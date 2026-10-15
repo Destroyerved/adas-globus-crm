@@ -160,15 +160,58 @@ async function emailTab(el) {
 }
 
 // ======================= N8N & WEBHOOKS =======================
-const WORKFLOWS = [
-  { file: '01-new-lead-alert.json', title: 'New lead → Slack / email alert', desc: 'Listens for contact.created and form.submitted, then posts a message to Slack (or swap in Telegram, WhatsApp, Teams).' },
-  { file: '02-website-form-to-crm.json', title: 'Any form → CRM contact + sequence', desc: 'Public n8n webhook for Typeform, Webflow, Facebook Lead Ads, etc. Upserts the contact and enrolls them in a sequence.' },
-  { file: '03-deal-won-handoff.json', title: 'Deal won → onboarding handoff', desc: 'On deal.won: creates an onboarding task, emails the customer a welcome note, and notifies the team.' },
-  { file: '04-reply-follow-up-task.json', title: 'Email reply → follow-up task', desc: 'On email.replied: creates a high-priority task for the owner and marks the contact as qualified.' },
-  { file: '05-daily-task-digest.json', title: 'Daily task digest', desc: 'Every weekday at 8:30, pulls overdue and today’s tasks from the CRM and emails a summary.' },
-  { file: '06-apollo-weekly-prospecting.json', title: 'Weekly Apollo prospecting', desc: 'Every Monday, searches Apollo for your ideal customer profile and imports new people into the CRM, tagged for review.' },
-  { file: '07-task-due-reminder.json', title: 'Task due → WhatsApp / Telegram reminder', desc: 'On task.due: sends the assignee a reminder through Telegram (or WhatsApp Cloud API).' },
-];
+const TRIGGER_LABEL = { crm: 'CRM event', external: 'Form / external', schedule: 'Scheduled' };
+const TRIGGER_ICON = { crm: 'zap', external: 'form', schedule: 'clock' };
+
+function openInstallDialog(t, onDone) {
+  const prev = t.installed?.values || {};
+  const inputs = {};
+  const rows = t.fields.map((f) => {
+    const v = prev[f.key] ?? (f.default === 'me' ? store.user.email : f.default) ?? '';
+    let input;
+    if (f.type === 'sequence') input = selectInput(store.meta.sequences.map((x) => ({ value: x.id, label: x.name })), v, () => {}, { placeholder: 'Don’t enroll' });
+    else if (f.type === 'boolean') input = h('input', { type: 'checkbox', checked: String(v) !== 'false' });
+    else input = h('input', { class: 'input', type: f.type === 'email' ? 'email' : 'text', value: v, placeholder: f.placeholder || '' });
+    inputs[f.key] = { f, input };
+    return f.type === 'boolean'
+      ? h('label', { class: 'field field-check' }, input, h('span', null, f.label))
+      : h('label', { class: 'field' }, h('span', { class: 'label' }, f.label, f.required ? h('span', { class: 'req' }, ' *') : null), input);
+  });
+  const activate = h('input', { type: 'checkbox', checked: true });
+  const what = t.trigger === 'crm'
+    ? `A CRM webhook for ${t.events.join(', ')} is added automatically.`
+    : t.trigger === 'external' ? 'You get a public n8n URL to post your website forms or lead ads to.' : 'Runs on a schedule inside n8n (n8n’s time zone).';
+  modal({
+    title: `Install “${t.title}”`,
+    body: h('div', { class: 'stack' },
+      h('p', { class: 'muted' }, t.description),
+      ...rows,
+      h('label', { class: 'field field-check' }, activate, h('span', null, 'Activate the workflow right away')),
+      muted(what),
+      t.installed ? h('div', { class: 'banner banner-warn small' }, 'Already installed: the existing workflow in n8n is replaced.') : null),
+    actions: [
+      { label: 'Cancel' },
+      {
+        label: t.installed ? 'Reinstall' : 'Install in n8n',
+        primary: true,
+        onClick: async ({ close }) => {
+          const values = {};
+          for (const [k, { f, input }] of Object.entries(inputs)) values[k] = f.type === 'boolean' ? String(input.checked) : input.value.trim();
+          const r = await POST(`/n8n/templates/${t.slug}/install`, { values, activate: activate.checked });
+          close();
+          modal({
+            title: 'Installed in n8n',
+            body: h('div', { class: 'stack' },
+              h('p', null, r.active ? 'The workflow is live in n8n.' : r.activation_error ? `Created, but n8n could not activate it: ${r.activation_error}` : 'Created in n8n (inactive).'),
+              r.public_webhook_url ? copyField(r.public_webhook_url, { label: 'Post your forms to this URL' }) : null,
+              h('a', { class: 'btn', href: r.editor_url, target: '_blank', rel: 'noopener' }, icon('external'), h('span', null, 'Open in n8n'))),
+            actions: [{ label: 'Done', primary: true, onClick: ({ close: done }) => { done(); onDone(); } }],
+          });
+        },
+      },
+    ],
+  });
+}
 
 function openWebhookForm(hook, events, onSaved) {
   const w = hook || { name: 'n8n', url: '', events: ['*'], headers: {}, active: true };
@@ -257,12 +300,57 @@ async function openDeliveries(hook) {
 }
 
 async function n8nTab(el) {
-  const { webhooks, events } = await GET('/webhooks');
+  const [{ webhooks, events }, setup, { settings }] = await Promise.all([GET('/webhooks'), GET('/n8n/templates'), GET('/settings')]);
+  const testBtn = btn('Test connection', { iconName: 'zap', onClick: (e) => busy(e.currentTarget, async () => {
+    const r = await POST('/n8n/test');
+    toast(`Connected to n8n · ${num(r.workflows)} workflow(s) found`);
+    refresh();
+  }) });
+  const conn = settingsForm('n8n', [
+    { name: 'url', label: 'n8n address (as the CRM reaches it)', placeholder: 'http://localhost:5678', help: 'Docker Compose: http://n8n:5678' },
+    { name: 'api_key', label: 'n8n API key', type: 'password', autocomplete: 'off', help: 'In n8n: Settings → n8n API → Create an API key.' },
+    { name: 'crm_url', label: 'CRM address (as n8n reaches it)', placeholder: store.baseUrl, help: 'Leave blank to use BASE_URL. Docker Compose: http://crm:3000' },
+    { name: 'editor_url', label: 'n8n address in your browser (optional)', placeholder: 'https://n8n.adasglobuspro.com', help: 'Used for “Open in n8n” links and public form URLs.' },
+  ], settings.n8n, { onSaved: refresh, extraActions: [testBtn] });
+  const status = setup.status === 'ok' ? pill('Connected', 'green') : setup.status === 'error' ? pill('Not reachable', 'red') : pill('Not connected', 'slate');
+
+  const templateCards = setup.templates.map((t) => {
+    const inst = t.installed;
+    const state = inst ? (inst.missing ? pill('Deleted in n8n', 'red') : pill(inst.active ? 'Active' : 'Inactive', inst.active ? 'green' : 'yellow')) : null;
+    return h('div', { class: 'wf-card' },
+      h('div', { class: 'wf-ico' }, icon(TRIGGER_ICON[t.trigger] || 'workflow')),
+      h('div', { class: 'wf-main' },
+        h('div', { class: 'row-gap' }, h('b', null, t.title), state),
+        h('p', { class: 'muted small' }, `${TRIGGER_LABEL[t.trigger]} · ${t.description}`),
+        inst && t.public_webhook_url ? copyField(t.public_webhook_url, { label: 'Form endpoint' }) : null,
+        h('div', { class: 'row-gap' },
+          setup.configured ? btn(inst ? 'Reinstall' : 'Install', { small: true, primary: !inst, iconName: 'zap', onClick: () => openInstallDialog(t, refresh) }) : null,
+          inst && !inst.missing ? h('a', { class: 'btn btn-sm', href: inst.editor_url, target: '_blank', rel: 'noopener' }, icon('external'), h('span', null, 'Open')) : null,
+          inst ? btn('Remove', { small: true, ghost: true, onClick: async () => {
+            if (!await confirmDialog(`Delete “${t.title}” from n8n${t.trigger === 'crm' ? ' and its CRM webhook' : ''}?`, { danger: true, confirmLabel: 'Remove' })) return;
+            await DEL(`/n8n/templates/${t.slug}${inst.missing ? '?force=1' : ''}`);
+            toast('Removed');
+            refresh();
+          } }) : null,
+          h('a', { class: 'btn btn-sm btn-ghost', href: t.file, download: `${t.slug}.json`, title: 'Download to import manually' }, icon('download'), h('span', null, 'JSON')))));
+  });
+
   el.append(
-    card('Connect n8n in 3 steps', h('ol', { class: 'steps-guide' },
-      h('li', null, h('b', null, 'CRM → n8n (events). '), 'In n8n add a ', h('b', null, 'Webhook'), ' node (HTTP method POST), copy its Production URL, and add it below. Choose which events to send.'),
-      h('li', null, h('b', null, 'n8n → CRM (actions). '), 'Create an API key in the ', h('a', { href: '#/integrations/api' }, 'API keys'), ' tab. In n8n add a ', h('b', null, 'Header Auth'), ' credential: name ', h('code', null, 'Authorization'), ', value ', h('code', null, 'Bearer agp_…'), '. Use it on HTTP Request nodes calling ', h('code', null, `${store.baseUrl}/api/…`), '.'),
-      h('li', null, h('b', null, 'Import ready-made workflows. '), 'Download a template below and import it in n8n (Workflows → Import from file). Set the CRM URL in its “CRM config” node.'))),
+    h('div', { class: 'grid-2' },
+      card('Connect n8n', h('div', { class: 'stack' }, h('div', { class: 'row-gap' }, status, setup.error ? muted(setup.error) : null), conn.el)),
+      card('How one-click setup works', h('ul', { class: 'checklist' },
+        h('li', null, icon('check'), h('span', null, 'Install creates the workflow in n8n with your answers filled in, and activates it.')),
+        h('li', null, icon('check'), h('span', null, 'A dedicated CRM API key is stored in n8n as the “', h('b', null, 'Adas Globus CRM API key'), '” credential, so n8n can call the CRM.')),
+        h('li', null, icon('check'), h('span', null, 'For event-driven workflows, the matching CRM webhook is registered below automatically.')),
+        h('li', null, icon('check'), h('span', null, 'Needs n8n’s public API (self-hosted n8n has it; n8n Cloud free trials don’t). You can always download the JSON and import it by hand.'))))),
+    card('Workflow templates', h('div', { class: 'stack' },
+      setup.configured ? null : h('div', { class: 'banner small' }, 'Connect n8n above to install these with one click, or download the JSON and import it in n8n (Workflows → Import from file).'),
+      h('div', { class: 'wf-grid' }, templateCards)),
+    { actions: setup.configured ? btn('New n8n credential', { small: true, ghost: true, iconName: 'key', onClick: async () => {
+      if (!await confirmDialog('Create a fresh CRM credential in n8n? Use this if the old one was deleted, then re-install your workflows.', { confirmLabel: 'Create' })) return;
+      await POST('/n8n/reset-credential');
+      toast('New credential created in n8n');
+    } }) : null }),
     card('Webhooks', webhooks.length ? dataTable({
       rows: webhooks,
       columns: [
@@ -277,12 +365,12 @@ async function n8nTab(el) {
           iconBtn('edit', 'Edit', () => openWebhookForm(w, events, refresh)),
           iconBtn('trash', 'Delete', async () => { if (await confirmDialog(`Delete webhook “${w.name}”?`, { danger: true, confirmLabel: 'Delete' })) { await DEL(`/webhooks/${w.id}`); refresh(); } })) },
       ],
-    }) : emptyState({ iconName: 'workflow', title: 'No webhooks yet', text: 'Add your n8n Webhook URL to start receiving CRM events.' }),
+    }) : emptyState({ iconName: 'workflow', title: 'No webhooks yet', text: 'Install a template above, or add any n8n Webhook URL to start receiving CRM events.' }),
     { actions: btn('Add webhook', { primary: true, small: true, iconName: 'plus', onClick: () => openWebhookForm(null, events, refresh) }) }),
-    card('n8n workflow templates', h('div', { class: 'wf-grid' }, WORKFLOWS.map((w) => h('div', { class: 'wf-card' },
-      h('div', { class: 'wf-ico' }, icon('workflow')),
-      h('div', null, h('b', null, w.title), h('p', { class: 'muted small' }, w.desc),
-        h('a', { class: 'btn btn-sm', href: `/n8n/${w.file}`, download: w.file }, icon('download'), h('span', null, 'Download JSON'))))))),
+    card('Manual setup (without the n8n API)', h('ol', { class: 'steps-guide' },
+      h('li', null, h('b', null, 'CRM → n8n (events). '), 'In n8n add a ', h('b', null, 'Webhook'), ' node (HTTP method POST), copy its Production URL, and add it under Webhooks above.'),
+      h('li', null, h('b', null, 'n8n → CRM (actions). '), 'Create an API key in the ', h('a', { href: '#/integrations/api' }, 'API keys'), ' tab. In n8n add a ', h('b', null, 'Header Auth'), ' credential: name ', h('code', null, 'Authorization'), ', value ', h('code', null, 'Bearer agp_…'), '. Use it on HTTP Request nodes calling ', h('code', null, `${store.baseUrl}/api/…`), '.'),
+      h('li', null, h('b', null, 'Templates. '), 'Download a template’s JSON above, import it in n8n, pick the credential on the CRM nodes and fill in its “CRM config” node.'))),
     card('Verifying signatures in n8n (optional)', h('div', { class: 'stack' },
       muted('Each delivery has an X-CRM-Signature header: sha256=HMAC(secret, raw body). In an n8n Code node (with NODE_FUNCTION_ALLOW_BUILTIN=crypto):'),
       h('pre', { class: 'code-block' }, `const crypto = require('crypto');

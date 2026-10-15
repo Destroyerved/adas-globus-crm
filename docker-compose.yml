@@ -9,6 +9,9 @@ services:
     environment:
       DATA_DIR: /data
       PORT: "3000"
+      # One-click n8n setup: how the two containers reach each other
+      N8N_URL: ${N8N_URL:-http://n8n:5678}
+      CRM_URL_FOR_N8N: ${CRM_URL_FOR_N8N:-http://crm:3000}
     ports:
       - "3000:3000"
     volumes:

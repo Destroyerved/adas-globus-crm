@@ -67,6 +67,15 @@ Deliverability checklist:
 - The **credit log** on the Apollo tab shows each call and estimated credits.
 
 ## 4. Connect n8n
+
+### One-click setup (recommended)
+1. In n8n: **Settings → n8n API → Create an API key**.
+2. In the CRM: **Integrations → n8n & webhooks → Connect n8n**. Enter the n8n address and the API key, then *Test connection*. With the bundled docker-compose the addresses are pre-filled (`http://n8n:5678` and `http://crm:3000`), so only the key is needed.
+3. Click **Install** on any workflow template and answer its questions (Slack URL, digest recipient, Apollo search…).
+
+Install creates the workflow in n8n with your answers filled in, adds an “Adas Globus CRM API key” Header Auth credential in n8n (backed by a dedicated CRM API key), activates the workflow, and, for event-driven templates, registers the matching CRM webhook. *Reinstall* replaces it; *Remove* deletes both the workflow and its webhook. This uses n8n's public API, which self-hosted n8n includes; n8n Cloud free trials don't.
+
+### Manual setup
 **CRM → n8n (events):** in n8n add a *Webhook* node (POST), copy its Production URL, and add it in **Integrations → n8n & webhooks**. Pick events or send all. Use *Send test* and the delivery log to debug. Failed deliveries retry after 1 min, 5 min, 30 min and 2 h.
 
 Every delivery is a JSON POST:
@@ -77,7 +86,7 @@ Headers: `X-CRM-Event`, `X-CRM-Delivery`, `X-CRM-Signature: sha256=<HMAC of the 
 
 **n8n → CRM (actions):** create a key in **Integrations → API keys**. In n8n create a *Header Auth* credential named `CRM API key` with Name `Authorization` and Value `Bearer agp_…`, and use it on HTTP Request nodes.
 
-**Ready-made workflows** (download from the n8n tab, or `public/n8n/`), then *Import from file* in n8n, select the credential on the CRM nodes and set `crm_url` in the **CRM config** node:
+**Ready-made workflows** (install with one click, or download from the n8n tab / `public/n8n/` and use *Import from file* in n8n, then select the credential on the CRM nodes and set `crm_url` in the **CRM config** node):
 
 | File | What it does |
 |---|---|
@@ -127,7 +136,8 @@ Sample payloads for each are under **Integrations → API keys → Webhook event
 - **Data** lives in `data/crm.db` (SQLite) and `data/.app-secret` (if `APP_SECRET` isn't set). Back up the whole `data/` folder; with Docker, back up the `crm-data` volume.
 - **Security**: passwords hashed with scrypt; SMTP/IMAP passwords and the Apollo key are AES-256-GCM encrypted at rest; session cookies are HttpOnly + SameSite with a CSRF header check; API keys are stored hashed; inbound email HTML is shown in a sandboxed frame; click-tracking links are HMAC-signed (no open redirect).
 - **Health check**: `GET /api/health`.
-- **Smoke test**: `npm run smoke` boots a throwaway instance and checks auth, CRUD, pipeline, email tracking, sequences, campaigns, unsubscribe, forms, API keys and signed webhooks.
+- **Smoke test**: `npm run smoke` boots a throwaway instance and checks auth, CRUD, pipeline, email tracking, sequences, campaigns, unsubscribe, forms, API keys, signed webhooks and the n8n installer (against a fake n8n API).
+- **CI**: `.github/workflows/ci.yml` runs the smoke test and builds + boots the Docker image on every push to `main` and every pull request.
 
 ## Project layout
 ```

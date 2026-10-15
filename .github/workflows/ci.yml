@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax check
+        run: for f in server/*.js server/*/*.js public/js/*.js public/js/views/*.js scripts/*.js; do node --check "$f"; done
+      - name: End-to-end smoke test
+        run: npm run smoke
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t adas-globus-crm .
+      - name: Boot container and check health
+        run: |
+          docker run -d --name crm -p 3000:3000 -e APP_SECRET=ci-secret adas-globus-crm
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/api/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs crm
+          exit 1

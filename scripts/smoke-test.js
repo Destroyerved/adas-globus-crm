@@ -31,6 +31,50 @@ const hookServer = http.createServer((req, res) => {
   });
 }).listen(HOOK_PORT);
 
+// Minimal fake of the n8n public API (credentials, workflows, activation) plus its production webhooks
+const N8N_PORT = PORT + 2;
+const N8N_KEY = 'fake-n8n-api-key';
+const fakeN8n = { credentials: [], workflows: new Map(), webhookHits: [], seq: 0 };
+const n8nServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    const send = (status, obj) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+    const url = new URL(req.url, 'http://x');
+    if (url.pathname.startsWith('/webhook/')) {
+      fakeN8n.webhookHits.push({ path: url.pathname, body: JSON.parse(body || '{}') });
+      return send(200, { message: 'Workflow was started' });
+    }
+    if (req.headers['x-n8n-api-key'] !== N8N_KEY) return send(401, { message: 'unauthorized' });
+    const json = body ? JSON.parse(body) : {};
+    const m = url.pathname.match(/^\/api\/v1\/workflows\/([^/]+)(\/activate)?$/);
+    if (req.method === 'GET' && url.pathname === '/api/v1/workflows') return send(200, { data: [...fakeN8n.workflows.values()], nextCursor: null });
+    if (req.method === 'POST' && url.pathname === '/api/v1/credentials') {
+      const cred = { id: `cred${fakeN8n.credentials.length + 1}`, ...json };
+      fakeN8n.credentials.push(cred);
+      return send(200, { id: cred.id, name: cred.name, type: cred.type });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/v1/workflows') {
+      // n8n rejects read-only properties on create
+      if (!json.name || !Array.isArray(json.nodes) || !json.connections || !json.settings || 'active' in json || 'pinData' in json) return send(400, { message: 'request/body must NOT have additional properties' });
+      const wf = { id: `wf${++fakeN8n.seq}`, active: false, ...json };
+      fakeN8n.workflows.set(wf.id, wf);
+      return send(200, wf);
+    }
+    if (m && req.method === 'POST' && m[2]) {
+      const wf = fakeN8n.workflows.get(m[1]);
+      if (!wf) return send(404, { message: 'Not Found' });
+      wf.active = true;
+      return send(200, wf);
+    }
+    if (m && req.method === 'DELETE') {
+      if (!fakeN8n.workflows.delete(m[1])) return send(404, { message: 'Not Found' });
+      return send(200, { id: m[1] });
+    }
+    return send(404, { message: 'Not Found' });
+  });
+}).listen(N8N_PORT);
+
 const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.js'], {
   cwd: ROOT,
   env: { ...process.env, PORT: String(PORT), DATA_DIR: dataDir, BASE_URL: BASE, MAIL_DRY_RUN: 'true', SCHEDULER_INTERVAL_MS: '3600000', APP_SECRET: 'smoke-secret' },
@@ -192,6 +236,40 @@ try {
   const badKey = await api('GET', '/api/contacts', undefined, { key: 'agp_wrong' });
   ok(badKey.status === 401, 'invalid API key rejected');
 
+  console.log('\nn8n one-click setup (fake n8n API)');
+  ok((await api('POST', '/api/n8n/test')).status === 400, 'clear error before n8n is configured');
+  await api('PUT', '/api/settings/n8n', { url: `http://127.0.0.1:${N8N_PORT}/`, api_key: 'wrong-key', crm_url: 'http://crm.internal:3000' });
+  const wrongKey = await api('POST', '/api/n8n/test');
+  ok(wrongKey.status === 502 && /API key/.test(wrongKey.data.error), 'wrong n8n API key reported without signing the user out');
+  await api('PUT', '/api/settings/n8n', { api_key: N8N_KEY });
+  ok((await api('POST', '/api/n8n/test')).status === 200, 'n8n connection test passes');
+  const missing = await api('POST', '/api/n8n/templates/07-task-due-reminder/install', { values: {} });
+  ok(missing.status === 400, 'required template fields are enforced');
+  const inst = await api('POST', '/api/n8n/templates/01-new-lead-alert/install', { values: { slack_webhook_url: 'https://hooks.slack.test/T/B/X' } });
+  ok(inst.status === 200 && inst.data.active && inst.data.webhook_id, 'template installed, activated and CRM webhook registered');
+  const wf = fakeN8n.workflows.get(inst.data.workflow_id);
+  const cfg = wf?.nodes.find((n) => n.name === 'CRM config')?.parameters.assignments.assignments || [];
+  ok(cfg.find((a) => a.name === 'crm_url')?.value === 'http://crm.internal:3000' && cfg.find((a) => a.name === 'slack_webhook_url')?.value === 'https://hooks.slack.test/T/B/X',
+    'CRM config node filled with CRM address and answers');
+  const cred = fakeN8n.credentials[0];
+  ok(cred?.type === 'httpHeaderAuth' && cred.data.value.startsWith('Bearer agp_'), 'Header Auth credential created in n8n');
+  ok(wf.nodes.filter((n) => n.parameters?.genericAuthType === 'httpHeaderAuth').every((n) => n.credentials?.httpHeaderAuth?.id === cred.id), 'CRM nodes use the new credential');
+  const credKeyWorks = await api('GET', '/api/contacts?limit=1', undefined, { key: cred.data.value.slice(7) });
+  ok(credKeyWorks.status === 200, 'the key given to n8n authenticates against the CRM');
+  await api('POST', '/api/contacts', { first_name: 'Webhook', last_name: 'Check', email: 'wh@example.com' });
+  await sleep(500);
+  ok(fakeN8n.webhookHits.some((h) => h.path === '/webhook/crm-new-lead' && h.body.event === 'contact.created'), 'CRM events reach the installed n8n workflow');
+  const formTpl = await api('POST', '/api/n8n/templates/02-website-form-to-crm/install', { values: { tags: 'web' } });
+  ok(formTpl.data.public_webhook_url?.endsWith('/webhook/lead-intake') && !formTpl.data.webhook_id, 'form template returns its public URL without a CRM webhook');
+  ok(fakeN8n.credentials.length === 1, 'credential is reused across installs');
+  const listed = (await api('GET', '/api/n8n/templates')).data;
+  ok(listed.status === 'ok' && listed.templates.find((t) => t.slug === '01-new-lead-alert').installed?.active, 'template list shows installed and active');
+  const re = await api('POST', '/api/n8n/templates/01-new-lead-alert/install', { values: { slack_webhook_url: 'https://hooks.slack.test/2' } });
+  ok(!fakeN8n.workflows.has(inst.data.workflow_id) && fakeN8n.workflows.has(re.data.workflow_id), 'reinstall replaces the old workflow');
+  const del = await api('DELETE', '/api/n8n/templates/01-new-lead-alert');
+  const hooksAfter = (await api('GET', '/api/webhooks')).data.webhooks;
+  ok(del.data.removed && !fakeN8n.workflows.has(re.data.workflow_id) && !hooksAfter.some((w) => w.name.startsWith('n8n: New lead')), 'uninstall removes the workflow and its CRM webhook');
+
   console.log('\nSettings');
   await api('PUT', '/api/settings/apollo', { api_key: 'test-apollo-key-123' });
   const s = (await api('GET', '/api/settings')).data.settings;
@@ -221,6 +299,7 @@ try {
 } finally {
   server.kill();
   hookServer.close();
+  n8nServer.close();
   await sleep(300);
   try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* windows may hold the file briefly */ }
   if (/\[error\]/.test(serverLog)) {
