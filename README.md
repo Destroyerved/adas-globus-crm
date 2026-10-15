@@ -137,7 +137,8 @@ Sample payloads for each are under **Integrations → API keys → Webhook event
 - **Security**: passwords hashed with scrypt; SMTP/IMAP passwords and the Apollo key are AES-256-GCM encrypted at rest; session cookies are HttpOnly + SameSite with a CSRF header check; API keys are stored hashed; inbound email HTML is shown in a sandboxed frame; click-tracking links are HMAC-signed (no open redirect).
 - **Health check**: `GET /api/health`.
 - **Smoke test**: `npm run smoke` boots a throwaway instance and checks auth, CRUD, pipeline, email tracking, sequences, campaigns, unsubscribe, forms, API keys, signed webhooks and the n8n installer (against a fake n8n API).
-- **CI**: `.github/workflows/ci.yml` runs the smoke test and builds + boots the Docker image on every push to `main` and every pull request.
+- **n8n template test**: `npm run n8n-e2e` (Linux + Docker) imports all 7 templates into the official n8n image, activates them, and drives real CRM events through them (form intake, deal won, email reply, daily digest), checking the results in the CRM.
+- **CI**: `.github/workflows/ci.yml` runs the smoke test, the real-n8n template test, and builds + boots the Docker image on every push to `main` and every pull request.
 
 ## Project layout
 ```

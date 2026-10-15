@@ -20,6 +20,20 @@ jobs:
       - name: End-to-end smoke test
         run: npm run smoke
 
+  n8n-templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pull n8n
+        run: docker pull docker.n8n.io/n8nio/n8n:latest
+      - name: Run workflow templates in a real n8n
+        run: npm run n8n-e2e
+
   docker:
     runs-on: ubuntu-latest
     steps:
