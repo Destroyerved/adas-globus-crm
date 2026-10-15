@@ -102,11 +102,13 @@ async function api(method, url, body, { key, raw } = {}) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitForServer() {
-  for (let i = 0; i < 150; i++) {
+  const deadline = Date.now() + 90_000; // generous: cold starts on busy Windows machines can be slow
+  while (Date.now() < deadline) {
+    if (server.exitCode !== null) throw new Error(`Server exited with code ${server.exitCode}:\n${serverLog}`);
     try { if ((await fetch(`${BASE}/api/health`)).ok) return; } catch { /* not up yet */ }
-    await sleep(200);
+    await sleep(250);
   }
-  throw new Error(`Server did not start:\n${serverLog}`);
+  throw new Error(`Server did not start within 90s:\n${serverLog}`);
 }
 
 try {

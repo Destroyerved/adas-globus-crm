@@ -18,10 +18,14 @@ export const n8nBase = () => trimUrl(getSettings('n8n').url);
 export const editorBase = () => trimUrl(getSettings('n8n').editor_url) || n8nBase();
 export const crmUrlForN8n = () => trimUrl(getSettings('n8n').crm_url) || config.baseUrl;
 
+function requireConfigured() {
+  if (!n8nBase() || !getSettings('n8n').api_key) throw new HttpError(400, 'Add your n8n URL and n8n API key first (Integrations → n8n & webhooks)');
+}
+
 async function n8nCall(method, apiPath, body) {
+  requireConfigured();
   const s = getSettings('n8n');
   const base = n8nBase();
-  if (!base || !s.api_key) throw new HttpError(400, 'Add your n8n URL and n8n API key first (Integrations → n8n & webhooks)');
   let res;
   try {
     res = await fetch(`${base}/api/v1${apiPath}`, {
@@ -54,6 +58,7 @@ export async function testConnection() {
 async function ensureCredential(user, force = false) {
   const state = getState('n8n', {});
   if (!force && state.credential_id && state.credential_for === n8nBase()) return state.credential_id;
+  requireConfigured();
   const owner = user?.id ? user : get("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY id LIMIT 1");
   const { id: keyId, key } = createApiKey('n8n (one-click setup)', owner?.id ?? null);
   try {
@@ -146,6 +151,7 @@ export async function listTemplates() {
 export async function installTemplate(slug, { values = {}, activate = true } = {}, user) {
   const tpl = templateBySlug(slug);
   if (!tpl) throw new HttpError(404, 'Unknown template');
+  requireConfigured();
   for (const f of tpl.fields) {
     if (f.required && !String(values[f.key] ?? '').trim()) throw new HttpError(400, `${f.label} is required`);
   }
