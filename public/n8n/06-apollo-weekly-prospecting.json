@@ -1,0 +1,250 @@
+{
+  "name": "CRM · Weekly Apollo prospecting",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Weekly Apollo prospecting\nEvery Monday 09:00 runs an Apollo people search **through the CRM** (the Apollo key stays in the CRM), keeps people not yet in the CRM, and imports them with emails revealed (uses Apollo credits), tagged for review.\n\n**Setup**\n1. Create an API key in the CRM (Integrations → API keys).\n2. In n8n create a **Header Auth** credential named `CRM API key`: Name `Authorization`, Value `Bearer agp_…`.\n3. Select that credential on every *CRM* HTTP Request node.\n4. Set `crm_url` in the **CRM config** node.\n5. Edit titles / locations / per_page in **CRM config** (separate multiple values with `;`).",
+        "width": 600,
+        "height": 320
+      },
+      "id": "47862a28-f869-56f2-8dda-c39d77bb9a8d",
+      "name": "Note 0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -350
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "a14ebcee-b564-5a55-a4ce-4a1f8a99f0ae",
+      "name": "Mondays 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6efe20bd-e920-5a66-ae24-87b8f9427b76",
+              "name": "crm_url",
+              "value": "http://localhost:3000",
+              "type": "string"
+            },
+            {
+              "id": "1e043c53-8b6e-53af-9ee1-aa141926eec4",
+              "name": "titles",
+              "value": "CEO;Founder;Head of Procurement",
+              "type": "string"
+            },
+            {
+              "id": "77149bc2-53a7-5df5-bf10-4ec3d309e2a4",
+              "name": "locations",
+              "value": "India;United Arab Emirates",
+              "type": "string"
+            },
+            {
+              "id": "6a0e7061-e942-5a4d-8204-2ff5eed2471c",
+              "name": "employee_ranges",
+              "value": "11,50;51,200",
+              "type": "string"
+            },
+            {
+              "id": "3b8dfb7b-eff3-5710-90d3-e8bf195ceab8",
+              "name": "per_page",
+              "value": 25,
+              "type": "number"
+            },
+            {
+              "id": "61b3a490-ef17-5785-96d0-ac125e0081f1",
+              "name": "tags",
+              "value": "apollo,weekly-review",
+              "type": "string"
+            },
+            {
+              "id": "f40139ab-dc64-5dfd-ba26-ee25097c13dd",
+              "name": "reveal_emails",
+              "value": "true",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "74378c38-ca0a-52ad-b062-27cb20ba5bb6",
+      "name": "CRM config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CRM config').item.json.crm_url }}/api/apollo/people/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ person_titles: $json.titles.split(';'), person_locations: $json.locations.split(';'), organization_num_employees_ranges: $json.employee_ranges.split(';'), per_page: $json.per_page }) }}"
+      },
+      "id": "eece5eb5-4839-5734-bc2b-4f0189c98d18",
+      "name": "CRM: search Apollo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const people = ($json.people || []).filter((p) => !p.in_crm && p.has_email !== false);\nreturn [{ json: { people: people.map((p) => ({ id: p.id, first_name: p.first_name, title: p.title, organization_name: p.organization_name })), count: people.length } }];"
+      },
+      "id": "fcbe2dff-b26b-518e-aeee-c6a1b2648008",
+      "name": "Keep new people",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f68456e1-db11-5471-9d1a-41a2391e5d0e",
+              "leftValue": "={{ $json.count }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "090fadf6-856c-5e68-b7f3-be698e7a5198",
+      "name": "Anyone new?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CRM config').item.json.crm_url }}/api/apollo/people/import",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ people: $json.people, enrich: $('CRM config').item.json.reveal_emails === 'true', tags: $('CRM config').item.json.tags }) }}"
+      },
+      "id": "7c3286e1-b933-56f3-9953-615acd92e3be",
+      "name": "CRM: import",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -20
+      ]
+    }
+  ],
+  "connections": {
+    "Mondays 09:00": {
+      "main": [
+        [
+          {
+            "node": "CRM config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM config": {
+      "main": [
+        [
+          {
+            "node": "CRM: search Apollo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM: search Apollo": {
+      "main": [
+        [
+          {
+            "node": "Keep new people",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep new people": {
+      "main": [
+        [
+          {
+            "node": "Anyone new?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anyone new?": {
+      "main": [
+        [
+          {
+            "node": "CRM: import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

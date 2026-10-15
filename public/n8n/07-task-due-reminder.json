@@ -1,0 +1,166 @@
+{
+  "name": "CRM · Task due → Telegram reminder",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Task reminders\nSubscribe this Webhook to `task.due`. Sends a Telegram message when a task becomes due. Create a bot with @BotFather, put its token and your chat ID in **CRM config**. For WhatsApp, swap the last node for the WhatsApp Business Cloud node.",
+        "width": 540,
+        "height": 220
+      },
+      "id": "621c4af3-3500-5e2c-80dd-6308d9ba5531",
+      "name": "Note 0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm-task-due",
+        "options": {}
+      },
+      "id": "321c8a2b-38d3-5c4f-87a0-a5596408ef44",
+      "name": "CRM event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8f006619-1364-5058-9d37-f97a68b092ff"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "33792962-9449-5c07-9345-979dc841c71e",
+              "name": "crm_url",
+              "value": "http://localhost:3000",
+              "type": "string"
+            },
+            {
+              "id": "64cba6b1-d681-5b6e-be5d-ed60ec0acfbd",
+              "name": "telegram_bot_token",
+              "value": "123456:ABC-your-bot-token",
+              "type": "string"
+            },
+            {
+              "id": "78166c73-f6d6-55d9-bd09-82f12f43d71a",
+              "name": "telegram_chat_id",
+              "value": "123456789",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e93eced4-2314-5886-8081-a5481ceb8bf9",
+      "name": "CRM config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "bd25f152-7082-5479-88f0-2997bd4e0fcf",
+              "leftValue": "={{ $('CRM event').item.json.body.event }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "task.due"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bbef3034-dce4-5c08-87d8-fc660078b6d6",
+      "name": "Task due?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $('CRM config').item.json.telegram_bot_token }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('CRM config').item.json.telegram_chat_id, text: '⏰ Task due: ' + $('CRM event').item.json.body.data.activity.subject + ($('CRM event').item.json.body.data.activity.contact_name ? ' (' + $('CRM event').item.json.body.data.activity.contact_name + ')' : '') + ($('CRM event').item.json.body.data.activity.assigned_name ? ' → ' + $('CRM event').item.json.body.data.activity.assigned_name : '') }) }}",
+        "options": {}
+      },
+      "id": "6bd34648-7acc-5559-975f-69a39854af71",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -20
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "CRM event": {
+      "main": [
+        [
+          {
+            "node": "CRM config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM config": {
+      "main": [
+        [
+          {
+            "node": "Task due?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Task due?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

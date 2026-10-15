@@ -1,0 +1,9 @@
+# Automatic HTTPS (Let's Encrypt). Point both DNS names at this server first.
+{$CRM_DOMAIN} {
+	encode gzip
+	reverse_proxy crm:3000
+}
+
+{$N8N_DOMAIN} {
+	reverse_proxy n8n:5678
+}

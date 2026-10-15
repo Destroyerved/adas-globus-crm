@@ -1,0 +1,238 @@
+{
+  "name": "CRM · Email reply → follow-up task",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Reply follow-up\nSubscribe this Webhook to `email.replied` (needs IMAP sync on in the CRM). Creates a task due in 2 hours for the contact owner and moves new leads to *qualified*.\n\n**Setup**\n1. Create an API key in the CRM (Integrations → API keys).\n2. In n8n create a **Header Auth** credential named `CRM API key`: Name `Authorization`, Value `Bearer agp_…`.\n3. Select that credential on every *CRM* HTTP Request node.\n4. Set `crm_url` in the **CRM config** node.",
+        "width": 560,
+        "height": 300
+      },
+      "id": "a0ffd885-2293-5e58-b070-6da5113eb805",
+      "name": "Note 0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -330
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm-email-replied",
+        "options": {}
+      },
+      "id": "3319f01a-6caa-5e6b-b63b-1a176b8bd535",
+      "name": "CRM event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "509252ff-81f2-5b25-8199-eb69f6be32b5"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5b14ab7d-83e6-5599-877c-bf8ab3b3cb1d",
+              "name": "crm_url",
+              "value": "http://localhost:3000",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6d5c9164-0fa6-5dad-90ce-d0f751eb16a7",
+      "name": "CRM config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "fc0d369d-9fa7-51db-bb07-a34c73050546",
+              "leftValue": "={{ $('CRM event').item.json.body.event }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "email.replied"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad7fb8a8-1adb-554f-beda-261f16001ec5",
+      "name": "Is a reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CRM config').item.json.crm_url }}/api/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ subject: 'Reply from ' + $('CRM event').item.json.body.data.contact.full_name + ': ' + ($('CRM event').item.json.body.data.reply.subject || ''), body: $('CRM event').item.json.body.data.reply.snippet, contact_id: $('CRM event').item.json.body.data.contact.id, assigned_to: $('CRM event').item.json.body.data.contact.owner_id, priority: 'high', due_at: new Date(Date.now() + 7200000).toISOString() }) }}"
+      },
+      "id": "6c5ee16b-87bc-50ba-bd58-b209f6bc6908",
+      "name": "CRM: follow-up task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "83ddc406-6259-579a-90c8-026e7117e89f",
+              "leftValue": "={{ $('CRM event').item.json.body.data.contact.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "lead"
+            },
+            {
+              "id": "b8ffba1e-90a3-516e-9065-fbbcc414988d",
+              "leftValue": "={{ $('CRM event').item.json.body.data.contact.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "contacted"
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "a4c4c82b-9916-56e0-8a40-981fe11f83f2",
+      "name": "Still a lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('CRM config').item.json.crm_url }}/api/contacts/{{ $('CRM event').item.json.body.data.contact.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'qualified' }) }}"
+      },
+      "id": "67e22cc1-21e6-5e7d-a402-c2818528f555",
+      "name": "CRM: mark qualified",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "CRM event": {
+      "main": [
+        [
+          {
+            "node": "CRM config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM config": {
+      "main": [
+        [
+          {
+            "node": "Is a reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is a reply?": {
+      "main": [
+        [
+          {
+            "node": "CRM: follow-up task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM: follow-up task": {
+      "main": [
+        [
+          {
+            "node": "Still a lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still a lead?": {
+      "main": [
+        [
+          {
+            "node": "CRM: mark qualified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

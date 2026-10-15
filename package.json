@@ -1,0 +1,23 @@
+{
+  "name": "adas-globus-crm",
+  "version": "1.0.0",
+  "description": "Adas Globus Pro CRM - contacts, companies, deals, mailing, sequences, Apollo.io prospecting and n8n automation",
+  "private": true,
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16"
+  }
+}

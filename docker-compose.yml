@@ -1,0 +1,56 @@
+# CRM + n8n on one machine.
+#   docker compose up -d                    → CRM on :3000, n8n on :5678
+#   docker compose --profile https up -d    → also Caddy with automatic HTTPS for CRM_DOMAIN and N8N_DOMAIN
+services:
+  crm:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - crm-data:/data
+
+  n8n:
+    # Pin the version you have tested, e.g. docker.n8n.io/n8nio/n8n:1.x.y
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      TZ: ${TZ:-UTC}
+      # lets Code nodes verify the CRM's webhook signatures
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CRM_DOMAIN: ${CRM_DOMAIN}
+      N8N_DOMAIN: ${N8N_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - crm
+      - n8n
+
+volumes:
+  crm-data:
+  n8n-data:
+  caddy-data:

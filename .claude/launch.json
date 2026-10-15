@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crm",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.claude/dev.env", "--disable-warning=ExperimentalWarning", "server/index.js"],
+      "port": 3210
+    }
+  ]
+}
