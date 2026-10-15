@@ -47,6 +47,15 @@ const DEFAULTS = {
     business_end: 18,
     business_days: [1, 2, 3, 4, 5],
   },
+  n8n: {
+    // Address the CRM uses to reach n8n (in docker-compose: http://n8n:5678)
+    url: env.N8N_URL || '',
+    api_key: env.N8N_API_KEY || '',
+    // Address n8n uses to reach the CRM (in docker-compose: http://crm:3000). Blank = BASE_URL.
+    crm_url: env.CRM_URL_FOR_N8N || '',
+    // Optional browser address of the n8n editor, for "Open in n8n" links. Blank = url.
+    editor_url: env.N8N_EDITOR_URL || '',
+  },
   apollo: {
     api_key: env.APOLLO_API_KEY || '',
     reveal_personal_emails: false,
@@ -55,7 +64,7 @@ const DEFAULTS = {
   },
 };
 
-const SECRETS = { smtp: ['pass'], imap: ['pass'], apollo: ['api_key'] };
+const SECRETS = { smtp: ['pass'], imap: ['pass'], apollo: ['api_key'], n8n: ['api_key'] };
 export const SECTIONS = Object.keys(DEFAULTS);
 
 const key = crypto.createHash('sha256').update(`${config.secret}:settings`).digest();

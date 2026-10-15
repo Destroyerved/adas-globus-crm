@@ -7,6 +7,7 @@ import { EVENT_TYPES, deliver } from '../events.js';
 import { verifySmtp, sendEmail } from '../services/mailer.js';
 import { testImap, syncInbox } from '../services/imap.js';
 import * as apollo from '../services/apollo.js';
+import * as n8n from '../services/n8n.js';
 import { tick } from '../scheduler.js';
 import { Router, HttpError, now, addMs, DAY, required, randomToken, tagsIn, tagsOut, jsonOut, isEmail } from '../util.js';
 
@@ -24,7 +25,7 @@ const idParam = (req) => {
 integrationRoutes.get('/settings', (req, res) => {
   const out = {};
   for (const s of SECTIONS) out[s] = publicSettings(s);
-  if (req.user.role !== 'admin') { delete out.smtp; delete out.imap; delete out.apollo; }
+  if (req.user.role !== 'admin') { delete out.smtp; delete out.imap; delete out.apollo; delete out.n8n; }
   res.json({ settings: out, base_url: config.baseUrl, imap_state: getState('imap', {}) });
 });
 
@@ -177,6 +178,15 @@ function samplePayload(event) {
   if (entity === 'apollo') return { created: 5, updated: 1, contact_ids: [1, 2, 3, 4, 5, 6], credits_used: 6 };
   return {};
 }
+
+// ======================= N8N ONE-CLICK SETUP =======================
+integrationRoutes.get('/n8n/templates', admin, async (req, res) => res.json(await n8n.listTemplates()));
+integrationRoutes.post('/n8n/test', admin, async (req, res) => res.json(await n8n.testConnection()));
+integrationRoutes.post('/n8n/templates/:slug/install', admin, async (req, res) => {
+  res.json(await n8n.installTemplate(req.params.slug, { values: req.body?.values || {}, activate: req.body?.activate !== false }, req.user));
+});
+integrationRoutes.delete('/n8n/templates/:slug', admin, async (req, res) => res.json(await n8n.uninstallTemplate(req.params.slug, { force: req.query.force === '1' })));
+integrationRoutes.post('/n8n/reset-credential', admin, async (req, res) => res.json(await n8n.resetCredential(req.user)));
 
 // ======================= API KEYS =======================
 integrationRoutes.get('/api-keys', admin, (req, res) => {
