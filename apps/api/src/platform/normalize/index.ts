@@ -1,5 +1,5 @@
 /**
- * Email and domain normalisation with free-mail blocklist (PRD §4.3, §4.4, §7.1; AGENTS.md §7).
+ * Email, domain, and phone normalisation with free-mail blocklist (PRD §4.3, §4.4, §7.1; AGENTS.md §7).
  */
 
 export const FREE_MAIL_DOMAINS = new Set<string>([
@@ -23,15 +23,19 @@ export const FREE_MAIL_DOMAINS = new Set<string>([
   'mail.com',
 ]);
 
-export function normalizeEmail(rawEmail: string): string {
-  return rawEmail.trim().toLowerCase();
+export function normalizeEmail(rawEmail: string): string | null {
+  const cleaned = rawEmail.trim().toLowerCase();
+  if (!cleaned || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) {
+    return null;
+  }
+  return cleaned;
 }
 
 export function isFreeMailDomain(domain: string): boolean {
   return FREE_MAIL_DOMAINS.has(domain.trim().toLowerCase());
 }
 
-export function normalizeCompanyDomain(rawInput: string): string | null {
+export function normalizeDomain(rawInput: string): string | null {
   const trimmed = rawInput.trim().toLowerCase();
   if (!trimmed) {
     return null;
@@ -44,8 +48,42 @@ export function normalizeCompanyDomain(rawInput: string): string | null {
   if (!withoutWww || !withoutWww.includes('.')) {
     return null;
   }
-  if (isFreeMailDomain(withoutWww)) {
+  return withoutWww;
+}
+
+export function normalizeCompanyDomain(rawInput: string): string | null {
+  const domain = normalizeDomain(rawInput);
+  if (!domain || isFreeMailDomain(domain)) {
     return null;
   }
-  return withoutWww;
+  return domain;
+}
+
+export function extractDomainFromEmail(rawEmail: string): string | null {
+  const email = normalizeEmail(rawEmail);
+  if (!email) {
+    return null;
+  }
+  const atIndex = email.lastIndexOf('@');
+  if (atIndex === -1) {
+    return null;
+  }
+  return normalizeDomain(email.slice(atIndex + 1));
+}
+
+export function normalizePhone(rawPhone: string, defaultRegion: 'US' | 'CA' = 'US'): string | null {
+  const digits = rawPhone.replace(/\D/g, '');
+  if (!digits) {
+    return null;
+  }
+  if (digits.length === 10 && (defaultRegion === 'US' || defaultRegion === 'CA')) {
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+  if (digits.length >= 8 && digits.length <= 15) {
+    return `+${digits}`;
+  }
+  return null;
 }

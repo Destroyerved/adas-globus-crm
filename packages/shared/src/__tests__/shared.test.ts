@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BreakGlassLoginInputSchema,
   CapabilityKeySchema,
+  ConvertLeadInputSchema,
   FilterClauseSchema,
   formatCount,
   formatDate,
@@ -11,6 +13,8 @@ import {
   formatTime,
   MarketSchema,
   MoneyWireSchema,
+  SendableReasonCodeSchema,
+  WebsiteInquiryPayloadSchema,
 } from '../index.js';
 
 describe('@adas/shared schemas and formatting', () => {
@@ -65,5 +69,31 @@ describe('@adas/shared schemas and formatting', () => {
     expect(formatTime(iso, 'America/Toronto')).toBe('9:30 am');
     expect(formatRelative('2026-11-04T12:30:00Z', iso, 'UTC')).toBe('2 h ago');
     expect(formatPersonWithCompany('Jane Patel', 'Acme CPA')).toBe('Jane Patel · Acme CPA');
+  });
+
+  it('validates website inquiry payloads and compliance reason codes (PRD §4.10, §5.1)', () => {
+    const parsed = WebsiteInquiryPayloadSchema.parse({
+      name: 'Jane Patel',
+      email: 'jane@acmetax.example.com',
+      firm: 'Acme Tax & Advisory LLP',
+      website: 'https://acmetax.example.com',
+      country: 'US',
+      formType: 'trial',
+    });
+    expect(parsed.formType).toBe('trial');
+    expect(SendableReasonCodeSchema.parse('SUPPRESSED_EMAIL')).toBe('SUPPRESSED_EMAIL');
+    expect(
+      BreakGlassLoginInputSchema.parse({
+        email: 'admin@adasglobuspro.example.com',
+        password: 'correct-horse-battery-staple',
+        totpCode: '123456',
+      }).totpCode,
+    ).toBe('123456');
+    expect(
+      ConvertLeadInputSchema.parse({
+        leadId: 'lead_1',
+        startFreeTrial: true,
+      }).startFreeTrial,
+    ).toBe(true);
   });
 });

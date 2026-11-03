@@ -1,6 +1,7 @@
-// Prisma schema for ADAS CRM (PRD §7)
-// Partial, expression and trigram indexes, check constraints, generated columns,
-// grants and triggers are added in hand-edited migration SQL (PRD §7.4, AGENTS.md §8).
+// ADAS CRM — Canonical Prisma Schema (PRD §7.2 & §7.4)
+// Partial unique indexes, trigram GIN indexes, check constraints, and
+// append-only triggers/grants live in:
+//   prisma/migrations/0001_initial_schema/migration.sql
 
 generator client {
   provider = "prisma-client-js"
@@ -9,4 +10,250 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model Team {
+  id        String   @id
+  name      String   @unique
+  market    String   @default("US")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("teams")
+}
+
+model Role {
+  id          String   @id
+  name        String   @unique
+  description String
+  isSystem    Boolean  @default(true) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("roles")
+}
+
+model User {
+  id            String   @id
+  email         String   @unique
+  name          String
+  roleId        String   @map("role_id")
+  teamId        String?  @map("team_id")
+  marketFocus   String   @default("US") @map("market_focus")
+  status        String   @default("active")
+  isBreakGlass  Boolean  @default(false) @map("is_break_glass")
+  passwordHash  String?  @map("password_hash")
+  totpSecret    String?  @map("totp_secret")
+  dailySendCap  Int      @default(50) @map("daily_send_cap")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([teamId])
+  @@index([roleId])
+  @@map("users")
+}
+
+// Append-only table protected by REVOKE UPDATE, DELETE and trg_audit_logs_immutable
+// in migrations/0001_initial_schema/migration.sql (PRD §9 & §7.4)
+model AuditLog {
+  id          String   @id
+  actorUserId String?  @map("actor_user_id")
+  actorEmail  String?  @map("actor_email")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  metadata    Json     @default("{}")
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// Partial unique index idx_companies_domain_active and trigram GIN index
+// idx_companies_name_trgm defined in migrations/0001_initial_schema/migration.sql
+model Company {
+  id                    String    @id
+  name                  String
+  domain                String?
+  website               String?
+  firmType              String    @default("CPA firm") @map("firm_type")
+  market                String    @default("US")
+  stateProvince         String?   @map("state_province")
+  city                  String?
+  timezone              String    @default("America/New_York")
+  staffBand             String    @default("11–20") @map("staff_band")
+  accountStatus         String    @default("prospect") @map("account_status")
+  ownerUserId           String    @map("owner_user_id")
+  teamId                String?   @map("team_id")
+  accountingSoftware    Json      @default("[]") @map("accounting_software")
+  servicesNeeded        Json      @default("[]") @map("services_needed")
+  estimatedRevenueMinor BigInt    @default(0) @map("estimated_revenue_minor")
+  currency              String    @default("USD")
+  customFields          Json      @default("{}") @map("custom_fields")
+  version               Int       @default(1)
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ownerUserId])
+  @@index([teamId])
+  @@index([market])
+  @@map("companies")
+}
+
+// Partial unique index idx_contacts_primary_email_active and trigram GIN index
+// idx_contacts_full_name_trgm defined in migrations/0001_initial_schema/migration.sql
+model Contact {
+  id                      String    @id
+  companyId               String?   @map("company_id")
+  firstName               String    @map("first_name")
+  lastName                String    @map("last_name")
+  fullName                String    @map("full_name")
+  title                   String    @default("Partner")
+  jobFunction             String    @default("Partner / Principal") @map("job_function")
+  seniority               String    @default("Partner")
+  primaryEmail            String    @map("primary_email")
+  phoneE164               String?   @map("phone_e164")
+  market                  String    @default("US")
+  timezone                String    @default("America/New_York")
+  ownerUserId             String    @map("owner_user_id")
+  teamId                  String?   @map("team_id")
+  doNotContact            Boolean   @default(false) @map("do_not_contact")
+  emailVerificationStatus String    @default("unknown") @map("email_verification_status")
+  hardBouncedAt           DateTime? @map("hard_bounced_at") @db.Timestamptz(6)
+  apolloPersonId          String?   @map("apollo_person_id")
+  leadScore               Int       @default(0) @map("lead_score")
+  leadScoreBreakdown      Json      @default("[]") @map("lead_score_breakdown")
+  customFields            Json      @default("{}") @map("custom_fields")
+  version                 Int       @default(1)
+  deletedAt               DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId])
+  @@index([ownerUserId])
+  @@index([teamId])
+  @@map("contacts")
+}
+
+model Lead {
+  id                     String    @id
+  firstName              String    @map("first_name")
+  lastName               String    @map("last_name")
+  fullName               String    @map("full_name")
+  email                  String
+  phoneE164              String?   @map("phone_e164")
+  firmName               String?   @map("firm_name")
+  domain                 String?
+  website                String?
+  title                  String    @default("Partner")
+  market                 String    @default("US")
+  stateProvince          String?   @map("state_province")
+  staffBand              String    @default("11–20") @map("staff_band")
+  source                 String    @default("Manual entry")
+  status                 String    @default("New")
+  statusCategory         String    @default("open") @map("status_category")
+  disqualificationReason String?   @map("disqualification_reason")
+  servicesNeeded         Json      @default("[]") @map("services_needed")
+  softwareStack          Json      @default("[]") @map("software_stack")
+  ownerUserId            String    @map("owner_user_id")
+  teamId                 String?   @map("team_id")
+  companyId              String?   @map("company_id")
+  contactId              String?   @map("contact_id")
+  convertedDealId        String?   @map("converted_deal_id")
+  convertedAt            DateTime? @map("converted_at") @db.Timestamptz(6)
+  leadScore              Int       @default(0) @map("lead_score")
+  leadScoreBreakdown     Json      @default("[]") @map("lead_score_breakdown")
+  utmSource              String?   @map("utm_source")
+  utmMedium              String?   @map("utm_medium")
+  utmCampaign            String?   @map("utm_campaign")
+  version                Int       @default(1)
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([email])
+  @@index([ownerUserId])
+  @@index([teamId])
+  @@index([status])
+  @@map("leads")
+}
+
+model Deal {
+  id                 String    @id
+  pipelineId         String    @map("pipeline_id")
+  stageId            String    @map("stage_id")
+  stageName          String    @map("stage_name")
+  stageCategory      String    @default("open") @map("stage_category")
+  companyId          String    @map("company_id")
+  primaryContactId   String?   @map("primary_contact_id")
+  name               String
+  monthlyValueMinor  BigInt    @map("monthly_value_minor")
+  annualValueMinor   BigInt    @map("annual_value_minor")
+  currency           String    @default("USD")
+  fteCount           Float     @default(1) @map("fte_count")
+  engagementModel    String    @default("Full-time") @map("engagement_model")
+  services           Json      @default("[]")
+  probability        Int       @default(10)
+  expectedCloseDate  String?   @map("expected_close_date")
+  trialStartedAt     DateTime? @map("trial_started_at") @db.Timestamptz(6)
+  trialEndsAt        DateTime? @map("trial_ends_at") @db.Timestamptz(6)
+  trialCandidateRole String?   @map("trial_candidate_role")
+  trialPassed        Boolean?  @map("trial_passed")
+  contractStartDate  String?   @map("contract_start_date")
+  lostReason         String?   @map("lost_reason")
+  lostNotes          String?   @map("lost_notes")
+  wonAt              DateTime? @map("won_at") @db.Timestamptz(6)
+  lostAt             DateTime? @map("lost_at") @db.Timestamptz(6)
+  ownerUserId        String    @map("owner_user_id")
+  teamId             String?   @map("team_id")
+  version            Int       @default(1)
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId])
+  @@index([ownerUserId])
+  @@index([teamId])
+  @@index([stageName])
+  @@map("deals")
+}
+
+// Non-deletable table protected by REVOKE DELETE and trg_suppressions_no_delete
+// in migrations/0001_initial_schema/migration.sql (PRD §5.3 & §7.4)
+model Suppression {
+  id          String   @id
+  email       String?  @unique
+  emailSha256 String   @unique @map("email_sha256")
+  reason      String
+  source      String
+  notes       String?
+  actorUserId String?  @map("actor_user_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("suppressions")
+}
+
+// Written ONLY by the send.message worker job after checkSendable() (PRD §5.1 & §7.2)
+model MessageSend {
+  id                   String    @id
+  idempotencyKey       String    @unique @map("idempotency_key")
+  channel              String
+  recipientEmail       String    @map("recipient_email")
+  contactId            String?   @map("contact_id")
+  senderUserId         String?   @map("sender_user_id")
+  sequenceEnrollmentId String?   @map("sequence_enrollment_id")
+  campaignId           String?   @map("campaign_id")
+  subject              String
+  bodyText             String    @map("body_text")
+  transportProvider    String    @map("transport_provider")
+  providerMessageId    String?   @map("provider_message_id")
+  status               String    @default("sent")
+  complianceReasonCode String    @map("compliance_reason_code")
+  sentAt               DateTime  @default(now()) @map("sent_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([recipientEmail, sentAt])
+  @@index([senderUserId, sentAt])
+  @@map("message_sends")
 }
