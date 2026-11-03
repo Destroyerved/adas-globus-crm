@@ -1,24 +1,37 @@
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const SCREENS_DIR = resolve(process.cwd(), 'docs/screens');
 
 const PHASE_SCREENS = [
-  { query: '?screen=tasks', selector: '[data-testid="tasks-screen"]', label: 'Tasks & SLA Center' },
   {
+    name: '07-tasks-sla',
+    query: '?screen=tasks',
+    selector: '[data-testid="tasks-screen"]',
+    label: 'Tasks & SLA Center',
+  },
+  {
+    name: '08-inbox-m365',
     query: '?screen=inbox',
     selector: '[data-testid="inbox-screen"]',
     label: 'Connected M365 Inbox',
   },
   {
+    name: '09-outreach-compliance',
     query: '?screen=outreach',
     selector: '[data-testid="outreach-screen"]',
     label: 'Sequences, Campaigns & checkSendable Gate',
   },
   {
+    name: '10-imports-duplicates',
     query: '?screen=imports',
     selector: '[data-testid="imports-duplicates-screen"]',
     label: 'CSV Import Dry-Run, Duplicate Merge & Bigin Cutover',
   },
   {
+    name: '11-reports-intelligence',
     query: '?screen=reports',
     selector: '[data-testid="reports-intelligence-screen"]',
     label: 'Multi-Currency FX Reports, Lead Scoring & Audit Log',
@@ -26,13 +39,39 @@ const PHASE_SCREENS = [
 ] as const;
 
 test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verification', () => {
+  test.beforeAll(() => {
+    mkdirSync(SCREENS_DIR, { recursive: true });
+  });
+
   for (const screen of PHASE_SCREENS) {
-    test(`${screen.label} (${screen.query}): renders at 1440px and 375px, passes axe, and has no horizontal overflow`, async ({
+    test(`${screen.label} (${screen.query}): renders at 1440, 1280, 768, and 375px, passes axe, has no horizontal overflow, and saves screenshots`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`/${screen.query}`);
       await page.waitForSelector(screen.selector);
+
+      // Verify DESIGN.md computed tokens at 1440px
+      const computedMetrics = await page.evaluate(() => {
+        const rootStyle = getComputedStyle(document.documentElement);
+        const bodyStyle = getComputedStyle(document.body);
+        const sidebar = document.querySelector('aside[aria-label="Primary navigation"]');
+        const topbar = document.querySelector('header');
+        return {
+          bgToken: rootStyle.getPropertyValue('--bg').trim(),
+          navyToken: rootStyle.getPropertyValue('--navy').trim(),
+          primaryToken: rootStyle.getPropertyValue('--primary').trim(),
+          fontFamily: bodyStyle.fontFamily,
+          sidebarWidth: sidebar ? Math.round(sidebar.getBoundingClientRect().width) : 0,
+          topbarHeight: topbar ? Math.round(topbar.getBoundingClientRect().height) : 0,
+        };
+      });
+      expect(computedMetrics.bgToken).toBe('#fbfcfb');
+      expect(computedMetrics.navyToken).toBe('#041c3e');
+      expect(computedMetrics.primaryToken).toBe('#00778a');
+      expect(computedMetrics.fontFamily.toLowerCase()).toContain('hanken grotesk');
+      expect(computedMetrics.sidebarWidth).toBe(248);
+      expect(computedMetrics.topbarHeight).toBe(56);
 
       const desktopOverflow = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth,
@@ -44,6 +83,21 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
         .analyze();
       expect(desktopAxe.violations).toEqual([]);
 
+      await page.screenshot({
+        path: resolve(SCREENS_DIR, `${screen.name}-1440w.png`),
+        fullPage: false,
+      });
+
+      // Check 1280px and 768px breakpoints (AGENTS.md §9)
+      for (const width of [1280, 768]) {
+        await page.setViewportSize({ width, height: 900 });
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth > window.innerWidth,
+        );
+        expect(overflow).toBe(false);
+      }
+
+      // Check 375px mobile breakpoint
       await page.setViewportSize({ width: 375, height: 812 });
       await page.waitForTimeout(100);
 
@@ -56,6 +110,11 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
         .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
         .analyze();
       expect(mobileAxe.violations).toEqual([]);
+
+      await page.screenshot({
+        path: resolve(SCREENS_DIR, `${screen.name}-375w.png`),
+        fullPage: false,
+      });
     });
   }
 

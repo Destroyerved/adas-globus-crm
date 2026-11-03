@@ -33,7 +33,7 @@ const INITIAL_THREADS: InboxThread[] = [
     firmName: 'Acme Tax & Advisory LLP',
     market: 'US',
     dealName: '2027 Tax Season Prep Pod (3 FTE)',
-    sequenceStoppedNote: 'Sequence auto-stopped on inbound reply · Follow-up task created',
+    sequenceStoppedNote: 'Sequence auto-stopped on reply · Task created',
     messages: [
       {
         id: 'm1',
@@ -101,14 +101,14 @@ export function InboxScreen() {
   };
 
   return (
-    <div
-      className="px-[16px] py-[20px] md:px-[28px] md:py-[24px] max-w-[1600px] mx-auto space-y-[20px]"
-      data-testid="inbox-screen"
-    >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[16px]">
+    <div className="space-y-[16px] pb-[32px]" data-testid="inbox-screen">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="eyebrow-rule mb-[6px]">Microsoft 365 delegated sync (PRD 4.11)</div>
-          <h1 className="text-h1 text-ink m-0">Connected Inbox</h1>
+          <div className="kicker mb-[4px]">Microsoft 365 delegated sync (PRD 4.11)</div>
+          <h1 className="text-display text-ink m-0">
+            <strong>Connected inbox</strong>{' '}
+            <span className="text-ink-3 font-light tabular-nums">{threads.length} threads</span>
+          </h1>
           <p className="text-[13.5px] text-ink-2 mt-[4px] mb-0">
             Syncs only threads matching known CRM contact emails. Non-CRM personal and internal
             emails are never imported.
@@ -118,9 +118,9 @@ export function InboxScreen() {
         <div className="flex flex-wrap items-center gap-[8px]">
           <StatusBadge tone="success">
             <ShieldCheck size={12} className="inline mr-[4px]" aria-hidden="true" />
-            M365 Connected · arjun@adasglobuspro.example.com (8/50 today)
+            M365 connected · 8/50 sent today
           </StatusBadge>
-          <StatusBadge tone="neutral">Mailpit Sandbox</StatusBadge>
+          <StatusBadge tone="neutral">Mailpit sandbox</StatusBadge>
         </div>
       </div>
 
@@ -135,7 +135,7 @@ export function InboxScreen() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-[16px]">
-        <Panel className="overflow-hidden">
+        <Panel padded={false} className="overflow-hidden">
           <div className="px-[16px] py-[12px] border-b border-line bg-bg-alt text-eyebrow text-ink-2">
             Synced CRM Threads ({threads.length})
           </div>
@@ -174,7 +174,7 @@ export function InboxScreen() {
             <div className="space-y-[14px]">
               <div className="border-b border-line pb-[12px]">
                 <div className="flex flex-wrap items-center justify-between gap-[8px]">
-                  <h2 className="text-h2 text-ink m-0">{selectedThread.subject}</h2>
+                  <h2 className="text-title text-ink m-0">{selectedThread.subject}</h2>
                   <StatusBadge tone="brand">{selectedThread.dealName}</StatusBadge>
                 </div>
                 <div className="text-[13px] text-ink-2 mt-[4px]">
@@ -196,7 +196,7 @@ export function InboxScreen() {
                       msg.direction === 'inbound' ? 'bg-surface' : 'bg-bg-alt'
                     }`}
                   >
-                    <div className="flex items-center justify-between text-[12px] text-ink-2 mb-[6px]">
+                    <div className="flex flex-wrap items-center justify-between gap-[6px] text-[12px] text-ink-2 mb-[6px]">
                       <span className="font-[600] text-ink">
                         <Mail size={12} className="inline mr-[6px]" aria-hidden="true" />
                         {msg.sender}

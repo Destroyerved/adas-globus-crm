@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  BarChart3,
   Bell,
   Building2,
+  CheckSquare,
   Handshake,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -10,7 +13,9 @@ import {
   PanelLeftOpen,
   Plus,
   Search,
+  Send,
   Settings,
+  Upload,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -38,13 +43,13 @@ const WORK_ITEMS: NavItem[] = [
   {
     id: 'tasks',
     label: 'Tasks & SLA',
-    icon: LayoutDashboard,
+    icon: CheckSquare,
     count: '5',
   },
   {
     id: 'inbox',
     label: 'Inbox (M365)',
-    icon: LayoutDashboard,
+    icon: Inbox,
     count: '2',
   },
   {
@@ -75,17 +80,17 @@ const RECORD_ITEMS: NavItem[] = [
   {
     id: 'outreach',
     label: 'Outreach & CASL',
-    icon: Handshake,
+    icon: Send,
   },
   {
     id: 'imports',
     label: 'Imports & Merge',
-    icon: Building2,
+    icon: Upload,
   },
   {
     id: 'reports',
     label: 'Reports & Audit',
-    icon: Settings,
+    icon: BarChart3,
   },
 ];
 
@@ -272,11 +277,11 @@ export function AppShell({
           </ul>
         </div>
 
-        {/* WORK / STATES group */}
+        {/* WORK group (DESIGN.md §5) */}
         <div>
           {!isCollapsedView && (
             <div className="px-[10px] mb-[6px] text-eyebrow text-sidebar-foreground opacity-85">
-              STATES
+              WORK
             </div>
           )}
           <ul className="m-0 p-0 list-none space-y-[2px]">
@@ -293,14 +298,23 @@ export function AppShell({
                       setMobileDrawerOpen(false);
                     }}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`w-full h-[36px] px-[10px] rounded-[8px] flex items-center gap-[10px] cursor-pointer border-0 transition-colors duration-120 ${
+                    className={`w-full h-[36px] px-[10px] rounded-[8px] flex items-center justify-between gap-[10px] cursor-pointer border-0 transition-colors duration-120 ${
                       isActive
                         ? 'bg-navy-2 text-primary-foreground font-semibold shadow-[inset_2px_0_0_0_var(--cyan)]'
                         : 'bg-transparent text-sidebar-foreground font-medium hover:bg-navy-2 hover:text-primary-foreground'
                     }`}
                   >
-                    <Icon size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
-                    {!isCollapsedView && <span className="text-[14px] truncate">{item.label}</span>}
+                    <span className="inline-flex items-center gap-[10px] min-w-0">
+                      <Icon size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
+                      {!isCollapsedView && (
+                        <span className="text-[14px] truncate">{item.label}</span>
+                      )}
+                    </span>
+                    {!isCollapsedView && item.count && (
+                      <span className="inline-flex items-center h-[20px] px-[7px] rounded-pill bg-navy-2 text-cyan text-[11.5px] font-semibold tabular-nums">
+                        {item.count}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

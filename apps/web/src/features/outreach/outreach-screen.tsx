@@ -77,16 +77,14 @@ export function OutreachScreen() {
   const activeScenario = SCENARIOS[scenario];
 
   return (
-    <div
-      className="px-[16px] py-[20px] md:px-[28px] md:py-[24px] max-w-[1600px] mx-auto space-y-[20px]"
-      data-testid="outreach-screen"
-    >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[16px]">
+    <div className="space-y-[16px] pb-[32px]" data-testid="outreach-screen">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="eyebrow-rule mb-[6px]">
-            Compliant Sequences & Campaigns (PRD 4.12, 4.13, 5)
-          </div>
-          <h1 className="text-h1 text-ink m-0">Outreach & Compliance Gate</h1>
+          <div className="kicker mb-[4px]">Compliant sequences & campaigns (PRD 4.12, 4.13, 5)</div>
+          <h1 className="text-display text-ink m-0">
+            <strong>Outreach</strong>{' '}
+            <span className="text-ink-3 font-light tabular-nums">&amp; compliance gate</span>
+          </h1>
           <p className="text-[13.5px] text-ink-2 mt-[4px] mb-0">
             Every outbound message passes through <code className="text-mono">checkSendable()</code>{' '}
             in the <code className="text-mono">send.message</code> worker job.
@@ -95,7 +93,7 @@ export function OutreachScreen() {
 
         <div className="flex flex-wrap items-center gap-[8px]">
           <StatusBadge tone="brand">CAN-SPAM (US) + CASL (CA)</StatusBadge>
-          <StatusBadge tone="neutral">Counsel Gate: Sandbox Active</StatusBadge>
+          <StatusBadge tone="neutral">Counsel gate: Sandbox active</StatusBadge>
         </div>
       </div>
 
@@ -105,7 +103,7 @@ export function OutreachScreen() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-eyebrow text-ink-3">PHASE 5A · SEQUENCES</div>
-              <h2 className="text-h2 text-ink m-0 mt-[2px]">Active Multi-Step Sequences</h2>
+              <h2 className="text-title text-ink m-0 mt-[2px]">Active multi-step sequences</h2>
             </div>
             <StatusBadge tone="success">50/day mailbox cap</StatusBadge>
           </div>
@@ -143,7 +141,9 @@ export function OutreachScreen() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-eyebrow text-ink-3">PHASE 5B · CAMPAIGNS</div>
-              <h2 className="text-h2 text-ink m-0 mt-[2px]">Bulk Campaigns & Auto-Pause Guard</h2>
+              <h2 className="text-title text-ink m-0 mt-[2px]">
+                Bulk campaigns &amp; auto-pause guard
+              </h2>
             </div>
             {campaignStatus === 'approved' && (
               <StatusBadge tone="success">Approved by Marketing Mgr</StatusBadge>
@@ -184,7 +184,7 @@ export function OutreachScreen() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
         <Panel className="p-[20px] space-y-[14px]">
           <div className="text-eyebrow text-ink-3">PRD 5.1 · SINGLE COMPLIANCE GATE (A12)</div>
-          <h2 className="text-h2 text-ink m-0">checkSendable() Reason Code Inspector</h2>
+          <h2 className="text-title text-ink m-0">checkSendable() reason code inspector</h2>
 
           <div className="flex flex-wrap gap-[8px]">
             {(Object.keys(SCENARIOS) as SimulatorScenario[]).map((key) => (
@@ -226,7 +226,9 @@ export function OutreachScreen() {
           <div className="text-eyebrow text-ink-3">
             PRD 5.4 · PUBLIC UNSUBSCRIBE HOST (go.adasglobuspro.com)
           </div>
-          <h2 className="text-h2 text-ink m-0">One-Click Unsubscribe & Preference Center (A17)</h2>
+          <h2 className="text-title text-ink m-0">
+            One-click unsubscribe &amp; preference center (A17)
+          </h2>
           <p className="text-[13px] text-ink-2 m-0">
             Served on <code className="text-mono">go.adasglobuspro.com/u/:token</code> with zero
             login required. Immediately writes to <code className="text-mono">suppressions</code>{' '}

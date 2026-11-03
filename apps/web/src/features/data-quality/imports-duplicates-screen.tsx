@@ -9,21 +9,23 @@ export function ImportsDuplicatesScreen() {
   const [mergeState, setMergeState] = useState<'pending' | 'merged' | 'undone'>('pending');
 
   return (
-    <div
-      className="px-[16px] py-[20px] md:px-[28px] md:py-[24px] max-w-[1600px] mx-auto space-y-[20px]"
-      data-testid="imports-duplicates-screen"
-    >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[16px]">
+    <div className="space-y-[16px] pb-[32px]" data-testid="imports-duplicates-screen">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="eyebrow-rule mb-[6px]">Data Hygiene & Cutover (PRD 4.8, 4.9, 10)</div>
-          <h1 className="text-h1 text-ink m-0">Imports, Duplicates & Bigin Cutover</h1>
+          <div className="kicker mb-[4px]">Data hygiene & cutover (PRD 4.8, 4.9, 10)</div>
+          <h1 className="text-display text-ink m-0">
+            <strong>Imports</strong>{' '}
+            <span className="text-ink-3 font-light tabular-nums">
+              &amp; Bigin cutover reconciliation
+            </span>
+          </h1>
           <p className="text-[13.5px] text-ink-2 mt-[4px] mb-0">
             Dry-run CSV previews, reversible contact merges, and 100% Bigin migration
             reconciliation.
           </p>
         </div>
 
-        <StatusBadge tone="brand">Suppression Always Wins (A13)</StatusBadge>
+        <StatusBadge tone="brand">Suppression always wins (A13)</StatusBadge>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
@@ -32,7 +34,7 @@ export function ImportsDuplicatesScreen() {
           <div className="flex items-center justify-between gap-[8px]">
             <div>
               <div className="text-eyebrow text-ink-3">PRD 4.9 · CSV IMPORT ENGINE (A5)</div>
-              <h2 className="text-h2 text-ink m-0 mt-[2px]">Dry-Run Preview & Rollback</h2>
+              <h2 className="text-title text-ink m-0 mt-[2px]">Dry-run preview &amp; rollback</h2>
             </div>
             <StatusBadge
               tone={
@@ -87,7 +89,7 @@ export function ImportsDuplicatesScreen() {
           <div className="flex items-center justify-between gap-[8px]">
             <div>
               <div className="text-eyebrow text-ink-3">PRD 4.8 · DUPLICATE REVIEW QUEUE (A6)</div>
-              <h2 className="text-h2 text-ink m-0 mt-[2px]">Contact Merge with Snapshot Undo</h2>
+              <h2 className="text-title text-ink m-0 mt-[2px]">Contact merge with snapshot undo</h2>
             </div>
             <StatusBadge tone={mergeState === 'merged' ? 'success' : 'neutral'}>
               {mergeState === 'pending'
@@ -126,8 +128,8 @@ export function ImportsDuplicatesScreen() {
         <div className="flex flex-wrap items-center justify-between gap-[8px]">
           <div>
             <div className="text-eyebrow text-ink-3">PRD 10 · ZOHO BIGIN MIGRATION & CUTOVER</div>
-            <h2 className="text-h2 text-ink m-0 mt-[2px]">
-              Bigin Staging Dry-Run & Reconciliation
+            <h2 className="text-title text-ink m-0 mt-[2px]">
+              Bigin staging dry-run &amp; reconciliation
             </h2>
           </div>
           <StatusBadge tone="success">

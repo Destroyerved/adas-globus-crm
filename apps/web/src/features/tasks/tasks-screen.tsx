@@ -122,15 +122,12 @@ export function TasksScreen() {
   const openCount = tasks.filter((t) => !t.completed).length;
 
   return (
-    <div
-      className="px-[16px] py-[20px] md:px-[28px] md:py-[24px] max-w-[1600px] mx-auto space-y-[20px]"
-      data-testid="tasks-screen"
-    >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[16px]">
+    <div className="space-y-[16px] pb-[32px]" data-testid="tasks-screen">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="eyebrow-rule mb-[6px]">Execution & SLA timers</div>
-          <h1 className="text-h1 text-ink m-0 flex items-baseline gap-[10px]">
-            <span>Tasks</span>
+          <div className="kicker mb-[4px]">Execution & SLA timers</div>
+          <h1 className="text-display text-ink m-0">
+            <strong>Tasks</strong>{' '}
             <span className="text-ink-3 font-light tabular-nums">
               {formatCount(openCount, 'open task')}
             </span>
@@ -146,7 +143,7 @@ export function TasksScreen() {
             [
               { id: 'all', label: 'All tasks' },
               { id: 'sla', label: '15m Website SLA' },
-              { id: 'trial', label: '3-Day Free Trial check-ins' },
+              { id: 'trial', label: '3-day free trial check-ins' },
             ] as const
           ).map((tab) => (
             <Button
@@ -169,7 +166,7 @@ export function TasksScreen() {
             onChange={(e) => setNewTaskTitle(e.target.value)}
             placeholder="Add follow-up or trial check-in task…"
             aria-label="New task title"
-            className="h-[36px] flex-1 rounded-[8px] border border-line-field bg-surface px-[12px] text-[14px] text-ink"
+            className="h-[36px] min-h-[36px] w-full sm:flex-1 shrink-0 rounded-[8px] border border-line-field bg-surface px-[12px] text-[14px] text-ink"
           />
           <Button type="submit" variant="primary" size="md">
             <Plus size={15} strokeWidth={1.8} aria-hidden="true" />
@@ -178,7 +175,7 @@ export function TasksScreen() {
         </form>
       </Panel>
 
-      <Panel className="overflow-hidden">
+      <Panel padded={false} className="overflow-hidden">
         <div className="divide-y divide-line">
           {filteredTasks.map((task) => (
             <div
