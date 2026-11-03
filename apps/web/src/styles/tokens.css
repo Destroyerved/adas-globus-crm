@@ -1,0 +1,78 @@
+:root {
+  /* Surfaces (website) */
+  --bg: #fbfcfb; /* app canvas */
+  --bg-alt: #f1f3f2; /* hover rows, Kanban columns, muted fills */
+  --surface: #ffffff; /* panels, cards, inputs, menus */
+  --tint: #e5f1f2; /* selected rows, brand badges, callouts */
+
+  /* Ink (website) */
+  --ink: #0f1b2a; /* primary text */
+  --ink-2: #445161; /* secondary text */
+  --ink-3: #646f7c; /* meta, placeholders, table headers */
+  --line: #dce2e2; /* hairlines, panel borders */
+  --line-strong: #bfc8ca; /* dividers that need more weight, disabled borders */
+  --line-field: #8a959c; /* NEW: form-control borders (3:1 on white) */
+
+  /* Brand (website) */
+  --primary: #00778a; /* primary buttons, active states, links */
+  --primary-ink: #005e6d; /* primary hover, teal text on tint */
+  --blue: #015fa7; /* focus ring, info, inline links. The website calls this --accent;
+                               renamed because shadcn uses --accent for a grey hover fill */
+  --navy: #041c3e; /* sidebar, bulk bar, login band */
+  --navy-2: #0a2b52; /* sidebar hover and active item */
+  --navy-line: rgba(255, 255, 255, 0.13);
+  --cyan: #63dfe9; /* active marker on navy only */
+
+  /* Status tones (NEW except danger and warning, which the website uses) */
+  --success: #067647;
+  --success-bg: #ecfdf3;
+  --warning: #7a4f00;
+  --warning-bg: #fff1d6;
+  --danger: #b42318;
+  --danger-bg: #fef3f2;
+  --info: #015fa7;
+  --info-bg: #e8f1fa;
+  --neutral: #445161;
+  --neutral-bg: #f1f3f2;
+  --brand: #005e6d;
+  --brand-bg: #e5f1f2;
+
+  /* Charts (website, validated for colour-blind separation) */
+  --chart-1: #2f64a8; /* primary series */
+  --chart-2: #00a3a3; /* comparison series */
+  --chart-muted: #9aa5ae; /* NEW: "other", "lost", baselines */
+
+  /* Shape */
+  --radius: 10px; /* panels and cards */
+  --radius-field: 8px; /* inputs, menus, small cards */
+  --radius-dialog: 14px; /* dialogs and the login card */
+  --radius-pill: 999px; /* buttons, chips, badges */
+
+  /* Elevation (website values) */
+  --shadow-pop: 0 12px 30px -14px rgba(15, 27, 42, 0.4); /* menus, popovers, tooltips */
+  --shadow-lift: 0 18px 40px -28px rgba(15, 27, 42, 0.35); /* hover on clickable cards, drag */
+  --shadow-dialog: 0 30px 60px -30px rgba(4, 28, 62, 0.45); /* dialogs, drawers */
+  --scrim: rgba(4, 28, 62, 0.4); /* NEW: navy-tinted overlay */
+
+  /* Focus (website) */
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--blue);
+  --field-focus: 0 0 0 3px rgba(0, 119, 138, 0.18);
+  --field-invalid: 0 0 0 3px rgba(180, 35, 24, 0.1);
+
+  /* Motion (website easing) */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
+
+  /* Type */
+  --font:
+    'Hanken Grotesk Variable', 'Hanken Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h: 56px;
+  --content-max: 1240px; /* website --max; forms and profiles */
+}

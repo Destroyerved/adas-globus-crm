@@ -1,0 +1,357 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+:root {
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  /* --primary comes from tokens.css */
+  --primary-foreground: #ffffff;
+  --secondary: var(--tint);
+  --secondary-foreground: var(--primary-ink);
+  --muted: var(--bg-alt);
+  --muted-foreground: var(--ink-3);
+  --accent: var(--bg-alt);
+  --accent-foreground: var(--ink); /* hover fill, NOT brand blue */
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-field);
+  --ring: var(--info);
+  --sidebar: var(--navy);
+  --sidebar-foreground: rgba(255, 255, 255, 0.72);
+  --sidebar-primary: var(--cyan);
+  --sidebar-primary-foreground: var(--navy);
+  --sidebar-accent: var(--navy-2);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: var(--navy-line);
+  --sidebar-ring: var(--cyan);
+}
+
+@theme inline {
+  --font-sans: var(--font);
+  --font-mono: var(--mono);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Brand names for direct use: bg-tint, text-ink-2, border-line ... */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-field: var(--line-field);
+  --color-bg-alt: var(--bg-alt);
+  --color-tint: var(--tint);
+  --color-primary-ink: var(--primary-ink);
+  --color-blue: var(--blue);
+  --color-navy: var(--navy);
+  --color-navy-2: var(--navy-2);
+  --color-navy-line: var(--navy-line);
+  --color-cyan: var(--cyan);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-neutral: var(--neutral);
+  --color-neutral-bg: var(--neutral-bg);
+  --color-brand: var(--brand);
+  --color-brand-bg: var(--brand-bg);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-muted: var(--chart-muted);
+
+  --radius-sm: 6px;
+  --radius-md: var(--radius-field);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius-dialog);
+  --radius-pill: var(--radius-pill);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: clip;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* Typography scale (DESIGN.md §4) */
+.text-display {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+.text-display strong {
+  font-weight: 650;
+}
+
+.text-title-lg {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.text-title {
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.text-body {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.text-body-sm {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.text-label {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.text-eyebrow {
+  font-size: 11.5px;
+  line-height: 16px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.text-kpi {
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 300;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-kpi-lg {
+  font-size: 44px;
+  line-height: 48px;
+  font-weight: 300;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Kicker (28px × 2px teal bar + 13px/500 --ink-2 text, DESIGN.md §5.3) */
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.kicker::before {
+  content: '';
+  width: 28px;
+  height: 2px;
+  background: var(--primary);
+  flex: none;
+}
+
+/* View tabs underline (DESIGN.md §5.3, §11) */
+.view-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 10px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast) linear;
+}
+.view-tab:hover {
+  color: var(--ink);
+}
+.view-tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--primary);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 350ms var(--ease-out);
+}
+.view-tab:hover::after,
+.view-tab[aria-selected='true']::after,
+.view-tab[data-active='true']::after {
+  transform: scaleX(1);
+}
+.view-tab[aria-selected='true'],
+.view-tab[data-active='true'] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Empty state 2x2 glass-tile cluster (DESIGN.md §6.13) */
+.tile-cluster {
+  display: grid;
+  grid-template-columns: repeat(2, 22px);
+  grid-template-rows: repeat(2, 22px);
+}
+.tile-cluster i {
+  display: block;
+}
+.tile-cluster i:nth-child(1) {
+  background: rgba(0, 163, 163, 0.22);
+}
+.tile-cluster i:nth-child(2) {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tile-cluster i:nth-child(3) {
+  grid-column: 2;
+  box-shadow: inset 0 0 0 1px rgba(0, 94, 109, 0.25);
+}
+
+/* Login screen corner tile cluster (DESIGN.md §6.14 & website .band-tiles) */
+.band-tiles {
+  --s: 36px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: calc(var(--s) * 3);
+  height: calc(var(--s) * 3);
+  pointer-events: none;
+}
+.band-tiles i {
+  position: absolute;
+  display: block;
+  right: calc(var(--x, 0) * var(--s));
+  top: calc(var(--y, 0) * var(--s));
+  width: var(--s);
+  height: var(--s);
+}
+.band-tiles i:nth-child(1) {
+  background: var(--navy-2);
+}
+.band-tiles i:nth-child(2) {
+  background: rgba(99, 223, 233, 0.14);
+}
+.band-tiles i:nth-child(3) {
+  border: 1px solid rgba(99, 223, 233, 0.3);
+}
+.band-tiles i:nth-child(4) {
+  background: var(--navy-2);
+}
+.band-tiles i:nth-child(5) {
+  border: 1px solid var(--navy-line);
+}
+
+/* Activity timeline user dot halo (DESIGN.md §6.10) */
+.timeline-dot-user {
+  background: var(--primary);
+  box-shadow: 0 0 0 4px rgba(0, 119, 138, 0.12);
+}
+
+/* Loading shimmer (DESIGN.md §6.13, §11) */
+@keyframes adas-shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+.skeleton-shimmer {
+  background: var(--bg-alt);
+  animation: adas-shimmer 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
