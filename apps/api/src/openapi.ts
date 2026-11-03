@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,8 +9,9 @@ const openApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'ADAS CRM API',
-    version: '0.1.0',
-    description: 'Internal CRM and outreach API for ADAS Globus Pro (PRD §6.7)',
+    version: '1.0.0',
+    description:
+      'Internal CRM and compliant outreach API for ADAS Globus Pro across Phases 1–6 (PRD §6.5–6.8)',
   },
   servers: [{ url: '/api/v1' }],
   paths: {
@@ -18,11 +19,208 @@ const openApiSpec = {
       get: {
         operationId: 'getHealth',
         summary: 'Service health check',
+        responses: { '200': { description: 'Healthy' } },
+      },
+    },
+    '/auth/entra-oidc': {
+      post: {
+        operationId: 'signInEntraOidc',
+        summary: 'Invite-only Microsoft Entra OIDC sign-in (PRD §3.1)',
         responses: {
-          '200': {
-            description: 'Healthy',
-          },
+          '200': { description: 'Authenticated' },
+          '403': { description: 'Not invited' },
         },
+      },
+    },
+    '/auth/break-glass': {
+      post: {
+        operationId: 'signInBreakGlass',
+        summary: 'Break-glass local admin sign-in (Argon2id + TOTP, PRD §3.1)',
+        responses: { '200': { description: 'Authenticated' } },
+      },
+    },
+    '/users': {
+      get: {
+        operationId: 'listUsers',
+        summary: 'List invited and active CRM users (PRD §3.2)',
+        responses: { '200': { description: 'User list' } },
+      },
+    },
+    '/audit-logs': {
+      get: {
+        operationId: 'listAuditLogs',
+        summary: 'List immutable security & compliance audit logs (PRD §9)',
+        responses: { '200': { description: 'Audit logs' } },
+      },
+    },
+    '/companies': {
+      get: {
+        operationId: 'listCompanies',
+        summary: 'List scoped companies (PRD §4.3)',
+        responses: { '200': { description: 'Companies' } },
+      },
+      post: {
+        operationId: 'createCompany',
+        summary: 'Create or deduplicate company by normalized domain (PRD §4.3)',
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/companies/{id}': {
+      patch: {
+        operationId: 'updateCompany',
+        summary: 'Update company with optimistic concurrency version check (PRD §6.5)',
+        responses: {
+          '200': { description: 'Updated' },
+          '409': { description: 'Version conflict' },
+        },
+      },
+    },
+    '/contacts': {
+      get: {
+        operationId: 'listContacts',
+        summary: 'List scoped contacts (PRD §4.4)',
+        responses: { '200': { description: 'Contacts' } },
+      },
+      post: {
+        operationId: 'createContact',
+        summary: 'Create contact with normalized email and E.164 phone (PRD §4.4)',
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/contacts/merge': {
+      post: {
+        operationId: 'mergeContacts',
+        summary: 'Merge duplicate contact into survivor with undo snapshot (PRD §4.8)',
+        responses: { '200': { description: 'Merged' } },
+      },
+    },
+    '/leads': {
+      get: {
+        operationId: 'listLeads',
+        summary: 'List scoped leads (PRD §4.1)',
+        responses: { '200': { description: 'Leads' } },
+      },
+      post: {
+        operationId: 'createLead',
+        summary: 'Create lead (PRD §4.1)',
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/leads/convert': {
+      post: {
+        operationId: 'convertLead',
+        summary:
+          'Convert qualified lead to Company, Contact, Deal, and 3-Day Free Trial tasks (PRD §4.2)',
+        responses: { '200': { description: 'Converted' } },
+      },
+    },
+    '/deals': {
+      get: {
+        operationId: 'listDeals',
+        summary: 'List scoped deals (PRD §4.5)',
+        responses: { '200': { description: 'Deals' } },
+      },
+      post: {
+        operationId: 'createDeal',
+        summary: 'Create deal (PRD §4.5)',
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/deals/{id}/stage': {
+      patch: {
+        operationId: 'moveDealStage',
+        summary: 'Move deal stage with required-field gates and Free Trial / Won hooks (PRD §4.5)',
+        responses: {
+          '200': { description: 'Updated' },
+          '422': { description: 'Missing required stage field' },
+        },
+      },
+    },
+    '/tasks': {
+      get: {
+        operationId: 'listTasks',
+        summary: 'List scoped tasks and SLA timers (PRD §4.6)',
+        responses: { '200': { description: 'Tasks' } },
+      },
+      post: {
+        operationId: 'createTask',
+        summary: 'Create task (PRD §4.6)',
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+    '/public/inquiries': {
+      post: {
+        operationId: 'submitPublicInquiry',
+        summary: 'Public website form intake endpoint (PRD §4.10)',
+        responses: { '200': { description: 'Accepted' } },
+      },
+    },
+    '/compliance/check-sendable': {
+      post: {
+        operationId: 'checkSendable',
+        summary: 'Evaluate CAN-SPAM / CASL / suppression sendability gate (PRD §5.1)',
+        responses: { '200': { description: 'Evaluation result' } },
+      },
+    },
+    '/compliance/suppressions': {
+      get: {
+        operationId: 'listSuppressions',
+        summary: 'List append-only suppressions (PRD §5.3)',
+        responses: { '200': { description: 'Suppressions' } },
+      },
+      post: {
+        operationId: 'addSuppression',
+        summary: 'Add suppression and immediately stop active sequences (PRD §5.3)',
+        responses: { '201': { description: 'Suppressed' } },
+      },
+    },
+    '/imports/csv': {
+      post: {
+        operationId: 'runCsvImport',
+        summary: 'Run CSV dry-run preview or background import (PRD §4.9)',
+        responses: { '200': { description: 'Import summary' } },
+      },
+    },
+    '/search': {
+      get: {
+        operationId: 'globalSearch',
+        summary: 'Global trigram and full-text search (PRD §6.8)',
+        responses: { '200': { description: 'Search results' } },
+      },
+    },
+    '/inbox/threads': {
+      get: {
+        operationId: 'listInboxThreads',
+        summary: 'List synced Microsoft 365 threads (PRD §4.11)',
+        responses: { '200': { description: 'Threads' } },
+      },
+    },
+    '/sequences': {
+      get: {
+        operationId: 'listSequences',
+        summary: 'List multi-step outbound sequences (PRD §4.12)',
+        responses: { '200': { description: 'Sequences' } },
+      },
+    },
+    '/campaigns': {
+      get: {
+        operationId: 'listCampaigns',
+        summary: 'List bulk campaigns (PRD §4.13)',
+        responses: { '200': { description: 'Campaigns' } },
+      },
+    },
+    '/campaigns/{id}/approve': {
+      post: {
+        operationId: 'approveCampaign',
+        summary: 'Approve campaign (requires campaigns.approve capability, PRD §4.13)',
+        responses: { '200': { description: 'Approved' }, '403': { description: 'Forbidden' } },
+      },
+    },
+    '/reports/pipeline-rollup': {
+      get: {
+        operationId: 'getPipelineRollup',
+        summary: 'Multi-currency pipeline rollup in integer minor units (PRD §4.15 & §14)',
+        responses: { '200': { description: 'Pipeline report' } },
       },
     },
   },
