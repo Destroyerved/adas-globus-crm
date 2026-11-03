@@ -1,0 +1,43 @@
+{
+  "name": "adas-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal CRM and outreach platform for ADAS Globus Pro",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "pnpm --filter @adas/web dev",
+    "dev:api": "pnpm --filter @adas/api dev",
+    "db:migrate": "pnpm --filter @adas/api db:migrate",
+    "db:migrate:new": "pnpm --filter @adas/api db:migrate:new",
+    "db:seed": "tsx scripts/seed-synthetic.ts",
+    "lint": "eslint . --max-warnings 0 && prettier --check \"**/*.{ts,tsx,mjs,json,css,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,mjs,json,css,md}\"",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run --project unit",
+    "test:int": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:int",
+    "build": "pnpm --filter @adas/shared build && pnpm --filter @adas/api build && pnpm --filter @adas/web build",
+    "api:openapi": "pnpm --filter @adas/api openapi:generate"
+  },
+  "devDependencies": {
+    "@adas/config": "workspace:*",
+    "@axe-core/playwright": "^4.10.2",
+    "@eslint/js": "^9.21.0",
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^22.13.5",
+    "eslint": "^9.21.0",
+    "eslint-plugin-boundaries": "^5.0.1",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.25.0",
+    "vitest": "^3.0.7"
+  }
+}

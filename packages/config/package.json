@@ -1,0 +1,16 @@
+{
+  "name": "@adas/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.node.json": "./tsconfig.node.json",
+    "./tsconfig.react.json": "./tsconfig.react.json",
+    "./eslint": "./eslint.preset.mjs",
+    "./prettier": "./prettier.preset.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

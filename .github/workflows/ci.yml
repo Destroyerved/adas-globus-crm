@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'p0/**', 'p1/**', 'p2/**', 'p3/**', 'p4/**', 'p5/**', 'p6/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Lint, Typecheck, Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pnpm check (lint + typecheck + unit + integration)
+        run: pnpm check
+
+      - name: Build workspace packages
+        run: pnpm build
+
+  e2e:
+    name: Playwright E2E & Accessibility (axe)
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Run Playwright E2E suite
+        run: pnpm test:e2e

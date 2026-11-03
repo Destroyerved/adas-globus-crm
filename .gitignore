@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment and secrets (NEVER commit)
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Real data & exports (NEVER commit - AGENTS.md §5)
+data/
+*.csv
+*.xlsx
+!docs/**
+
+# Test & Playwright artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Logs & OS
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
