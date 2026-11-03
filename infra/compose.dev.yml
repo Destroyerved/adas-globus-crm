@@ -1,0 +1,37 @@
+name: adas-crm-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: adas-crm-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: adas_app
+      POSTGRES_PASSWORD: adas_dev_password
+      POSTGRES_DB: adas_crm
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adas_app -d adas_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.22
+    container_name: adas-crm-mailpit-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_dev_data:

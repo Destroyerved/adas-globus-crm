@@ -1,0 +1,77 @@
+name: adas-crm
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 4g
+    logging: *default-logging
+    networks:
+      - internal
+    volumes:
+      - /srv/adas-crm/data/postgres:/var/lib/postgresql/data
+      - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adas_app -d adas_crm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ghcr.io/destroyerved/adas-crm-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    mem_limit: 1g
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    image: ghcr.io/destroyerved/adas-crm-api:${IMAGE_TAG:-latest}
+    command: ["node", "dist/worker.js"]
+    restart: unless-stopped
+    mem_limit: 768m
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    restart: unless-stopped
+    mem_limit: 128m
+    logging: *default-logging
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    networks:
+      - internal
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: *default-logging
+    volumes:
+      - /srv/adas-crm/data/uptime-kuma:/app/data
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

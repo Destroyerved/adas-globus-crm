@@ -1,0 +1,11 @@
+# Cloudflare Tunnel ingress rules (PRD §6.5, §10.4)
+# Credentials file is mounted from /srv/adas-crm/secrets/ outside git.
+
+ingress:
+  - hostname: crm.adasglobuspro.com
+    service: http://api:3000
+  - hostname: go.adasglobuspro.com
+    service: http://api:3000
+  - hostname: status.adasglobuspro.com
+    service: http://uptime-kuma:3001
+  - service: http_status:404
