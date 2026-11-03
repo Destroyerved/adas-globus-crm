@@ -1,8 +1,9 @@
 import { type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { ArrowRight } from 'lucide-react';
 
-export type ButtonVariant = 'primary' | 'outline' | 'ghost' | 'danger' | 'link';
-export type ButtonSize = 'sm' | 'default' | 'lg' | 'icon';
+export type ButtonVariant =
+  'primary' | 'secondary' | 'navy' | 'outline' | 'ghost' | 'danger' | 'link';
+export type ButtonSize = 'sm' | 'md' | 'default' | 'lg' | 'icon';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -13,6 +14,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
     'bg-primary text-primary-foreground border border-transparent hover:bg-primary-ink font-semibold',
+  secondary: 'bg-surface text-ink border border-line-strong hover:bg-surface-hover font-medium',
+  navy: 'bg-navy text-primary-foreground border border-transparent hover:bg-navy-2 font-semibold',
   outline:
     'bg-transparent text-primary-ink border border-primary hover:bg-primary hover:text-primary-foreground font-semibold',
   ghost:
@@ -24,6 +27,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
   sm: 'h-[32px] px-[14px] text-[13px] rounded-pill',
+  md: 'h-[36px] px-[16px] text-[14px] rounded-pill',
   default: 'h-[36px] px-[16px] text-[14px] rounded-pill',
   lg: 'h-[40px] px-[20px] text-[14px] rounded-pill',
   icon: 'h-[32px] w-[32px] p-0 rounded-pill justify-center',

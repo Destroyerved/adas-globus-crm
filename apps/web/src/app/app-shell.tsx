@@ -36,6 +36,18 @@ interface NavItem {
 
 const WORK_ITEMS: NavItem[] = [
   {
+    id: 'tasks',
+    label: 'Tasks & SLA',
+    icon: LayoutDashboard,
+    count: '5',
+  },
+  {
+    id: 'inbox',
+    label: 'Inbox (M365)',
+    icon: LayoutDashboard,
+    count: '2',
+  },
+  {
     id: 'empty',
     label: 'Empty state',
     icon: LayoutDashboard,
@@ -59,6 +71,21 @@ const RECORD_ITEMS: NavItem[] = [
     label: 'Deals',
     icon: Handshake,
     count: '8',
+  },
+  {
+    id: 'outreach',
+    label: 'Outreach & CASL',
+    icon: Handshake,
+  },
+  {
+    id: 'imports',
+    label: 'Imports & Merge',
+    icon: Building2,
+  },
+  {
+    id: 'reports',
+    label: 'Reports & Audit',
+    icon: Settings,
   },
 ];
 

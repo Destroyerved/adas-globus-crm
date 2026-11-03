@@ -11,7 +11,17 @@ import {
 } from 'lucide-react';
 import { COMMAND_PALETTE_ITEMS, type CommandPaletteItem } from '@/lib/synthetic-data.js';
 
-export type AppScreenId = 'leads' | 'company' | 'deals' | 'empty' | 'login';
+export type AppScreenId =
+  | 'leads'
+  | 'company'
+  | 'deals'
+  | 'tasks'
+  | 'inbox'
+  | 'outreach'
+  | 'imports'
+  | 'reports'
+  | 'empty'
+  | 'login';
 
 export interface CommandPaletteProps {
   open: boolean;

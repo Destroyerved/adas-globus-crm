@@ -7,6 +7,11 @@ import { LeadsScreen, type ScreenDataState } from '@/features/leads/leads-screen
 import { CompanyProfileScreen } from '@/features/companies/company-profile-screen.js';
 import { DealsKanbanScreen } from '@/features/deals/deals-kanban-screen.js';
 import { EmptyShowcaseScreen } from '@/features/empty/empty-screen.js';
+import { TasksScreen } from '@/features/tasks/tasks-screen.js';
+import { InboxScreen } from '@/features/inbox/inbox-screen.js';
+import { OutreachScreen } from '@/features/outreach/outreach-screen.js';
+import { ImportsDuplicatesScreen } from '@/features/data-quality/imports-duplicates-screen.js';
+import { ReportsIntelligenceScreen } from '@/features/reports/reports-intelligence-screen.js';
 import { DEFAULT_DEV_USER, type DevUser } from '@/lib/api-client.js';
 
 const queryClient = new QueryClient({
@@ -18,21 +23,27 @@ const queryClient = new QueryClient({
   },
 });
 
+const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
+  'login',
+  'leads',
+  'company',
+  'deals',
+  'tasks',
+  'inbox',
+  'outreach',
+  'imports',
+  'reports',
+  'empty',
+]);
+
 function readUrlState(): {
   screen: AppScreenId;
   palette: boolean;
   dataState: ScreenDataState;
 } {
   const params = new URLSearchParams(window.location.search);
-  const rawScreen = params.get('screen');
-  const screen: AppScreenId =
-    rawScreen === 'login' ||
-    rawScreen === 'leads' ||
-    rawScreen === 'company' ||
-    rawScreen === 'deals' ||
-    rawScreen === 'empty'
-      ? rawScreen
-      : 'leads';
+  const rawScreen = params.get('screen') as AppScreenId | null;
+  const screen: AppScreenId = rawScreen && VALID_SCREENS.has(rawScreen) ? rawScreen : 'leads';
   const palette = params.get('palette') === '1';
   const rawState = params.get('state');
   const dataState: ScreenDataState =
@@ -99,6 +110,11 @@ export function App() {
         {activeScreen === 'deals' && (
           <DealsKanbanScreen onOpenCompany={() => navigateScreen('company')} />
         )}
+        {activeScreen === 'tasks' && <TasksScreen />}
+        {activeScreen === 'inbox' && <InboxScreen />}
+        {activeScreen === 'outreach' && <OutreachScreen />}
+        {activeScreen === 'imports' && <ImportsDuplicatesScreen />}
+        {activeScreen === 'reports' && <ReportsIntelligenceScreen />}
         {activeScreen === 'empty' && (
           <EmptyShowcaseScreen onGoToLeads={() => navigateScreen('leads')} />
         )}
