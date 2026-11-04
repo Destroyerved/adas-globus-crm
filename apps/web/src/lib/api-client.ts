@@ -111,4 +111,36 @@ export const apiClient = {
       body: JSON.stringify(payload),
     });
   },
+  triggerN8nPipeline(payload: {
+    workflowId: 'wf_01_lead_sequence_enroll' | 'wf_02_marketing_campaign_dispatch';
+    contactId?: string;
+  }) {
+    return requestJson<{
+      workflowId: string;
+      webhookEventId: string;
+      webhookSignature: string;
+      webhookTimestamp: string;
+      complianceGate: {
+        sendable: boolean;
+        reasonCode: string;
+        reasonMessage: string;
+      };
+      enrollmentId: string | null;
+      messageSendId: string | null;
+      providerMessageId: string | null;
+      transportProvider: string;
+    }>('/api/v1/n8n/pipeline/trigger', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  createN8nToken(payload: { name: string; scopes?: string[] }) {
+    return requestJson<{ id: string; rawToken: string; tokenPrefix: string }>(
+      '/api/v1/n8n/api-tokens',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+  },
 };

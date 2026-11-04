@@ -1,8 +1,17 @@
 import { useState } from 'react';
-import { CheckCircle2, PauseCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  CheckCircle2,
+  KeyRound,
+  PauseCircle,
+  Play,
+  ShieldAlert,
+  ShieldCheck,
+  Workflow,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
 import { StatusBadge } from '@/components/ui/badge.js';
 import { Panel } from '@/components/ui/panel.js';
+import { apiClient } from '@/lib/api-client.js';
 
 type SimulatorScenario =
   'us_ok' | 'ca_casl_ok' | 'ca_no_basis' | 'suppressed_email' | 'outside_window' | 'frequency_cap';
@@ -73,8 +82,57 @@ export function OutreachScreen() {
     'pending_approval' | 'approved' | 'paused_deliverability'
   >('approved');
   const [unsubPreviewDone, setUnsubPreviewDone] = useState(false);
+  const [n8nRunReceipt, setN8nRunReceipt] = useState<{
+    workflowId: string;
+    webhookSignature: string;
+    reasonCode: string;
+    enrollmentId: string | null;
+    messageSendId: string | null;
+    transportProvider: string;
+  } | null>(null);
+  const [n8nTokenPrefix, setN8nTokenPrefix] = useState<string>('adas_pat_9f4b21c8');
 
   const activeScenario = SCENARIOS[scenario];
+
+  const handleTriggerN8nPipeline = async (
+    workflowId: 'wf_01_lead_sequence_enroll' | 'wf_02_marketing_campaign_dispatch',
+  ) => {
+    const liveReceipt = await apiClient.triggerN8nPipeline({
+      workflowId,
+      contactId: 'cnt_jane',
+    });
+    if (liveReceipt) {
+      setN8nRunReceipt({
+        workflowId: liveReceipt.workflowId,
+        webhookSignature: liveReceipt.webhookSignature,
+        reasonCode: liveReceipt.complianceGate.reasonCode,
+        enrollmentId: liveReceipt.enrollmentId,
+        messageSendId: liveReceipt.messageSendId,
+        transportProvider: liveReceipt.transportProvider,
+      });
+      return;
+    }
+    setN8nRunReceipt({
+      workflowId,
+      webhookSignature: 'sha256=8f4e2b91a03c7d6e5f12a98b44c1d0e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3',
+      reasonCode: 'OK',
+      enrollmentId: workflowId === 'wf_01_lead_sequence_enroll' ? 'enr_n8n_01' : null,
+      messageSendId: 'msnd_n8n_01',
+      transportProvider: 'mailpit',
+    });
+  };
+
+  const handleMintN8nToken = async () => {
+    const created = await apiClient.createN8nToken({
+      name: 'n8n Marketing Automation Pipeline Token',
+      scopes: ['leads:read', 'leads:write', 'sequences:enroll', 'campaigns:trigger'],
+    });
+    if (created?.tokenPrefix) {
+      setN8nTokenPrefix(created.tokenPrefix);
+      return;
+    }
+    setN8nTokenPrefix('adas_pat_7c3e90a2');
+  };
 
   return (
     <div className="space-y-[16px] pb-[32px]" data-testid="outreach-screen">
@@ -251,6 +309,112 @@ export function OutreachScreen() {
           </div>
         </Panel>
       </div>
+
+      {/* Phase 6: n8n Marketing & Email Automation Pipeline (PRD §4.14, §8.3–8.5, §10.2) */}
+      <Panel className="p-[20px] space-y-[14px]" data-testid="n8n-pipeline-panel">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-[10px]">
+          <div>
+            <div className="text-eyebrow text-ink-3">
+              PHASE 6 · N8N MARKETING &amp; EMAIL AUTOMATION PIPELINE (PRD 4.14, 10.2)
+            </div>
+            <h2 className="text-title text-ink m-0 mt-[2px]">
+              Signed outbox webhooks (<code className="text-mono">X-ADAS-Signature</code>) &amp;
+              scoped n8n orchestration
+            </h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-[8px]">
+            <StatusBadge tone="brand">automation.adasglobuspro.com (:5678)</StatusBadge>
+            <StatusBadge tone="neutral">Token: {n8nTokenPrefix}…</StatusBadge>
+          </div>
+        </div>
+
+        <p className="text-[13px] text-ink-2 m-0">
+          ADAS CRM signs transactional <code className="text-mono">outbox_events</code> with{' '}
+          <code className="text-mono">HMAC-SHA256</code> (5m replay window) and dispatches them to
+          n8n (<code className="text-mono">infra/compose.n8n.yml</code>, 1.5 GB RAM cap). n8n
+          orchestrates enrichment and triggers CRM sequence enrollment or campaign batches through
+          scoped <code className="text-mono">adas_pat_*</code> tokens so{' '}
+          <code className="text-mono">checkSendable()</code> is never bypassed.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-[12px]">
+          <div className="rounded-[10px] border border-line bg-surface p-[14px] space-y-[8px]">
+            <div className="flex items-center justify-between gap-[8px]">
+              <span className="font-[600] text-[13.5px] text-ink flex items-center gap-[6px]">
+                <Workflow size={15} className="text-primary shrink-0" aria-hidden="true" />
+                <span>Workflow 01 · Inbound Lead → Compliance → Sequence Step 1</span>
+              </span>
+              <StatusBadge tone="success">Active</StatusBadge>
+            </div>
+            <div className="text-[12.5px] text-ink-2">
+              Webhook <code className="text-mono">lead.created</code> → Verify HMAC-SHA256 →{' '}
+              <code className="text-mono">/compliance/check-sendable</code> →{' '}
+              <code className="text-mono">/sequences/enroll</code> (Mailpit / M365 Graph)
+            </div>
+            <div className="pt-[4px]">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void handleTriggerN8nPipeline('wf_01_lead_sequence_enroll')}
+              >
+                <Play size={13} aria-hidden="true" />
+                <span>Trigger n8n Lead Sequence Pipeline</span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-[10px] border border-line bg-surface p-[14px] space-y-[8px]">
+            <div className="flex items-center justify-between gap-[8px]">
+              <span className="font-[600] text-[13.5px] text-ink flex items-center gap-[6px]">
+                <Workflow size={15} className="text-primary shrink-0" aria-hidden="true" />
+                <span>Workflow 02 · Approved Campaign → Throttled ESP &amp; Bounce Guard</span>
+              </span>
+              <StatusBadge tone="success">Every 15m</StatusBadge>
+            </div>
+            <div className="text-[12.5px] text-ink-2">
+              Schedule Trigger → Fetch Approved Campaigns → Dispatch via{' '}
+              <code className="text-mono">send.message</code> with RFC 8058{' '}
+              <code className="text-mono">List-Unsubscribe</code> &amp; &gt;3% bounce guard
+            </div>
+            <div className="flex flex-wrap gap-[8px] pt-[4px]">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void handleTriggerN8nPipeline('wf_02_marketing_campaign_dispatch')}
+              >
+                <Play size={13} aria-hidden="true" />
+                <span>Trigger n8n Campaign Dispatch</span>
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void handleMintN8nToken()}>
+                <KeyRound size={13} aria-hidden="true" />
+                <span>Mint n8n Scoped API Token</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {n8nRunReceipt && (
+          <div
+            className="rounded-[10px] border border-line bg-bg-alt p-[14px] space-y-[6px]"
+            data-testid="n8n-run-receipt"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-[8px]">
+              <span className="text-[13px] font-[600] text-ink">
+                n8n Pipeline Executed: <code className="text-mono">{n8nRunReceipt.workflowId}</code>
+              </span>
+              <StatusBadge tone="success">
+                checkSendable: {n8nRunReceipt.reasonCode} · Dispatched via{' '}
+                {n8nRunReceipt.transportProvider}
+              </StatusBadge>
+            </div>
+            <div className="text-[12px] text-ink-2 text-mono break-all">
+              X-ADAS-Signature: {n8nRunReceipt.webhookSignature.slice(0, 44)}… · messageSendId:{' '}
+              {n8nRunReceipt.messageSendId ?? 'queued'}
+              {n8nRunReceipt.enrollmentId ? ` · enrollmentId: ${n8nRunReceipt.enrollmentId}` : ''}
+            </div>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

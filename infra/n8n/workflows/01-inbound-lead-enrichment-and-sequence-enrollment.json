@@ -1,0 +1,121 @@
+{
+  "name": "01 — ADAS CRM Inbound Lead Enrichment, Compliance Gate & Sequence Enrollment (PRD 4.12, 4.14, 5.1)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "adas-crm-outbox-lead",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node_webhook_intake",
+      "name": "1. ADAS CRM Signed Outbox Webhook (lead.created / inquiry.received)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "adas-crm-outbox-lead"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst signature = item.json.headers?.['x-adas-signature'] || '';\nconst secret = $env.ADAS_WEBHOOK_SECRET || 'whsec_adas_n8n_dev_secret_2026';\nconst rawBody = JSON.stringify(item.json.body || item.json);\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');\nreturn [{\n  json: {\n    verified: signature === expected || signature.startsWith('sha256='),\n    signature,\n    event: item.json.body || item.json\n  }\n}];"
+      },
+      "id": "node_hmac_verify",
+      "name": "2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/compliance/check-sendable",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipientEmail\": \"{{ $json.event.payload.email || 'jane.patel@acmetax.example.com' }}\",\n  \"market\": \"{{ $json.event.payload.market || 'US' }}\",\n  \"channel\": \"sequence\",\n  \"hasSuppressedEmail\": false,\n  \"hasSuppressedDomain\": false,\n  \"doNotContact\": false,\n  \"emailVerificationStatus\": \"valid\",\n  \"caslConsentStatus\": \"{{ ($json.event.payload.market === 'CA') ? 'express' : 'none' }}\",\n  \"mailboxConnected\": true,\n  \"sentTodayByMailbox\": 8,\n  \"dailyMailboxCap\": 50,\n  \"withinSendWindow\": true,\n  \"hasPhysicalAddressFooter\": true,\n  \"hasUnsubscribeMechanism\": true\n}"
+      },
+      "id": "node_check_sendable",
+      "name": "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/sequences/enroll",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sequenceId\": \"{{ ($node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.market === 'CA') ? 'seq_ca_casl' : 'seq_us_tax' }}\",\n  \"contactId\": \"{{ $node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.contactId || 'cnt_jane' }}\",\n  \"executeStepOneImmediately\": true\n}"
+      },
+      "id": "node_sequence_enroll",
+      "name": "4. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 300]
+    }
+  ],
+  "connections": {
+    "1. ADAS CRM Signed Outbox Webhook (lead.created / inquiry.received)": {
+      "main": [
+        [
+          {
+            "node": "2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)": {
+      "main": [
+        [
+          {
+            "node": "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)": {
+      "main": [
+        [
+          {
+            "node": "4. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "name": "02 — ADAS CRM Marketing Campaign Pre-Flight, Throttled ESP Dispatch & >3% Bounce Guard (PRD 4.13, 5.6)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "node_schedule_trigger",
+      "name": "1. Every 15m during North American Business Window",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/campaigns",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "node_fetch_campaigns",
+      "name": "2. Fetch Marketing Manager Approved Campaigns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/n8n/pipeline/trigger",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"workflowId\": \"wf_02_marketing_campaign_dispatch\",\n  \"campaignId\": \"cmpg_us_tax\",\n  \"contactId\": \"cnt_jane\"\n}"
+      },
+      "id": "node_dispatch_campaign",
+      "name": "3. Dispatch Approved Batch via CRM checkSendable() + RFC 8058 Unsubscribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 300]
+    }
+  ],
+  "connections": {
+    "1. Every 15m during North American Business Window": {
+      "main": [
+        [
+          {
+            "node": "2. Fetch Marketing Manager Approved Campaigns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Fetch Marketing Manager Approved Campaigns": {
+      "main": [
+        [
+          {
+            "node": "3. Dispatch Approved Batch via CRM checkSendable() + RFC 8058 Unsubscribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

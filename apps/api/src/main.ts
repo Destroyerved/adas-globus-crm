@@ -334,6 +334,60 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
+      if (method === 'POST' && pathname === '/api/v1/sequences/enroll') {
+        const body = await readJsonBody(req);
+        const enrolled = await outreach.enrollInSequence(user, body as never);
+        if (body['executeStepOneImmediately'] === true) {
+          const stepResult = await outreach.executeSequenceEnrollmentStep(enrolled.enrollmentId, {
+            bypassSendWindow: true,
+          });
+          res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(serializeJson({ ...enrolled, stepOneSend: stepResult }));
+          return;
+        }
+        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(enrolled));
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/n8n/pipeline/trigger') {
+        const body = await readJsonBody(req);
+        const result = await outreach.runN8nMarketingPipeline(user, {
+          workflowId:
+            body['workflowId'] === 'wf_02_marketing_campaign_dispatch'
+              ? 'wf_02_marketing_campaign_dispatch'
+              : 'wf_01_lead_sequence_enroll',
+          contactId: typeof body['contactId'] === 'string' ? body['contactId'] : undefined,
+          sequenceId: typeof body['sequenceId'] === 'string' ? body['sequenceId'] : undefined,
+          campaignId: typeof body['campaignId'] === 'string' ? body['campaignId'] : undefined,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(result));
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/n8n/webhooks/dispatch') {
+        const result = await intelligence.dispatchPendingOutboxEventsToWebhooks();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(result));
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/n8n/api-tokens') {
+        const body = await readJsonBody(req);
+        const tokenName =
+          typeof body['name'] === 'string' && body['name'].trim() !== ''
+            ? body['name'].trim()
+            : 'n8n Marketing Automation Service Token';
+        const scopes = Array.isArray(body['scopes'])
+          ? (body['scopes'] as string[])
+          : ['leads:read', 'leads:write', 'sequences:enroll', 'campaigns:trigger'];
+        const created = await intelligence.createApiToken(user, tokenName, scopes);
+        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(created));
+        return;
+      }
+
       if (method === 'GET' && pathname === '/api/v1/campaigns') {
         const items = await outreach.listCampaigns();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });

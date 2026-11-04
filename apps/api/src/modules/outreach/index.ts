@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import {
   CreateCampaignInputSchema,
   CreateSequenceInputSchema,
@@ -832,6 +832,135 @@ export class OutreachService {
       bounceRate,
       complaintRate,
       pausedReason,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 6: n8n Marketing & Email Automation Pipeline (PRD §4.14, §8.3, §8.4)
+  // -------------------------------------------------------------------------
+
+  async runN8nMarketingPipeline(
+    user: SessionUser,
+    input: {
+      workflowId: 'wf_01_lead_sequence_enroll' | 'wf_02_marketing_campaign_dispatch';
+      contactId?: string;
+      sequenceId?: string;
+      campaignId?: string;
+    },
+  ): Promise<{
+    workflowId: string;
+    webhookEventId: string;
+    webhookSignature: string;
+    webhookTimestamp: string;
+    complianceGate: {
+      sendable: boolean;
+      reasonCode: SendableReasonCode;
+      reasonMessage: string;
+    };
+    enrollmentId: string | null;
+    messageSendId: string | null;
+    providerMessageId: string | null;
+    transportProvider: string;
+  }> {
+    const contactId = input.contactId ?? 'cnt_jane';
+    const contactRes = await this.db.query<{
+      id: string;
+      primary_email: string;
+      market: 'US' | 'CA' | 'OTHER';
+    }>(`SELECT id, primary_email, market FROM contacts WHERE id = $1 LIMIT 1`, [contactId]);
+    const contact = contactRes.rows[0];
+    if (!contact) {
+      throw new NotFoundDomainError('Contact', contactId);
+    }
+
+    const webhookEventId = `evt_n8n_${randomUUID()}`;
+    const webhookTimestamp = new Date().toISOString();
+    const webhookPayload = JSON.stringify({
+      id: webhookEventId,
+      eventType:
+        input.workflowId === 'wf_01_lead_sequence_enroll' ? 'lead.created' : 'campaign.batch_ready',
+      timestamp: webhookTimestamp,
+      contactId: contact.id,
+      email: contact.primary_email,
+      market: contact.market,
+    });
+    const webhookSignature = `sha256=${createHmac('sha256', 'whsec_adas_n8n_dev_secret_2026')
+      .update(webhookPayload)
+      .digest('hex')}`;
+
+    await this.db.transaction(async (tx) => {
+      await this.db.addOutboxEvent(tx, {
+        id: webhookEventId,
+        eventType:
+          input.workflowId === 'wf_01_lead_sequence_enroll'
+            ? 'lead.created'
+            : 'campaign.batch_ready',
+        aggregateType: 'n8n_pipeline',
+        aggregateId: contact.id,
+        payload: {
+          workflowId: input.workflowId,
+          contactId: contact.id,
+          signature: webhookSignature,
+        },
+      });
+    });
+
+    if (input.workflowId === 'wf_01_lead_sequence_enroll') {
+      const sequenceId =
+        input.sequenceId ?? (contact.market === 'CA' ? 'seq_ca_casl' : 'seq_us_tax');
+      const enrolled = await this.enrollInSequence(user, {
+        sequenceId,
+        contactId: contact.id,
+        senderUserId: user.id,
+      });
+      const stepSend = await this.executeSequenceEnrollmentStep(enrolled.enrollmentId, {
+        bypassSendWindow: true,
+      });
+      return {
+        workflowId: input.workflowId,
+        webhookEventId,
+        webhookSignature,
+        webhookTimestamp,
+        complianceGate: {
+          sendable: stepSend.sent,
+          reasonCode: stepSend.reasonCode,
+          reasonMessage: stepSend.reasonMessage,
+        },
+        enrollmentId: enrolled.enrollmentId,
+        messageSendId: stepSend.messageSendId,
+        providerMessageId: stepSend.providerMessageId,
+        transportProvider: 'mailpit',
+      };
+    }
+
+    const campaignId = input.campaignId ?? 'cmpg_us_tax';
+    const sendResult = await this.executeSendMessageJob({
+      idempotencyKey: `n8n_cmp_${campaignId}_${contact.id}_${randomUUID()}`,
+      channel: 'campaign',
+      recipientEmail: contact.primary_email,
+      contactId: contact.id,
+      senderUserId: user.id,
+      campaignId,
+      subject: 'ADAS Globus Pro · 2026 CPA Busy-Season Pod Capacity Briefing',
+      bodyText:
+        'Review our dedicated US & Canadian CPA pod availability and 3-day free trial workpaper workflow.',
+      bypassSendWindow: true,
+    });
+
+    return {
+      workflowId: input.workflowId,
+      webhookEventId,
+      webhookSignature,
+      webhookTimestamp,
+      complianceGate: {
+        sendable: sendResult.sent,
+        reasonCode: sendResult.reasonCode,
+        reasonMessage: sendResult.reasonMessage,
+      },
+      enrollmentId: null,
+      messageSendId: sendResult.messageSendId,
+      providerMessageId: sendResult.providerMessageId,
+      transportProvider: 'mailpit',
     };
   }
 }

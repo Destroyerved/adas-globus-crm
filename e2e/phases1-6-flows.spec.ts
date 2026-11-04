@@ -156,6 +156,20 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
       page.locator('text=Unsubscribed immediately · All active sequences & campaigns stopped'),
     ).toBeVisible();
 
+    // Test Phase 6 n8n Marketing & Email Automation Pipeline (PRD §4.14)
+    await page.click('button:has-text("Trigger n8n Lead Sequence Pipeline")');
+    await expect(page.getByTestId('n8n-run-receipt')).toBeVisible();
+    await expect(page.getByTestId('n8n-run-receipt')).toContainText('wf_01_lead_sequence_enroll');
+    await expect(page.getByTestId('n8n-run-receipt')).toContainText('X-ADAS-Signature: sha256=');
+
+    await page.click('button:has-text("Trigger n8n Campaign Dispatch")');
+    await expect(page.getByTestId('n8n-run-receipt')).toContainText(
+      'wf_02_marketing_campaign_dispatch',
+    );
+
+    await page.click('button:has-text("Mint n8n Scoped API Token")');
+    await expect(page.getByTestId('n8n-pipeline-panel')).toContainText('Token: adas_pat_');
+
     // 4. Imports & Duplicates screen: execute import, rollback, merge, and undo merge
     await page.goto('/?screen=imports');
     await page.click('button:has-text("Execute Verified Import")');

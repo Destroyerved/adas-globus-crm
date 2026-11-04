@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:n8n": "docker compose -f infra/compose.dev.yml -f infra/compose.n8n.yml up -d",
     "dev:web": "pnpm --filter @adas/web dev",
     "dev:api": "pnpm --filter @adas/api dev",
     "db:migrate": "pnpm --filter @adas/api db:migrate",
