@@ -143,4 +143,43 @@ export const apiClient = {
       },
     );
   },
+  tailorOutreachEmail(payload: {
+    contactId?: string;
+    firstName?: string;
+    title?: string;
+    companyName?: string;
+    market?: Market;
+    city?: string;
+    stateProvince?: string;
+    staffBand?: string;
+    softwareStack?: string[];
+    servicesNeeded?: string[];
+  }) {
+    return requestJson<{
+      recipient: {
+        firstName: string;
+        title: string;
+        companyName: string;
+        market: 'US' | 'CA';
+        location: string;
+        staffBand: string;
+        softwareStack: string[];
+        servicesNeeded: string[];
+      };
+      subject: string;
+      bodyPlainText: string;
+      postalFooter: string;
+      deliverabilityCheck: {
+        spamRiskScore: number;
+        wordCount: number;
+        plainTextFirst: boolean;
+        openTrackingDisabled: boolean;
+        scheduledJitterMinutes: number;
+        verdict: 'INBOX_READY' | 'REVIEW_NEEDED';
+      };
+    }>('/api/v1/outreach/tailor-preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };

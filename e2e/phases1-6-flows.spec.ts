@@ -170,6 +170,23 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
     await page.click('button:has-text("Mint n8n Scoped API Token")');
     await expect(page.getByTestId('n8n-pipeline-panel')).toContainText('Token: adas_pat_');
 
+    // Test Anti-Spam Warm-Up Ramp Schedule & CPA Firmographic Email Tailoring (PRD §4.12, §5.4, §5.5)
+    await page.click('button:has-text("Week 1 (15/day)")');
+    await expect(page.getByTestId('warmup-deliverability-panel')).toContainText(
+      'Active Ramp: Week 1 · 15/day mailbox · 50/day subdomain (10/hr)',
+    );
+
+    await page.click('button:has-text("Canada Partner · CaseWare + TaxCycle (ON)")');
+    await expect(page.getByTestId('email-tailoring-panel')).toContainText(
+      'Northstar Chartered Accountants · CaseWare and TaxCycle capacity for T1/T2 season (Toronto)',
+    );
+    await expect(page.getByTestId('email-tailoring-panel')).toContainText(
+      'CA · Edmonton, AB Footer',
+    );
+    await expect(page.getByTestId('email-tailoring-panel')).toContainText(
+      '10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+    );
+
     // 4. Imports & Duplicates screen: execute import, rollback, merge, and undo merge
     await page.goto('/?screen=imports');
     await page.click('button:has-text("Execute Verified Import")');

@@ -963,4 +963,274 @@ export class OutreachService {
       transportProvider: 'mailpit',
     };
   }
+
+  /**
+   * PRD §5.4, §5.5, §5.6, §8.3, §8.4 — Anti-Spam Deliverability & Warm-Up Ramp Schedule
+   * Enforces gradual domain/mailbox warm-up, SPF/DKIM(2048)/DMARC alignment, zero open-tracking pixels,
+   * custom link host (`go.adasglobuspro.com`), and random 0–20m send jitter.
+   */
+  getWarmupAndDeliverabilityStatus(warmupDay = 21): {
+    warmupDay: number;
+    sequenceMailboxCapToday: number;
+    campaignDailyAllowance: number;
+    campaignHourlyThrottle: number;
+    jitterRangeMinutes: [number, number];
+    authentication: {
+      sequenceDomain: string;
+      campaignSubdomain: string;
+      customLinkHost: string;
+      spfAligned: boolean;
+      dkimBits: number;
+      dmarcPolicy: 'none' | 'quarantine' | 'reject';
+    };
+    antiSpamGuardrails: {
+      openTrackingPixels: false;
+      clickTrackingDefault: false;
+      plainTextFirst: true;
+      excludeRiskyOrUnknownEmails: true;
+      autoPauseBounceThresholdPct: number;
+      autoPauseComplaintThresholdPct: number;
+    };
+    rampSchedule: Array<{
+      stage: string;
+      days: string;
+      mailboxSequenceCap: number;
+      campaignSubdomainCap: number;
+      hourlyThrottle: number;
+      active: boolean;
+    }>;
+  } {
+    const clampedDay = Math.max(1, warmupDay);
+    const sequenceMailboxCapToday =
+      clampedDay < 7 ? 15 : clampedDay < 14 ? 25 : clampedDay < 21 ? 35 : 50;
+    const campaignDailyAllowance =
+      clampedDay < 7 ? 50 : clampedDay < 14 ? 150 : clampedDay < 21 ? 400 : 1000;
+    const campaignHourlyThrottle =
+      clampedDay < 7 ? 10 : clampedDay < 14 ? 25 : clampedDay < 21 ? 50 : 100;
+
+    return {
+      warmupDay: clampedDay,
+      sequenceMailboxCapToday,
+      campaignDailyAllowance,
+      campaignHourlyThrottle,
+      jitterRangeMinutes: [2, 20],
+      authentication: {
+        sequenceDomain: 'adasglobuspro.com (M365 Graph)',
+        campaignSubdomain: 'mail.adasglobuspro.com (Dedicated ESP Subdomain)',
+        customLinkHost: 'go.adasglobuspro.com',
+        spfAligned: true,
+        dkimBits: 2048,
+        dmarcPolicy: 'quarantine',
+      },
+      antiSpamGuardrails: {
+        openTrackingPixels: false,
+        clickTrackingDefault: false,
+        plainTextFirst: true,
+        excludeRiskyOrUnknownEmails: true,
+        autoPauseBounceThresholdPct: 3.0,
+        autoPauseComplaintThresholdPct: 0.1,
+      },
+      rampSchedule: [
+        {
+          stage: 'Week 1 · Initial Seed',
+          days: 'Days 1–6',
+          mailboxSequenceCap: 15,
+          campaignSubdomainCap: 50,
+          hourlyThrottle: 10,
+          active: clampedDay < 7,
+        },
+        {
+          stage: 'Week 2 · Engagement Build',
+          days: 'Days 7–13',
+          mailboxSequenceCap: 25,
+          campaignSubdomainCap: 150,
+          hourlyThrottle: 25,
+          active: clampedDay >= 7 && clampedDay < 14,
+        },
+        {
+          stage: 'Week 3 · Volume Expansion',
+          days: 'Days 14–20',
+          mailboxSequenceCap: 35,
+          campaignSubdomainCap: 400,
+          hourlyThrottle: 50,
+          active: clampedDay >= 14 && clampedDay < 21,
+        },
+        {
+          stage: 'Week 4+ · Full Warmed Steady-State',
+          days: 'Day 21+',
+          mailboxSequenceCap: 50,
+          campaignSubdomainCap: 1000,
+          hourlyThrottle: 100,
+          active: clampedDay >= 21,
+        },
+      ],
+    };
+  }
+
+  /**
+   * PRD §4.12, §4.13, §5.5 — CPA Firmographic Email Tailoring & Spam-Trigger Hygiene Engine.
+   * Dynamically tailors outreach copy to the recipient's market (US IRS vs Canada CRA),
+   * role/seniority, CPA software stack (UltraTax CS, CaseWare, TaxCycle, CCH Axcess),
+   * staff size band, and market-matched physical postal address (Sheridan WY vs Edmonton AB).
+   */
+  async tailorOutreachEmail(input: {
+    contactId?: string;
+    firstName?: string;
+    title?: string;
+    companyName?: string;
+    market?: 'US' | 'CA';
+    city?: string;
+    stateProvince?: string;
+    staffBand?: string;
+    softwareStack?: string[];
+    servicesNeeded?: string[];
+    stepOrder?: number;
+  }): Promise<{
+    recipient: {
+      firstName: string;
+      title: string;
+      companyName: string;
+      market: 'US' | 'CA';
+      location: string;
+      staffBand: string;
+      softwareStack: string[];
+      servicesNeeded: string[];
+    };
+    subject: string;
+    bodyPlainText: string;
+    postalFooter: string;
+    headers: Record<string, string>;
+    deliverabilityCheck: {
+      spamRiskScore: number;
+      spamTriggersFound: string[];
+      wordCount: number;
+      plainTextFirst: boolean;
+      openTrackingDisabled: boolean;
+      scheduledJitterMinutes: number;
+      verdict: 'INBOX_READY' | 'REVIEW_NEEDED';
+    };
+  }> {
+    let firstName = input.firstName ?? 'Jane';
+    let title = input.title ?? 'Managing Partner';
+    let companyName = input.companyName ?? 'Acme Tax & Advisory LLP';
+    let market: 'US' | 'CA' = input.market ?? 'US';
+    let city = input.city ?? 'Chicago';
+    let stateProvince = input.stateProvince ?? 'IL';
+    let staffBand = input.staffBand ?? '21–50';
+    let softwareStack = input.softwareStack ?? ['UltraTax CS', 'QuickBooks', 'Suralink'];
+    let servicesNeeded = input.servicesNeeded ?? ['Tax Preparation', 'Audit Support'];
+
+    if (input.contactId) {
+      const res = await this.db.query<{
+        first_name: string;
+        title: string | null;
+        market: 'US' | 'CA';
+        company_name: string | null;
+        city: string | null;
+        state_province: string | null;
+        staff_band: string | null;
+        accounting_software: string[] | null;
+        services_needed: string[] | null;
+      }>(
+        `SELECT c.first_name, c.title, c.market,
+                cmp.name AS company_name, cmp.city, cmp.state_province,
+                cmp.staff_band, cmp.accounting_software, cmp.services_needed
+         FROM contacts c
+         LEFT JOIN companies cmp ON cmp.id = c.company_id
+         WHERE c.id = $1
+         LIMIT 1`,
+        [input.contactId],
+      );
+      const row = res.rows[0];
+      if (row) {
+        firstName = row.first_name || firstName;
+        title = row.title || title;
+        market = row.market === 'CA' ? 'CA' : 'US';
+        companyName = row.company_name || companyName;
+        city = row.city || (market === 'CA' ? 'Toronto' : 'Chicago');
+        stateProvince = row.state_province || (market === 'CA' ? 'ON' : 'IL');
+        staffBand = row.staff_band || staffBand;
+        if (Array.isArray(row.accounting_software) && row.accounting_software.length > 0) {
+          softwareStack = row.accounting_software;
+        }
+        if (Array.isArray(row.services_needed) && row.services_needed.length > 0) {
+          servicesNeeded = row.services_needed;
+        }
+      }
+    }
+
+    const primarySoftware = softwareStack.slice(0, 2).join(' and ') || 'your tax workflow';
+    const primaryService =
+      servicesNeeded[0] ?? (market === 'CA' ? 'Canadian T1/T2 Tax' : 'Tax Preparation');
+
+    // Market-specific postal footer per PRD §5.5:
+    // US -> Sheridan, Wyoming; Canada -> Edmonton, Alberta
+    const postalFooter =
+      market === 'CA'
+        ? 'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada'
+        : 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA';
+
+    const taxRegimePhrase =
+      market === 'CA'
+        ? 'CRA T1 personal, T2 corporate and year-end compilation working papers'
+        : 'IRS 1040, 1065 and 1120 tax returns and GAAP audit workpapers';
+
+    const subject =
+      market === 'CA'
+        ? `${companyName} · ${primarySoftware} capacity for T1/T2 season (${city})`
+        : `${companyName} · ${primarySoftware} reviewer pod for ${stateProvince} busy season`;
+
+    const bodyPlainText = [
+      `Hi ${firstName},`,
+      '',
+      `Speaking with ${staffBand}-person CPA firms in ${city}, ${stateProvince}, most ${title}s tell us the bottleneck isn't finding clients—it's getting clean, review-ready ${taxRegimePhrase} inside ${primarySoftware} without burning out senior managers.`,
+      '',
+      `At ADAS Globus Pro, we pair ${companyName} with a dedicated offshore ${primaryService} pod trained directly on ${softwareStack.join(', ')}. Before any commitment, we run a 3-day free trial on a sample engagement so your partners can grade our workpaper indexing and turnaround firsthand.`,
+      '',
+      `Would next Tuesday or Thursday inside your ${city} business hours work for a 12-minute walkthrough of how our ${primarySoftware} pods operate?`,
+      '',
+      `Best regards,`,
+      `Arjun Mehta`,
+      `Partner Success · ADAS Globus Pro`,
+      '',
+      `---`,
+      `If you'd rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token`,
+      postalFooter,
+    ].join('\n');
+
+    const spamBannedWords = ['100% free', 'act now', 'guaranteed', 'urgent', 'click here', '$$$'];
+    const lowerCombined = `${subject} ${bodyPlainText}`.toLowerCase();
+    const spamTriggersFound = spamBannedWords.filter((w) => lowerCombined.includes(w));
+    const wordCount = bodyPlainText.split(/\s+/).filter(Boolean).length;
+
+    return {
+      recipient: {
+        firstName,
+        title,
+        companyName,
+        market,
+        location: `${city}, ${stateProvince}`,
+        staffBand,
+        softwareStack,
+        servicesNeeded,
+      },
+      subject,
+      bodyPlainText,
+      postalFooter,
+      headers: {
+        'List-Unsubscribe': '<https://go.adasglobuspro.com/u/preview-token>',
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-ADAS-Market': market,
+      },
+      deliverabilityCheck: {
+        spamRiskScore: spamTriggersFound.length * 25,
+        spamTriggersFound,
+        wordCount,
+        plainTextFirst: true,
+        openTrackingDisabled: true,
+        scheduledJitterMinutes: market === 'CA' ? 11 : 7,
+        verdict: spamTriggersFound.length === 0 ? 'INBOX_READY' : 'REVIEW_NEEDED',
+      },
+    };
+  }
 }

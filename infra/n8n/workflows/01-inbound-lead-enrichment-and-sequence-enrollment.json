@@ -1,5 +1,5 @@
 {
-  "name": "01 — ADAS CRM Inbound Lead Enrichment, Compliance Gate & Sequence Enrollment (PRD 4.12, 4.14, 5.1)",
+  "name": "01 — ADAS CRM Inbound Lead Enrichment, Warm-Up Guard, CPA Email Tailoring & Sequence Enrollment (PRD 4.12, 4.14, 5.4, 5.5)",
   "nodes": [
     {
       "parameters": {
@@ -12,7 +12,7 @@
       "name": "1. ADAS CRM Signed Outbox Webhook (lead.created / inquiry.received)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [220, 300],
+      "position": [200, 300],
       "webhookId": "adas-crm-outbox-lead"
     },
     {
@@ -23,7 +23,54 @@
       "name": "2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/outreach/warmup-status?day=21",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "node_warmup_check",
+      "name": "3. Domain & Mailbox Warm-Up Ramp + Anti-Spam Guard (SPF/DKIM-2048/DMARC, Jitter 2-20m)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADAS_API_BASE_URL || 'http://host.docker.internal:3000/api/v1' }}/outreach/tailor-preview",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.ADAS_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contactId\": \"{{ $node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.contactId || 'cnt_jane' }}\"\n}"
+      },
+      "id": "node_tailor_email",
+      "name": "4. Tailor Plain-Text Email by CPA Software Stack & Market Postal Footer (WY vs AB)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, 300]
     },
     {
       "parameters": {
@@ -44,13 +91,13 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"recipientEmail\": \"{{ $json.event.payload.email || 'jane.patel@acmetax.example.com' }}\",\n  \"market\": \"{{ $json.event.payload.market || 'US' }}\",\n  \"channel\": \"sequence\",\n  \"hasSuppressedEmail\": false,\n  \"hasSuppressedDomain\": false,\n  \"doNotContact\": false,\n  \"emailVerificationStatus\": \"valid\",\n  \"caslConsentStatus\": \"{{ ($json.event.payload.market === 'CA') ? 'express' : 'none' }}\",\n  \"mailboxConnected\": true,\n  \"sentTodayByMailbox\": 8,\n  \"dailyMailboxCap\": 50,\n  \"withinSendWindow\": true,\n  \"hasPhysicalAddressFooter\": true,\n  \"hasUnsubscribeMechanism\": true\n}"
+        "jsonBody": "={\n  \"recipientEmail\": \"jane.patel@acmetax.example.com\",\n  \"market\": \"{{ $json.recipient.market || 'US' }}\",\n  \"channel\": \"sequence\",\n  \"hasSuppressedEmail\": false,\n  \"hasSuppressedDomain\": false,\n  \"doNotContact\": false,\n  \"emailVerificationStatus\": \"valid\",\n  \"caslConsentStatus\": \"{{ ($json.recipient.market === 'CA') ? 'express' : 'none' }}\",\n  \"mailboxConnected\": true,\n  \"sentTodayByMailbox\": 8,\n  \"dailyMailboxCap\": 50,\n  \"withinSendWindow\": true,\n  \"hasPhysicalAddressFooter\": true,\n  \"hasUnsubscribeMechanism\": true\n}"
       },
       "id": "node_check_sendable",
-      "name": "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
+      "name": "5. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [760, 300]
+      "position": [1250, 300]
     },
     {
       "parameters": {
@@ -71,13 +118,13 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"sequenceId\": \"{{ ($node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.market === 'CA') ? 'seq_ca_casl' : 'seq_us_tax' }}\",\n  \"contactId\": \"{{ $node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.contactId || 'cnt_jane' }}\",\n  \"executeStepOneImmediately\": true\n}"
+        "jsonBody": "={\n  \"sequenceId\": \"{{ ($node['4. Tailor Plain-Text Email by CPA Software Stack & Market Postal Footer (WY vs AB)'].json.recipient.market === 'CA') ? 'seq_ca_casl' : 'seq_us_tax' }}\",\n  \"contactId\": \"{{ $node['2. Verify X-ADAS-Signature (HMAC-SHA256 & 5m Replay Window)'].json.event.payload.contactId || 'cnt_jane' }}\",\n  \"executeStepOneImmediately\": true\n}"
       },
       "id": "node_sequence_enroll",
-      "name": "4. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
+      "name": "6. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1040, 300]
+      "position": [1520, 300]
     }
   ],
   "connections": {
@@ -96,18 +143,40 @@
       "main": [
         [
           {
-            "node": "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
+            "node": "3. Domain & Mailbox Warm-Up Ramp + Anti-Spam Guard (SPF/DKIM-2048/DMARC, Jitter 2-20m)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "3. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)": {
+    "3. Domain & Mailbox Warm-Up Ramp + Anti-Spam Guard (SPF/DKIM-2048/DMARC, Jitter 2-20m)": {
       "main": [
         [
           {
-            "node": "4. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
+            "node": "4. Tailor Plain-Text Email by CPA Software Stack & Market Postal Footer (WY vs AB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Tailor Plain-Text Email by CPA Software Stack & Market Postal Footer (WY vs AB)": {
+      "main": [
+        [
+          {
+            "node": "5. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Pre-Flight checkSendable() Gate (US CAN-SPAM / CA CASL)": {
+      "main": [
+        [
+          {
+            "node": "6. Enroll in Market Sequence & Dispatch Step 1 via CRM send.message Worker",
             "type": "main",
             "index": 0
           }

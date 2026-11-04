@@ -91,8 +91,127 @@ export function OutreachScreen() {
     transportProvider: string;
   } | null>(null);
   const [n8nTokenPrefix, setN8nTokenPrefix] = useState<string>('adas_pat_9f4b21c8');
+  const [warmupWeek, setWarmupWeek] = useState<1 | 2 | 3 | 4>(4);
+  const [tailorProfileId, setTailorProfileId] = useState<'cnt_jane' | 'cnt_marcus' | 'cnt_elena'>(
+    'cnt_jane',
+  );
+  const [tailoredPreview, setTailoredPreview] = useState<{
+    recipientLabel: string;
+    market: 'US' | 'CA';
+    softwareStack: string[];
+    subject: string;
+    bodyPlainText: string;
+    postalFooter: string;
+    spamRiskScore: number;
+    jitterMinutes: number;
+    verdict: 'INBOX_READY' | 'REVIEW_NEEDED';
+  }>({
+    recipientLabel: 'Jane Patel · Managing Partner · Acme Tax & Advisory LLP (Chicago, IL)',
+    market: 'US',
+    softwareStack: ['UltraTax CS', 'QuickBooks', 'Suralink'],
+    subject: 'Acme Tax & Advisory LLP · UltraTax CS and QuickBooks reviewer pod for IL busy season',
+    bodyPlainText: [
+      'Hi Jane,',
+      '',
+      "Speaking with 21–50-person CPA firms in Chicago, IL, most Managing Partners tell us the bottleneck isn't finding clients—it's getting clean, review-ready IRS 1040, 1065 and 1120 tax returns and GAAP audit workpapers inside UltraTax CS and QuickBooks without burning out senior managers.",
+      '',
+      'At ADAS Globus Pro, we pair Acme Tax & Advisory LLP with a dedicated offshore Tax Preparation pod trained directly on UltraTax CS, QuickBooks, Suralink. Before any commitment, we run a 3-day free trial on a sample engagement so your partners can grade our workpaper indexing and turnaround firsthand.',
+      '',
+      'Would next Tuesday or Thursday inside your Chicago business hours work for a 12-minute walkthrough of how our UltraTax CS and QuickBooks pods operate?',
+      '',
+      'Best regards,',
+      'Arjun Mehta',
+      'Partner Success · ADAS Globus Pro',
+      '',
+      '---',
+      'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
+      'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+    ].join('\n'),
+    postalFooter: 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+    spamRiskScore: 0,
+    jitterMinutes: 7,
+    verdict: 'INBOX_READY',
+  });
 
   const activeScenario = SCENARIOS[scenario];
+
+  const handleSelectTailorProfile = async (contactId: 'cnt_jane' | 'cnt_marcus' | 'cnt_elena') => {
+    setTailorProfileId(contactId);
+    const live = await apiClient.tailorOutreachEmail({ contactId });
+    if (live) {
+      setTailoredPreview({
+        recipientLabel: `${live.recipient.firstName} · ${live.recipient.title} · ${live.recipient.companyName} (${live.recipient.location})`,
+        market: live.recipient.market,
+        softwareStack: live.recipient.softwareStack,
+        subject: live.subject,
+        bodyPlainText: live.bodyPlainText,
+        postalFooter: live.postalFooter,
+        spamRiskScore: live.deliverabilityCheck.spamRiskScore,
+        jitterMinutes: live.deliverabilityCheck.scheduledJitterMinutes,
+        verdict: live.deliverabilityCheck.verdict,
+      });
+      return;
+    }
+    if (contactId === 'cnt_marcus') {
+      setTailoredPreview({
+        recipientLabel:
+          'Marcus Vance · Tax Practice Leader · Northstar Chartered Accountants (Toronto, ON)',
+        market: 'CA',
+        softwareStack: ['CaseWare', 'TaxCycle', 'Xero'],
+        subject:
+          'Northstar Chartered Accountants · CaseWare and TaxCycle capacity for T1/T2 season (Toronto)',
+        bodyPlainText: [
+          'Hi Marcus,',
+          '',
+          "Speaking with 11–20-person CPA firms in Toronto, ON, most Tax Practice Leaders tell us the bottleneck isn't finding clients—it's getting clean, review-ready CRA T1 personal, T2 corporate and year-end compilation working papers inside CaseWare and TaxCycle without burning out senior managers.",
+          '',
+          'At ADAS Globus Pro, we pair Northstar Chartered Accountants with a dedicated offshore Canadian T1/T2 Tax pod trained directly on CaseWare, TaxCycle, Xero. Before any commitment, we run a 3-day free trial on a sample engagement so your partners can grade our workpaper indexing and turnaround firsthand.',
+          '',
+          'Would next Tuesday or Thursday inside your Toronto business hours work for a 12-minute walkthrough of how our CaseWare and TaxCycle pods operate?',
+          '',
+          'Best regards,',
+          'Arjun Mehta',
+          'Partner Success · ADAS Globus Pro',
+          '',
+          '---',
+          'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
+          'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+        ].join('\n'),
+        postalFooter: 'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+        spamRiskScore: 0,
+        jitterMinutes: 11,
+        verdict: 'INBOX_READY',
+      });
+    } else if (contactId === 'cnt_elena') {
+      setTailoredPreview({
+        recipientLabel: 'Elena Rostova · Audit Director · Ridgeway CPA Group (Austin, TX)',
+        market: 'US',
+        softwareStack: ['CCH Axcess', 'QuickBooks', 'Canopy'],
+        subject: 'Ridgeway CPA Group · CCH Axcess and QuickBooks reviewer pod for TX busy season',
+        bodyPlainText: [
+          'Hi Elena,',
+          '',
+          "Speaking with 51–100-person CPA firms in Austin, TX, most Audit Directors tell us the bottleneck isn't finding clients—it's getting clean, review-ready IRS 1040, 1065 and 1120 tax returns and GAAP audit workpapers inside CCH Axcess and QuickBooks without burning out senior managers.",
+          '',
+          'At ADAS Globus Pro, we pair Ridgeway CPA Group with a dedicated offshore Audit Support pod trained directly on CCH Axcess, QuickBooks, Canopy. Before any commitment, we run a 3-day free trial on a sample engagement so your partners can grade our workpaper indexing and turnaround firsthand.',
+          '',
+          'Would next Tuesday or Thursday inside your Austin business hours work for a 12-minute walkthrough of how our CCH Axcess and QuickBooks pods operate?',
+          '',
+          'Best regards,',
+          'Arjun Mehta',
+          'Partner Success · ADAS Globus Pro',
+          '',
+          '---',
+          'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
+          'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+        ].join('\n'),
+        postalFooter: 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+        spamRiskScore: 0,
+        jitterMinutes: 7,
+        verdict: 'INBOX_READY',
+      });
+    }
+  };
 
   const handleTriggerN8nPipeline = async (
     workflowId: 'wf_01_lead_sequence_enroll' | 'wf_02_marketing_campaign_dispatch',
@@ -415,6 +534,128 @@ export function OutreachScreen() {
           </div>
         )}
       </Panel>
+
+      {/* Anti-Spam Deliverability, Warm-Up Ramp Schedule & CPA Email Tailoring Studio (PRD §4.12, §5.4, §5.5) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
+        <Panel className="p-[20px] space-y-[14px]" data-testid="warmup-deliverability-panel">
+          <div className="flex flex-wrap items-center justify-between gap-[8px]">
+            <div>
+              <div className="text-eyebrow text-ink-3">
+                PRD 5.4, 5.6, 8.3 · ANTI-SPAM &amp; WARM-UP RAMP
+              </div>
+              <h2 className="text-title text-ink m-0 mt-[2px]">
+                Domain authentication &amp; gradual warm-up schedule
+              </h2>
+            </div>
+            <StatusBadge tone="success">SPF · DKIM 2048 · DMARC p=quarantine</StatusBadge>
+          </div>
+
+          <div className="flex flex-wrap gap-[8px]">
+            {([1, 2, 3, 4] as const).map((wk) => (
+              <Button
+                key={wk}
+                size="sm"
+                variant={warmupWeek === wk ? 'navy' : 'secondary'}
+                onClick={() => setWarmupWeek(wk)}
+              >
+                Week {wk} ({wk === 1 ? '15' : wk === 2 ? '25' : wk === 3 ? '35' : '50'}/day)
+              </Button>
+            ))}
+          </div>
+
+          <div className="rounded-[10px] border border-line bg-bg-alt p-[14px] space-y-[8px]">
+            <div className="flex flex-wrap items-center justify-between gap-[8px]">
+              <span className="text-[13.5px] font-[600] text-ink">
+                Active Ramp: Week {warmupWeek} ·{' '}
+                {warmupWeek === 1
+                  ? '15/day mailbox · 50/day subdomain (10/hr)'
+                  : warmupWeek === 2
+                    ? '25/day mailbox · 150/day subdomain (25/hr)'
+                    : warmupWeek === 3
+                      ? '35/day mailbox · 400/day subdomain (50/hr)'
+                      : '50/day mailbox · 1,000/day subdomain (100/hr)'}
+              </span>
+              <StatusBadge tone="brand">Jitter: 2–20m random spacing</StatusBadge>
+            </div>
+            <ul className="text-[12.5px] text-ink-2 m-0 pl-[18px] space-y-[4px]">
+              <li>
+                <strong>Zero tracking pixels:</strong> Open tracking is strictly OFF; plain-text
+                first so Gmail/M365 primary inbox filters never flag tracking beacons.
+              </li>
+              <li>
+                <strong>Reputation isolation:</strong> 1:1 sequences send via employee M365 Graph (
+                <code className="text-mono">adasglobuspro.com</code>); bulk campaigns use{' '}
+                <code className="text-mono">mail.adasglobuspro.com</code>; links use{' '}
+                <code className="text-mono">go.adasglobuspro.com</code>.
+              </li>
+              <li>
+                <strong>Verification &amp; bounce guard:</strong> Excludes{' '}
+                <code className="text-mono">unknown</code>/<code className="text-mono">risky</code>{' '}
+                addresses and auto-pauses at &gt;3.0% bounce or &gt;0.1% complaint.
+              </li>
+            </ul>
+          </div>
+        </Panel>
+
+        <Panel className="p-[20px] space-y-[14px]" data-testid="email-tailoring-panel">
+          <div className="flex flex-wrap items-center justify-between gap-[8px]">
+            <div>
+              <div className="text-eyebrow text-ink-3">
+                PRD 4.12, 5.5 · CPA FIRMOGRAPHIC EMAIL TAILORING
+              </div>
+              <h2 className="text-title text-ink m-0 mt-[2px]">
+                Software-stack &amp; market-tailored plain-text preview
+              </h2>
+            </div>
+            <StatusBadge tone="success">
+              Spam Risk: {tailoredPreview.spamRiskScore}/100 ({tailoredPreview.verdict})
+            </StatusBadge>
+          </div>
+
+          <div className="flex flex-wrap gap-[8px]">
+            <Button
+              size="sm"
+              variant={tailorProfileId === 'cnt_jane' ? 'navy' : 'secondary'}
+              onClick={() => void handleSelectTailorProfile('cnt_jane')}
+            >
+              US Partner · UltraTax CS (IL)
+            </Button>
+            <Button
+              size="sm"
+              variant={tailorProfileId === 'cnt_marcus' ? 'navy' : 'secondary'}
+              onClick={() => void handleSelectTailorProfile('cnt_marcus')}
+            >
+              Canada Partner · CaseWare + TaxCycle (ON)
+            </Button>
+            <Button
+              size="sm"
+              variant={tailorProfileId === 'cnt_elena' ? 'navy' : 'secondary'}
+              onClick={() => void handleSelectTailorProfile('cnt_elena')}
+            >
+              US Audit Director · CCH Axcess (TX)
+            </Button>
+          </div>
+
+          <div className="rounded-[10px] border border-line bg-surface p-[14px] space-y-[8px]">
+            <div className="flex flex-wrap items-center justify-between gap-[6px]">
+              <span className="text-[12.5px] font-[600] text-ink">
+                To: {tailoredPreview.recipientLabel}
+              </span>
+              <StatusBadge tone={tailoredPreview.market === 'CA' ? 'info' : 'brand'}>
+                {tailoredPreview.market === 'CA'
+                  ? 'CA · Edmonton, AB Footer'
+                  : 'US · Sheridan, WY Footer'}
+              </StatusBadge>
+            </div>
+            <div className="text-[13px] font-[600] text-ink border-b border-line pb-[6px]">
+              Subject: {tailoredPreview.subject}
+            </div>
+            <pre className="text-[12px] text-ink-2 whitespace-pre-wrap font-sans m-0 leading-[1.5]">
+              {tailoredPreview.bodyPlainText}
+            </pre>
+          </div>
+        </Panel>
+      </div>
     </div>
   );
 }

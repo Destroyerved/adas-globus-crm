@@ -388,6 +388,24 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
+      if (method === 'GET' && pathname === '/api/v1/outreach/warmup-status') {
+        const dayParam = Number(parsedUrl.searchParams.get('day') ?? '21');
+        const status = outreach.getWarmupAndDeliverabilityStatus(
+          Number.isFinite(dayParam) && dayParam > 0 ? dayParam : 21,
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(status));
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/outreach/tailor-preview') {
+        const body = await readJsonBody(req);
+        const preview = await outreach.tailorOutreachEmail(body as never);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(preview));
+        return;
+      }
+
       if (method === 'GET' && pathname === '/api/v1/campaigns') {
         const items = await outreach.listCampaigns();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
