@@ -20,7 +20,12 @@ const cscCandidates = [
 const cscPath = cscCandidates.find((candidate) => existsSync(candidate));
 
 if (!cscPath) {
-  console.error('Windows C# compiler (csc.exe) not found.');
+  if (existsSync(rootExe)) {
+    copyFileSync(rootExe, outExe);
+    console.log(`Non-Windows host detected; staged pre-built executable -> ${outExe}`);
+    process.exit(0);
+  }
+  console.error('Windows C# compiler (csc.exe) not found and no pre-built binary present.');
   process.exit(1);
 }
 

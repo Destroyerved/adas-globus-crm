@@ -1,0 +1,71 @@
+name: Release One-Click Deployer (.exe) & 16GB Server Bundle
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish GitHub Release (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production packages & compile ADAS-CRM-Deployer.exe
+        run: pnpm build
+
+      - name: Package 16GB Server Release Bundle (.zip)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-bundle | Out-Null
+          Copy-Item ADAS-CRM-Deployer.exe -Destination release-bundle/
+          Copy-Item README.md -Destination release-bundle/
+          Copy-Item .env.example -Destination release-bundle/
+          Copy-Item package.json -Destination release-bundle/
+          Copy-Item -Recurse infra -Destination release-bundle/infra
+          Compress-Archive -Path release-bundle/* -DestinationPath ADAS-CRM-16GB-Server-Bundle.zip -Force
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "ADAS CRM ${{ github.ref_name }} — One-Click 16GB Server & Cloudflare Deployer (.exe)"
+          body: |
+            ## ADAS CRM ${{ github.ref_name }} — Production Release (Phases 0–6 Complete)
+
+            ### Attached Release Assets
+            1. **`ADAS-CRM-Deployer.exe`** — Standalone Windows GUI + CLI One-Click Deployer with built-in **Cloudflare Tunnel (`crm.`, `go.`, `status.`, `automation.`)**, **Anti-Spam DNS (`SPF`, `2048-bit DKIM`, `DMARC p=quarantine`)**, and **16 GB RAM server provisioning**.
+            2. **`ADAS-CRM-16GB-Server-Bundle.zip`** — Complete deployment bundle including `ADAS-CRM-Deployer.exe`, `infra/compose.prod.yml` (16 GB RAM tuned), `infra/postgres/postgresql.16gb.conf`, and `infra/n8n/workflows/` (Workflows 01 & 02).
+
+            ### Quick Start on Your 16 GB Server
+            ```powershell
+            # Option A: Double-click ADAS-CRM-Deployer.exe (GUI Mode)
+            # Option B: Headless CLI Provision + Start
+            .\ADAS-CRM-Deployer.exe --start-service --domain yourdomain.com
+            ```
+          files: |
+            ADAS-CRM-Deployer.exe
+            ADAS-CRM-16GB-Server-Bundle.zip
