@@ -174,4 +174,147 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
     await page.click('button:has-text("Report in CAD (FX 1.3514)")');
     await expect(page.locator('text=CA$25,119/mo')).toBeVisible();
   });
+
+  test('full end-to-end interactive user journey across Login, Topbar, Leads, Conversion, Bulk Actions, Company 360 Tabs & Deals Kanban', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // 1. Login Screen: test break-glass validation & dev persona login
+    await page.goto('/?screen=login');
+    await page.click('button:has-text("Admin sign-in (break-glass)")');
+    await page.click('button:has-text("Sign in with break-glass account")');
+    await expect(
+      page.locator(
+        'text=Enter your break-glass admin email, password and 6-digit authenticator code.',
+      ),
+    ).toBeVisible();
+
+    // Prove dev login persona selector is compiled out of production builds (AGENTS.md §6)
+    await expect(page.locator('#dev-user-select')).toHaveCount(0);
+    await page.click('[data-testid="microsoft-signin-btn"]');
+    await expect(page.getByTestId('leads-screen')).toBeVisible();
+
+    // 2. Top Bar Notifications popover & Sidebar collapse/expand
+    await page.click('button[aria-label="Notifications (2 unread)"]');
+    await expect(page.locator('div[role="dialog"][aria-label="Notifications"]')).toBeVisible();
+    await page.click('button:has-text("Mark all read")');
+    await expect(page.locator('text=Notifications (0 unread)')).toBeVisible();
+    await page.click('button[aria-label="Notifications (0 unread)"]');
+
+    await page.click('button[aria-label="Collapse sidebar"]');
+    await expect(page.locator('button[aria-label="Expand sidebar"]')).toBeVisible();
+    await page.click('button[aria-label="Expand sidebar"]');
+    await expect(page.locator('button[aria-label="Collapse sidebar"]')).toBeVisible();
+
+    // 3. Leads Screen: create a new lead, convert a lead, sort, and run bulk actions
+    await page.click('button:has-text("New lead")');
+    await page.fill('input[aria-label="Contact full name"]', 'Nadia Kowalski');
+    await page.fill(
+      'input[aria-label="CPA firm name"]',
+      'Maple Leaf Chartered Professional Accountants',
+    );
+    await page.fill('input[aria-label="Work email"]', 'n.kowalski@mapleleafcpa.example.ca');
+    await page.selectOption('select[aria-label="Lead market"]', 'CA');
+    await page.click('button:has-text("Save lead")');
+    await expect(
+      page.locator('text=Nadia Kowalski · Maple Leaf Chartered Professional Accountants'),
+    ).toBeVisible();
+
+    // Convert the newly created lead into Company + Contact + Deal + 3-Day Free Trial tasks
+    await page.locator('button:has-text("Convert")').first().click();
+    await expect(
+      page.locator('text=Created Company, Contact, Deal & 3-day free trial check-in tasks'),
+    ).toBeVisible();
+
+    // Bulk action bar: Assign, Change status, Add tag, Export
+    await page.locator('[data-testid="bulk-action-bar"] button:has-text("Assign")').click();
+    await expect(page.locator('text=Assigned 2 selected leads to Priya Nair.')).toBeVisible();
+
+    await page.locator('[data-testid="bulk-action-bar"] button:has-text("Change status")').click();
+    await expect(
+      page.locator('text=Updated status to Qualified for 2 selected leads.'),
+    ).toBeVisible();
+
+    await page.locator('[data-testid="bulk-action-bar"] button:has-text("Export")').click();
+    await expect(
+      page.locator('text=Exported 2 selected leads to CSV (audit log entry recorded).'),
+    ).toBeVisible();
+
+    // 4. Company 360 Profile: inline edit, all 6 tabs, and quick-log call composer
+    await page.goto('/?screen=company');
+    const desktopRail = page.locator('aside[aria-label="About company"]');
+    await desktopRail.locator('button[aria-label^="Edit staff size:"]').click();
+    await desktopRail.locator('input[aria-label="Edit staff size"]').fill('51–100');
+    await desktopRail.locator('input[aria-label="Edit staff size"]').press('Enter');
+    await expect(
+      desktopRail.locator('button[aria-label="Edit staff size: 51–100 staff"]'),
+    ).toBeVisible();
+
+    // Switch through Overview, Contacts, Deals, Notes, History tabs
+    await page.click('button[role="tab"]:has-text("Overview")');
+    await expect(page.locator('text=Firmographic & compliance overview')).toBeVisible();
+
+    await page.click('button[role="tab"]:has-text("Contacts (3)")');
+    await expect(page.locator('text=Associated contacts (3)')).toBeVisible();
+
+    await page.click('button[role="tab"]:has-text("Deals (2)")');
+    await expect(page.locator('text=Firm recurring deals (2)')).toBeVisible();
+
+    await page.click('button[role="tab"]:has-text("Notes (3)")');
+    await expect(page.locator('text=Pinned partner notes (3)')).toBeVisible();
+
+    await page.click('button[role="tab"]:has-text("History")');
+    await expect(page.locator('text=Field-level record history (PRD 7.3)')).toBeVisible();
+
+    // Log call via header button + quick-log composer
+    await page.click('button:has-text("Log call")');
+    await page.fill(
+      'input[aria-label="Log a call"]',
+      'Reviewed Suralink workpaper indexing with Jane Patel',
+    );
+    await page.click('button:has-text("Save call")');
+    await expect(
+      page.locator('text=Reviewed Suralink workpaper indexing with Jane Patel'),
+    ).toBeVisible();
+
+    // 5. Deals Kanban Board: create new CAD deal & move card via keyboard
+    await page.goto('/?screen=deals');
+    await page.click('button:has-text("New deal")');
+    await page.fill('input[aria-label="Deal CPA firm name"]', 'Boreal Tax LLP');
+    await page.fill('input[aria-label="Deal pod name"]', 'T2 Corporate Tax Pod (2 FTE)');
+    await page.fill('input[aria-label="Monthly recurring value"]', '7500');
+    await page.selectOption('select[aria-label="Deal currency"]', 'CAD');
+    await page.click('button:has-text("Save deal")');
+    await expect(page.getByRole('button', { name: 'Boreal Tax LLP' })).toBeVisible();
+    await expect(page.locator('text=CA$7.5k/mo')).toBeVisible();
+
+    // 6. Full-stack live API verification via Vite /api proxy -> @adas/api -> PostgreSQL 17
+    const healthRes = await page.request.get('/api/v1/health');
+    expect(healthRes.ok()).toBe(true);
+    const healthJson = (await healthRes.json()) as { status: string; service: string };
+    expect(healthJson.status).toBe('ok');
+    expect(healthJson.service).toBe('adas-crm-api');
+
+    const intakeRes = await page.request.post('/api/v1/public/inquiries', {
+      data: {
+        name: 'Claire Fontaine',
+        email: 'c.fontaine@fontainecpa.example.ca',
+        firm: 'Fontaine & Associés CPA',
+        country: 'CA',
+        services: ['Canadian T1/T2 Tax'],
+        software: ['TaxCycle'],
+        sourcePage: '/ca/offshore-tax-staffing',
+      },
+    });
+    expect(intakeRes.ok()).toBe(true);
+    const intakeJson = (await intakeRes.json()) as { accepted: boolean; leadId: string };
+    expect(intakeJson.accepted).toBe(true);
+    expect(intakeJson.leadId).toBeTruthy();
+
+    const rollupRes = await page.request.get('/api/v1/reports/pipeline-rollup?currency=USD', {
+      headers: { 'x-dev-user-id': 'usr_admin_1' },
+    });
+    expect(rollupRes.ok()).toBe(true);
+  });
 });

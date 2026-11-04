@@ -76,7 +76,10 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         });
       }
 
-      if (method === 'GET' && (pathname === '/healthz' || pathname === '/api/v1/healthz')) {
+      if (
+        method === 'GET' &&
+        (pathname === '/healthz' || pathname === '/api/v1/healthz' || pathname === '/api/v1/health')
+      ) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
           serializeJson({
@@ -399,8 +402,11 @@ const isMainModule =
   process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 
 if (isMainModule) {
-  const { server, logger, env } = createAppServer();
-  server.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'ADAS CRM API listening');
-  });
+  const { server, logger, env, db } = createAppServer();
+  void (async () => {
+    await db.ensureInitialized();
+    server.listen(env.PORT, () => {
+      logger.info({ port: env.PORT, env: env.NODE_ENV }, 'ADAS CRM API listening');
+    });
+  })();
 }

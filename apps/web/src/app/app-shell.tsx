@@ -110,6 +110,8 @@ export function AppShell({
   });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(2);
   const [scrolled, setScrolled] = useState(false);
   const gChordRef = useRef<boolean>(false);
 
@@ -463,6 +465,7 @@ export function AppShell({
                       ['New lead', 'leads'],
                       ['New company', 'company'],
                       ['New deal', 'deals'],
+                      ['New task', 'tasks'],
                     ] as const
                   ).map(([label, target]) => (
                     <button
@@ -482,13 +485,73 @@ export function AppShell({
               )}
             </div>
 
-            <button
-              type="button"
-              aria-label="Notifications (2 unread)"
-              className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-transparent hover:bg-bg-alt text-ink-2 hover:text-ink cursor-pointer border-0"
-            >
-              <Bell size={18} strokeWidth={1.6} aria-hidden="true" />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setNotificationsOpen((prev) => !prev)}
+                aria-expanded={notificationsOpen}
+                aria-label={`Notifications (${unreadNotifications} unread)`}
+                className="relative inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-transparent hover:bg-bg-alt text-ink-2 hover:text-ink cursor-pointer border-0"
+              >
+                <Bell size={18} strokeWidth={1.6} aria-hidden="true" />
+                {unreadNotifications > 0 && (
+                  <span
+                    className="absolute top-[5px] right-[5px] h-[7px] w-[7px] rounded-pill bg-primary"
+                    aria-hidden="true"
+                  />
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Notifications"
+                  style={{ boxShadow: 'var(--shadow-pop)' }}
+                  className="absolute right-0 mt-[6px] w-[320px] rounded-[10px] bg-surface border border-line p-[12px] z-40 space-y-[10px]"
+                >
+                  <div className="flex items-center justify-between border-b border-line pb-[8px]">
+                    <span className="text-[13px] font-semibold text-ink">
+                      Notifications ({unreadNotifications} unread)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setUnreadNotifications(0)}
+                      className="text-[12px] font-semibold text-primary-ink hover:underline bg-transparent border-0 p-0 cursor-pointer"
+                    >
+                      Mark all read
+                    </button>
+                  </div>
+                  <div className="space-y-[8px] text-[13px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotificationsOpen(false);
+                        onNavigate('tasks');
+                      }}
+                      className="w-full text-left p-[8px] rounded-[8px] bg-bg-alt hover:bg-tint border-0 cursor-pointer"
+                    >
+                      <div className="font-semibold text-ink">15m Website SLA: Jane Patel</div>
+                      <div className="text-[12px] text-ink-2">
+                        Acme Tax &amp; Advisory LLP · 11m remaining
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotificationsOpen(false);
+                        onNavigate('inbox');
+                      }}
+                      className="w-full text-left p-[8px] rounded-[8px] bg-bg-alt hover:bg-tint border-0 cursor-pointer"
+                    >
+                      <div className="font-semibold text-ink">Inbound reply received</div>
+                      <div className="text-[12px] text-ink-2">
+                        Jane Patel replied · Sequence auto-stopped
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               type="button"

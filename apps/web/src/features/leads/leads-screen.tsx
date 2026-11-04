@@ -23,7 +23,12 @@ import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
 import { AddFilterChip, FilterChip } from '@/components/ui/chip.js';
 import { Input } from '@/components/ui/input.js';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/state-views.js';
-import { SYNTHETIC_LEADS, SYNTHETIC_LEADS_TOTAL } from '@/lib/synthetic-data.js';
+import { apiClient } from '@/lib/api-client.js';
+import {
+  SYNTHETIC_LEADS,
+  SYNTHETIC_LEADS_TOTAL,
+  type SyntheticLeadRow,
+} from '@/lib/synthetic-data.js';
 
 export type ScreenDataState = 'loaded' | 'empty' | 'loading' | 'error';
 
@@ -40,6 +45,7 @@ export function LeadsScreen({
   initialSelectedIds = ['lead_01', 'lead_02'],
   onOpenCompany,
 }: LeadsScreenProps) {
+  const [leadsList, setLeadsList] = useState<SyntheticLeadRow[]>(SYNTHETIC_LEADS);
   const [viewTab, setViewTab] = useState<'all' | 'mine' | 'website' | 'unassigned'>('all');
   const [dataState, setDataState] = useState<ScreenDataState>(initialState);
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
@@ -47,6 +53,13 @@ export function LeadsScreen({
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds);
+  const [sortAsc, setSortAsc] = useState<boolean | null>(null);
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const [newLeadContact, setNewLeadContact] = useState('');
+  const [newLeadFirm, setNewLeadFirm] = useState('');
+  const [newLeadEmail, setNewLeadEmail] = useState('');
+  const [newLeadMarket, setNewLeadMarket] = useState<Market>('US');
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -77,7 +90,7 @@ export function LeadsScreen({
     if (dataState === 'empty') {
       return [];
     }
-    return SYNTHETIC_LEADS.filter((lead) => {
+    const base = leadsList.filter((lead) => {
       if (viewTab === 'mine' && lead.ownerName !== 'Arjun Mehta') {
         return false;
       }
@@ -101,7 +114,71 @@ export function LeadsScreen({
       }
       return true;
     });
-  }, [dataState, viewTab, marketFilter, statusFilter, searchQuery]);
+    if (sortAsc === null) {
+      return base;
+    }
+    return [...base].sort((a, b) =>
+      sortAsc
+        ? a.contactName.localeCompare(b.contactName)
+        : b.contactName.localeCompare(a.contactName),
+    );
+  }, [leadsList, dataState, viewTab, marketFilter, statusFilter, searchQuery, sortAsc]);
+
+  const handleCreateLead = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLeadContact.trim() || !newLeadFirm.trim() || !newLeadEmail.trim()) {
+      return;
+    }
+    const created: SyntheticLeadRow = {
+      id: `lead_${Date.now()}`,
+      companyId: 'comp_01',
+      contactName: newLeadContact.trim(),
+      contactTitle: 'Managing Partner',
+      companyName: newLeadFirm.trim(),
+      email: newLeadEmail.trim().toLowerCase(),
+      market: newLeadMarket,
+      firmSize: '21-50',
+      software: ['UltraTax CS'],
+      status: 'New',
+      statusTone: 'info',
+      source: 'Manual entry',
+      ownerName: 'Arjun Mehta',
+      ownerInitials: 'AM',
+      lastContactedAt: '2026-11-04T14:25:00Z',
+      nextFollowUpAt: '2026-11-05T15:00:00Z',
+      overdueFollowUp: false,
+    };
+    setLeadsList((prev) => [created, ...prev]);
+    void apiClient.createLead({
+      firstName: newLeadContact.trim(),
+      email: newLeadEmail.trim().toLowerCase(),
+      companyName: newLeadFirm.trim(),
+      market: newLeadMarket,
+      source: 'Manual entry',
+    });
+    setNewLeadContact('');
+    setNewLeadFirm('');
+    setNewLeadEmail('');
+    setNewLeadOpen(false);
+    setActionNotice(
+      `Created lead ${created.contactName} (${created.companyName}) in ${created.market} pipeline.`,
+    );
+  };
+
+  const handleConvertLead = (lead: SyntheticLeadRow) => {
+    setLeadsList((prev) =>
+      prev.map((row) =>
+        row.id === lead.id ? { ...row, status: 'Converted', statusTone: 'success' } : row,
+      ),
+    );
+    void apiClient.convertLead(lead.id, {
+      dealName: `${lead.companyName} — 3-Day Free Trial Pod`,
+      startTrial: true,
+    });
+    setActionNotice(
+      `Converted ${lead.contactName} (${lead.companyName}) → Created Company, Contact, Deal & 3-day free trial check-in tasks (Day 1, Day 2, Day 3).`,
+    );
+  };
 
   const allVisibleSelected =
     filteredLeads.length > 0 && filteredLeads.every((row) => selectedIds.includes(row.id));
@@ -140,12 +217,87 @@ export function LeadsScreen({
             <Upload size={16} strokeWidth={1.6} aria-hidden="true" />
             <span>Import leads</span>
           </Button>
-          <Button variant="primary">
+          <Button variant="primary" onClick={() => setNewLeadOpen((prev) => !prev)}>
             <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
             <span>New lead</span>
           </Button>
         </div>
       </div>
+
+      {actionNotice && (
+        <div
+          role="status"
+          className="rounded-[10px] border border-line bg-tint px-[16px] py-[10px] text-[13.5px] text-primary-ink flex items-center justify-between gap-[12px]"
+        >
+          <span>{actionNotice}</span>
+          <button
+            type="button"
+            onClick={() => setActionNotice(null)}
+            aria-label="Dismiss notification"
+            className="text-primary-ink bg-transparent border-0 cursor-pointer p-0"
+          >
+            <X size={15} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {newLeadOpen && (
+        <form
+          onSubmit={handleCreateLead}
+          aria-label="Create new lead"
+          className="bg-surface border border-line rounded-[10px] p-[16px] space-y-[12px]"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-title text-ink m-0">New qualification lead</h2>
+            <button
+              type="button"
+              onClick={() => setNewLeadOpen(false)}
+              aria-label="Close new lead form"
+              className="text-ink-3 hover:text-ink bg-transparent border-0 cursor-pointer"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-[10px]">
+            <Input
+              placeholder="Contact full name"
+              aria-label="Contact full name"
+              value={newLeadContact}
+              onChange={(e) => setNewLeadContact(e.target.value)}
+              required
+            />
+            <Input
+              placeholder="CPA firm name"
+              aria-label="CPA firm name"
+              value={newLeadFirm}
+              onChange={(e) => setNewLeadFirm(e.target.value)}
+              required
+            />
+            <Input
+              type="email"
+              placeholder="Work email"
+              aria-label="Work email"
+              value={newLeadEmail}
+              onChange={(e) => setNewLeadEmail(e.target.value)}
+              required
+            />
+            <div className="flex items-center gap-[8px]">
+              <select
+                aria-label="Lead market"
+                value={newLeadMarket}
+                onChange={(e) => setNewLeadMarket(e.target.value as Market)}
+                className="h-[36px] rounded-[8px] border border-line-field bg-surface px-[10px] text-[14px] text-ink"
+              >
+                <option value="US">US (CAN-SPAM)</option>
+                <option value="CA">CA (CASL)</option>
+              </select>
+              <Button type="submit" variant="primary" size="md">
+                Save lead
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
 
       {/* View tabs (DESIGN.md §5.3) */}
       <div
@@ -360,10 +512,14 @@ export function LeadsScreen({
                     />
                   </th>
                   <th scope="col" className="px-[12px] min-w-[240px]">
-                    <span className="inline-flex items-center gap-[4px]">
+                    <button
+                      type="button"
+                      onClick={() => setSortAsc((prev) => (prev === null ? true : !prev))}
+                      className="inline-flex items-center gap-[4px] bg-transparent border-0 p-0 text-label text-ink-3 hover:text-ink cursor-pointer"
+                    >
                       <span>Name · Firm</span>
                       <ArrowUpDown size={13} strokeWidth={1.6} aria-hidden="true" />
-                    </span>
+                    </button>
                   </th>
                   <th scope="col" className="px-[12px] w-[80px]">
                     Market
@@ -475,15 +631,26 @@ export function LeadsScreen({
                           <span className="text-ink-3">—</span>
                         )}
                       </td>
-                      <td className="pr-[16px] text-right">
-                        <button
-                          type="button"
-                          onClick={() => onOpenCompany(lead.companyId)}
-                          aria-label={`More actions for ${lead.contactName}`}
-                          className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill text-ink-2 hover:bg-bg-alt hover:text-ink cursor-pointer border-0 bg-transparent"
-                        >
-                          <MoreHorizontal size={16} strokeWidth={1.6} aria-hidden="true" />
-                        </button>
+                      <td className="pr-[16px] text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-[4px]">
+                          {lead.status !== 'Converted' && (
+                            <button
+                              type="button"
+                              onClick={() => handleConvertLead(lead)}
+                              className="h-[26px] px-[8px] rounded-pill bg-tint text-primary-ink hover:bg-primary hover:text-primary-foreground text-[12px] font-semibold cursor-pointer border-0 transition-colors"
+                            >
+                              Convert
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onOpenCompany(lead.companyId)}
+                            aria-label={`More actions for ${lead.contactName}`}
+                            className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill text-ink-2 hover:bg-bg-alt hover:text-ink cursor-pointer border-0 bg-transparent"
+                          >
+                            <MoreHorizontal size={16} strokeWidth={1.6} aria-hidden="true" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -511,24 +678,56 @@ export function LeadsScreen({
           </span>
           <button
             type="button"
+            onClick={() => {
+              setLeadsList((prev) =>
+                prev.map((row) =>
+                  selectedIds.includes(row.id)
+                    ? { ...row, ownerName: 'Priya Nair', ownerInitials: 'PN' }
+                    : row,
+                ),
+              );
+              setActionNotice(`Assigned ${selectedIds.length} selected leads to Priya Nair.`);
+            }}
             className="h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
           >
             Assign
           </button>
           <button
             type="button"
+            onClick={() => {
+              setLeadsList((prev) =>
+                prev.map((row) =>
+                  selectedIds.includes(row.id)
+                    ? { ...row, status: 'Qualified', statusTone: 'success' }
+                    : row,
+                ),
+              );
+              setActionNotice(
+                `Updated status to Qualified for ${selectedIds.length} selected leads.`,
+              );
+            }}
             className="h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
           >
             Change status
           </button>
           <button
             type="button"
+            onClick={() =>
+              setActionNotice(
+                `Tagged ${selectedIds.length} selected leads with "2027 Tax Season Pod".`,
+              )
+            }
             className="hidden sm:inline-flex items-center h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
           >
             Add tag
           </button>
           <button
             type="button"
+            onClick={() =>
+              setActionNotice(
+                `Exported ${selectedIds.length} selected leads to CSV (audit log entry recorded).`,
+              )
+            }
             className="hidden md:inline-flex items-center gap-[5px] h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
           >
             <Download size={14} strokeWidth={1.6} aria-hidden="true" />

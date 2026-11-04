@@ -291,6 +291,7 @@ export function CompanyProfileScreen({ onOpenDeals }: CompanyProfileScreenProps)
             <Button
               variant="outline"
               onClick={() => {
+                setActiveTab('activity');
                 setQuickLogType('call');
               }}
             >
@@ -382,6 +383,141 @@ export function CompanyProfileScreen({ onOpenDeals }: CompanyProfileScreenProps)
               ))}
             </div>
           </div>
+
+          {activeTab === 'overview' && (
+            <Panel title="Firmographic & compliance overview" padded>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-[14px] text-[13.5px]">
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="text-ink-3 text-[12px]">Normalized domain</div>
+                  <div className="font-semibold text-ink mt-[2px]">{company.domain}</div>
+                </div>
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="text-ink-3 text-[12px]">Staff size band</div>
+                  <div className="font-semibold text-ink mt-[2px]">{sizeBand} staff</div>
+                </div>
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="text-ink-3 text-[12px]">Tax &amp; accounting stack</div>
+                  <div className="font-semibold text-ink mt-[2px]">
+                    {company.software.join(' · ')}
+                  </div>
+                </div>
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="text-ink-3 text-[12px]">CAN-SPAM / CASL marketing basis</div>
+                  <div className="font-semibold text-ink mt-[2px]">{company.marketingBasis}</div>
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === 'contacts' && (
+            <Panel title="Associated contacts (3)" padded>
+              <div className="divide-y divide-line">
+                {company.contacts.map((ct) => (
+                  <div
+                    key={ct.id}
+                    className="py-[12px] first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-[8px]"
+                  >
+                    <div>
+                      <div className="font-semibold text-ink text-[14px]">{ct.name}</div>
+                      <div className="text-body-sm text-ink-2">
+                        {ct.title} · {ct.email} · {ct.phone}
+                      </div>
+                    </div>
+                    <StatusBadge tone={ct.verificationTone}>{ct.verificationStatus}</StatusBadge>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === 'deals' && (
+            <Panel title="Firm recurring deals (2)" padded>
+              <div className="divide-y divide-line">
+                {company.deals.map((deal) => (
+                  <div
+                    key={deal.id}
+                    className="py-[12px] first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-[8px]"
+                  >
+                    <div>
+                      <div className="font-semibold text-ink text-[14px]">{deal.name}</div>
+                      <div className="text-body-sm text-ink-2">
+                        {deal.fteCount} · {deal.engagementModel}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-[8px]">
+                      <StatusBadge tone="brand">{deal.stage}</StatusBadge>
+                      <span className="font-semibold text-ink tabular-nums">
+                        {formatMoney(
+                          { amountMinor: deal.monthlyValueMinor, currency: deal.currency },
+                          { perMonth: true },
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === 'notes' && (
+            <Panel title="Pinned partner notes (3)" padded>
+              <div className="space-y-[10px] text-[13.5px]">
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="font-semibold text-ink">
+                    1040 &amp; 1120S UltraTax CS workflow requirements
+                  </div>
+                  <p className="text-ink-2 mt-[4px] mb-0">
+                    Partner Jane Patel requires all workpapers indexed in Suralink with two-level
+                    preparer sign-off before partner review.
+                  </p>
+                </div>
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="font-semibold text-ink">Citrix VDI onboarding window</div>
+                  <p className="text-ink-2 mt-[4px] mb-0">
+                    IT administrator Grant Miller provisions Citrix credentials 24h before the 3-day
+                    free trial start date.
+                  </p>
+                </div>
+                <div className="p-[12px] rounded-[8px] border border-line bg-bg-alt">
+                  <div className="font-semibold text-ink">Busy season expansion target</div>
+                  <p className="text-ink-2 mt-[4px] mb-0">
+                    Potential expansion from 3 FTE to 6 FTE in January if trial accuracy exceeds
+                    98%.
+                  </p>
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {activeTab === 'history' && (
+            <Panel title="Field-level record history (PRD 7.3)" padded>
+              <div className="divide-y divide-line text-[13px]">
+                <div className="py-[10px] first:pt-0 flex items-center justify-between gap-[8px]">
+                  <span>
+                    <strong className="font-semibold text-ink">Ved Shah</strong> updated{' '}
+                    <code className="text-mono">size_band</code>: <code>11-20</code> →{' '}
+                    <code>{sizeBand}</code>
+                  </span>
+                  <span className="text-ink-3 tabular-nums">Today · 2:10 pm</span>
+                </div>
+                <div className="py-[10px] flex items-center justify-between gap-[8px]">
+                  <span>
+                    <strong className="font-semibold text-ink">Arjun Mehta</strong> updated{' '}
+                    <code className="text-mono">account_status</code>: <code>Lead</code> →{' '}
+                    <code>Prospect</code>
+                  </span>
+                  <span className="text-ink-3 tabular-nums">Yesterday · 11:15 am</span>
+                </div>
+                <div className="py-[10px] last:pb-0 flex items-center justify-between gap-[8px]">
+                  <span>
+                    <strong className="font-semibold text-ink">System (Intake)</strong> recorded{' '}
+                    <code className="text-mono">consent_status</code>: <code>implied_inquiry</code>
+                  </span>
+                  <span className="text-ink-3 tabular-nums">2 Nov 2026</span>
+                </div>
+              </div>
+            </Panel>
+          )}
 
           {/* Quick-log bar (DESIGN.md §6.10: Note · Call · Meeting · Email · Task) */}
           <Panel padded>

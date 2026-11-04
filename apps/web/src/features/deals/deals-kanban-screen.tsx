@@ -8,10 +8,11 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { CheckCircle2, ClockAlert, Plus, Trophy, XCircle } from 'lucide-react';
-import { formatMoney } from '@adas/shared';
+import { CheckCircle2, ClockAlert, Plus, Trophy, X, XCircle } from 'lucide-react';
+import { formatMoney, type Currency, type Market } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
+import { Input } from '@/components/ui/input.js';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/state-views.js';
 import {
   INITIAL_KANBAN_DEALS,
@@ -241,6 +242,39 @@ export function DealsKanbanScreen({ onOpenCompany }: DealsKanbanScreenProps) {
   const [pipelineTab, setPipelineTab] = useState<'new_business' | 'expansion'>('new_business');
   const [grabbedDealId, setGrabbedDealId] = useState<string | null>(null);
   const [liveAnnouncement, setLiveAnnouncement] = useState('');
+  const [newDealOpen, setNewDealOpen] = useState(false);
+  const [newDealFirm, setNewDealFirm] = useState('');
+  const [newDealTitle, setNewDealTitle] = useState('');
+  const [newDealMonthlyMajor, setNewDealMonthlyMajor] = useState('5600');
+  const [newDealCurrency, setNewDealCurrency] = useState<Currency>('USD');
+  const [newDealMarket, setNewDealMarket] = useState<Market>('US');
+
+  const handleCreateDeal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDealFirm.trim() || !newDealTitle.trim()) {
+      return;
+    }
+    const parsedMajor = Number(newDealMonthlyMajor) || 5600;
+    const created: SyntheticDealCard = {
+      id: `deal_${Date.now()}`,
+      stageId: 'stage_new',
+      companyName: newDealFirm.trim(),
+      dealName: newDealTitle.trim(),
+      monthlyValueMinor: BigInt(Math.round(parsedMajor * 100)),
+      currency: newDealCurrency,
+      termMonths: 12,
+      market: newDealMarket,
+      fteLabel: '2.0 FTE',
+      engagementModel: 'Full-time',
+      ownerName: 'Arjun Mehta',
+      ownerInitials: 'AM',
+    };
+    setDeals((prev) => [created, ...prev]);
+    setNewDealFirm('');
+    setNewDealTitle('');
+    setNewDealOpen(false);
+    setLiveAnnouncement(`Created deal ${created.dealName} for ${created.companyName}.`);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -348,12 +382,74 @@ export function DealsKanbanScreen({ onOpenCompany }: DealsKanbanScreenProps) {
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-[8px]">
-          <Button variant="primary">
+          <Button variant="primary" onClick={() => setNewDealOpen((prev) => !prev)}>
             <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
             <span>New deal</span>
           </Button>
         </div>
       </div>
+
+      {newDealOpen && (
+        <form
+          onSubmit={handleCreateDeal}
+          aria-label="Create new deal"
+          className="bg-surface border border-line rounded-[10px] p-[16px] space-y-[12px]"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-title text-ink m-0">New recurring staffing opportunity</h2>
+            <button
+              type="button"
+              onClick={() => setNewDealOpen(false)}
+              aria-label="Close new deal form"
+              className="text-ink-3 hover:text-ink bg-transparent border-0 cursor-pointer"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-[10px]">
+            <Input
+              placeholder="CPA firm name"
+              aria-label="Deal CPA firm name"
+              value={newDealFirm}
+              onChange={(e) => setNewDealFirm(e.target.value)}
+              required
+            />
+            <Input
+              placeholder="Deal / pod name (e.g. 2 FTE Tax Pod)"
+              aria-label="Deal pod name"
+              value={newDealTitle}
+              onChange={(e) => setNewDealTitle(e.target.value)}
+              required
+            />
+            <Input
+              type="number"
+              placeholder="Monthly value"
+              aria-label="Monthly recurring value"
+              value={newDealMonthlyMajor}
+              onChange={(e) => setNewDealMonthlyMajor(e.target.value)}
+              required
+            />
+            <div className="flex items-center gap-[8px]">
+              <select
+                aria-label="Deal currency"
+                value={newDealCurrency}
+                onChange={(e) => {
+                  const curr = e.target.value as Currency;
+                  setNewDealCurrency(curr);
+                  setNewDealMarket(curr === 'CAD' ? 'CA' : 'US');
+                }}
+                className="h-[36px] rounded-[8px] border border-line-field bg-surface px-[10px] text-[14px] text-ink"
+              >
+                <option value="USD">USD (US)</option>
+                <option value="CAD">CAD (CA)</option>
+              </select>
+              <Button type="submit" variant="primary" size="md">
+                Save deal
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
 
       {/* Pipeline tabs + state preview switcher */}
       <div className="flex flex-wrap items-center justify-between gap-[12px] border-b border-line">

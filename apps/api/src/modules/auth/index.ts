@@ -56,6 +56,12 @@ export class AuthAndUsersService {
   }
 
   async resolveSessionUser(userId = 'usr_mgr_1'): Promise<SessionUser> {
+    const aliasMap: Record<string, string> = {
+      usr_01: 'usr_admin_1',
+      usr_02: 'usr_mgr_1',
+      usr_03: 'usr_bdr_1',
+    };
+    const resolvedUserId = aliasMap[userId] ?? userId;
     const res = await this.db.query<{
       id: string;
       email: string;
@@ -69,7 +75,7 @@ export class AuthAndUsersService {
        FROM users u
        JOIN roles r ON r.id = u.role_id
        WHERE u.id = $1 LIMIT 1`,
-      [userId],
+      [resolvedUserId],
     );
 
     const row = res.rows[0];
