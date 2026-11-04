@@ -12,7 +12,7 @@ export function ImportsDuplicatesScreen() {
     <div className="space-y-[16px] pb-[32px]" data-testid="imports-duplicates-screen">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="kicker mb-[4px]">Data hygiene & cutover (PRD 4.8, 4.9, 10)</div>
+          <div className="kicker mb-[4px]">Data hygiene & cutover</div>
           <h1 className="text-display text-ink m-0">
             <strong>Imports</strong>{' '}
             <span className="text-ink-3 font-light tabular-nums">
@@ -25,7 +25,7 @@ export function ImportsDuplicatesScreen() {
           </p>
         </div>
 
-        <StatusBadge tone="brand">Suppression always wins (A13)</StatusBadge>
+        <StatusBadge tone="brand">Suppression always wins</StatusBadge>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
@@ -33,7 +33,7 @@ export function ImportsDuplicatesScreen() {
         <Panel className="p-[20px] space-y-[14px]">
           <div className="flex items-center justify-between gap-[8px]">
             <div>
-              <div className="text-eyebrow text-ink-3">PRD 4.9 · CSV IMPORT ENGINE (A5)</div>
+              <div className="text-eyebrow text-ink-3">CSV IMPORT ENGINE</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">Dry-run preview &amp; rollback</h2>
             </div>
             <StatusBadge
@@ -88,7 +88,7 @@ export function ImportsDuplicatesScreen() {
         <Panel className="p-[20px] space-y-[14px]">
           <div className="flex items-center justify-between gap-[8px]">
             <div>
-              <div className="text-eyebrow text-ink-3">PRD 4.8 · DUPLICATE REVIEW QUEUE (A6)</div>
+              <div className="text-eyebrow text-ink-3">DUPLICATE REVIEW QUEUE</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">Contact merge with snapshot undo</h2>
             </div>
             <StatusBadge tone={mergeState === 'merged' ? 'success' : 'neutral'}>
@@ -127,7 +127,7 @@ export function ImportsDuplicatesScreen() {
       <Panel className="p-[20px] space-y-[12px]">
         <div className="flex flex-wrap items-center justify-between gap-[8px]">
           <div>
-            <div className="text-eyebrow text-ink-3">PRD 10 · ZOHO BIGIN MIGRATION & CUTOVER</div>
+            <div className="text-eyebrow text-ink-3">ZOHO BIGIN MIGRATION & CUTOVER</div>
             <h2 className="text-title text-ink m-0 mt-[2px]">
               Bigin staging dry-run &amp; reconciliation
             </h2>

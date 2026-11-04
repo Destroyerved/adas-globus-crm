@@ -11,6 +11,7 @@ import {
 } from '@adas/shared';
 import { isWithinSendWindow } from '../../platform/calendar/index.js';
 import { type DatabaseService, sha256Hex, type DbTx } from '../../platform/db/index.js';
+import { NotFoundDomainError } from '../../platform/errors/index.js';
 import { extractDomainFromEmail, normalizeEmail } from '../../platform/normalize/index.js';
 import { requireCapability } from '../../platform/scope/index.js';
 
@@ -463,6 +464,26 @@ export class ComplianceService {
   }
 
   /**
+   * Read-only lookup for the GET confirmation page. Never changes state, because
+   * mail security scanners open links automatically (PRD §8.6).
+   */
+  async describeUnsubscribeToken(
+    token: string,
+  ): Promise<{ maskedEmail: string; alreadyUnsubscribed: boolean }> {
+    const res = await this.db.query<{ email: string; used_at: string | null }>(
+      `SELECT email, used_at FROM unsubscribe_tokens WHERE token = $1 LIMIT 1`,
+      [token],
+    );
+    const row = res.rows[0];
+    if (!row) {
+      throw new NotFoundDomainError('Unsubscribe link', 'token');
+    }
+    const [local = '', domain = ''] = row.email.split('@');
+    const maskedEmail = `${local.slice(0, 1)}${'*'.repeat(Math.max(1, local.length - 1))}@${domain}`;
+    return { maskedEmail, alreadyUnsubscribed: row.used_at !== null };
+  }
+
+  /**
    * PRD §5.4 (A17) — Public one-click RFC 8058 unsubscribe and preference center.
    * Never requires login.
    */
@@ -482,7 +503,7 @@ export class ComplianceService {
 
     const found = tokenRow.rows[0];
     if (!found) {
-      throw new Error('Unsubscribe token not found');
+      throw new NotFoundDomainError('Unsubscribe link', 'token');
     }
 
     const result = await this.db.transaction(async (tx) => {

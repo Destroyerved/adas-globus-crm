@@ -70,6 +70,11 @@ Stop, explain the options briefly, give your recommendation, and wait before you
 - **Never use floats for money** or naive local times for anything stored.
 - **Never use raw hex colours** in components. Use tokens from `DESIGN.md`.
 - **Never disable a lint rule or test,** or use `--no-verify`, to get a check to pass. Fix the cause.
+- **Never run the app on an in-memory or embedded database.** PGlite is allowed in unit and integration tests only. The running API uses PostgreSQL through `DATABASE_URL`, and data must survive a restart.
+- **Never show demo data in product screens.** Screens read and write through the API. Synthetic data lives only in the seed script and tests. Never hide a failed request behind fallback data: show the error state.
+- **Never fake a connector.** A connector (Microsoft Entra, Microsoft Graph, the email provider, Apollo, Bookings, n8n) counts as built only when it calls the provider's real API, with sandbox or test credentials if needed. Mailpit is for catching outbound mail in development, not a stand-in for a provider. If credentials are missing, stop and ask (section 4).
+- **Never put spec references in the UI.** No "PRD 4.12", "§5", "(A19)", "Phase 6" or "simulate" buttons in anything a user sees. Keep references in code comments, tests and commit messages.
+- **Never tick an item you couldn't verify where it says.** Production items need production; owner and counsel sign-offs need the owner. Write "built, not verified in production" instead.
 
 ## 6. Stack and commands
 
@@ -179,6 +184,7 @@ A change is done when all of these hold:
 - [ ] `pnpm check` passes, and `pnpm test:e2e` passes for UI flows.
 - [ ] `PROGRESS.md` is updated; ADR, runbook, README and `.env.example` are updated where relevant.
 - [ ] No secrets, no real personal data, no new `TODO` without an entry in `PROGRESS.md`.
+- [ ] The feature works end to end in the running app: data entered in the UI is still there after a page reload **and** an API restart.
 
 ## 13. First session (Phase 0)
 

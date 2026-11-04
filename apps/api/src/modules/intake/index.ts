@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebsiteInquiryPayloadSchema, type Market, type WebsiteInquiryPayload } from '@adas/shared';
+import { addBusinessDays } from '../../platform/calendar/index.js';
 import { type DatabaseService } from '../../platform/db/index.js';
 import {
   extractDomainFromEmail,
@@ -20,6 +21,64 @@ export interface WebsiteInquiryResult {
   assignedUserId: string | null;
 }
 
+const CA_PROVINCES = new Set(
+  [
+    'alberta',
+    'british columbia',
+    'manitoba',
+    'new brunswick',
+    'newfoundland and labrador',
+    'northwest territories',
+    'nova scotia',
+    'nunavut',
+    'ontario',
+    'prince edward island',
+    'quebec',
+    'québec',
+    'saskatchewan',
+    'yukon',
+    'multiple provinces',
+  ].map((p) => p.toLowerCase()),
+);
+
+function toList(value: string | string[] | null | undefined): string[] {
+  if (Array.isArray(value)) return value.map((v) => v.trim()).filter(Boolean);
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * The live website forms never send `formType`. When it is missing, the payload came from
+ * adasglobuspro.com, so infer the form and treat the contact form's `website` field as the
+ * hidden honeypot it is there (PRD §4.10).
+ */
+function readWebsiteShape(raw: Record<string, unknown>): {
+  fromWebsite: boolean;
+  formType: 'trial' | 'contact';
+} {
+  const fromWebsite = raw['formType'] === undefined;
+  const looksLikeContact = 'location' in raw || 'interests' in raw;
+  return { fromWebsite, formType: looksLikeContact && !('need' in raw) ? 'contact' : 'trial' };
+}
+
+function marketFrom(
+  country: string | null | undefined,
+  location: string | null | undefined,
+): Market {
+  const c = country?.trim().toUpperCase();
+  if (c === 'CA' || c === 'CANADA') return 'CA';
+  if (c === 'US' || c === 'USA' || c === 'UNITED STATES') return 'US';
+  const loc = location?.trim().toLowerCase();
+  if (loc && CA_PROVINCES.has(loc)) return 'CA';
+  if (loc === 'outside the u.s. and canada') return 'OTHER';
+  return 'US';
+}
+
 export class WebsiteIntakeService {
   private roundRobinIndex = 0;
 
@@ -29,10 +88,20 @@ export class WebsiteIntakeService {
    * PRD §4.10 (A1 & A2) — Public website inquiry intake endpoint handler.
    */
   async handlePublicInquiry(rawPayload: WebsiteInquiryPayload): Promise<WebsiteInquiryResult> {
-    const payload = WebsiteInquiryPayloadSchema.parse(rawPayload);
+    const raw = (rawPayload ?? {}) as unknown as Record<string, unknown>;
+    const shape = readWebsiteShape(raw);
+    const payload = WebsiteInquiryPayloadSchema.parse(
+      shape.fromWebsite ? { ...raw, formType: shape.formType } : raw,
+    );
+    // On the website's contact form, `website` is the honeypot, not the firm's site.
+    const websiteHoneypot = shape.fromWebsite ? (payload.website ?? '').trim() : '';
+    if (shape.fromWebsite) {
+      payload.website = null;
+    }
 
     // 1. Honeypot check: silently accept and drop spam bots
     if (
+      websiteHoneypot !== '' ||
       (payload.company_website_hp && payload.company_website_hp.trim() !== '') ||
       (payload._gotcha && payload._gotcha.trim() !== '')
     ) {
@@ -53,10 +122,11 @@ export class WebsiteIntakeService {
       throw new Error('Invalid email in inquiry payload');
     }
 
-    const market: Market =
-      payload.country?.toUpperCase() === 'CA' || payload.country?.toUpperCase() === 'CANADA'
-        ? 'CA'
-        : 'US';
+    const market: Market = marketFrom(payload.country, payload.location);
+    const location = payload.location?.trim() || null;
+    const isSpecificRegion =
+      location !== null && !/^(multiple|both|outside)/i.test(location) && location !== '';
+    const stateProvince = payload.stateProvince ?? (isSpecificRegion ? location : null);
     const emailDomain = extractDomainFromEmail(cleanEmail);
     const webDomain = payload.website ? normalizeDomain(payload.website) : emailDomain;
     const isFreeMail = webDomain ? isFreeMailDomain(webDomain) : true;
@@ -77,16 +147,13 @@ export class WebsiteIntakeService {
       ? normalizePhone(payload.phone, market === 'CA' ? 'CA' : 'US')
       : null;
 
-    const servicesList = Array.isArray(payload.services)
-      ? payload.services
-      : payload.services
-        ? [payload.services]
-        : ['Tax Preparation'];
-    const softwareList = Array.isArray(payload.software)
-      ? payload.software
-      : payload.software
-        ? [payload.software]
-        : [];
+    // Services come from `services` (API callers), the trial form's `need`, or the contact
+    // form's `interests`. Nothing is invented when the visitor didn't say.
+    const needList = payload.need && !/^not sure/i.test(payload.need) ? [payload.need.trim()] : [];
+    const servicesList = [
+      ...new Set([...toList(payload.services), ...needList, ...toList(payload.interests)]),
+    ];
+    const softwareList = toList(payload.software);
 
     return this.db.transaction(async (tx) => {
       // 2. Check repeat submission within 24 hours for an open lead (PRD §4.10 A1)
@@ -178,7 +245,7 @@ export class WebsiteIntakeService {
               corporateDomain,
               `https://${corporateDomain}`,
               market,
-              payload.stateProvince ?? null,
+              stateProvince,
               payload.staffSize ?? '11–20',
               assignedUserId,
               teamId,
@@ -203,7 +270,7 @@ export class WebsiteIntakeService {
           `INSERT INTO contacts (
              id, company_id, first_name, last_name, full_name, title,
              primary_email, phone_e164, market, owner_user_id, team_id, email_verification_status
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'valid')`,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'unknown')`,
           [
             contactId,
             companyId,
@@ -220,7 +287,7 @@ export class WebsiteIntakeService {
         );
         await tx.query(
           `INSERT INTO contact_emails (id, contact_id, email, is_primary, verification_status)
-           VALUES ($1, $2, $3, TRUE, 'valid')
+           VALUES ($1, $2, $3, TRUE, 'unknown')
            ON CONFLICT (email) DO NOTHING`,
           [`ce_${randomUUID()}`, contactId, cleanEmail],
         );
@@ -253,7 +320,7 @@ export class WebsiteIntakeService {
           corporateDomain ? `https://${corporateDomain}` : null,
           payload.role ?? 'Partner',
           market,
-          payload.stateProvince ?? null,
+          stateProvince,
           payload.staffSize ?? '11–20',
           sourceLabel,
           JSON.stringify(servicesList),
@@ -268,8 +335,34 @@ export class WebsiteIntakeService {
         ],
       );
 
-      // 7. Record Consent (CASL 6-month implied_inquiry for CA; express for US website inquiry)
-      const consentBasis = market === 'CA' ? 'implied_inquiry' : 'express';
+      // 6b. Keep what the visitor wrote on the lead's timeline, so the owner can reply to it.
+      const inquiryDetail = [
+        payload.need ? `Need: ${payload.need}` : null,
+        toList(payload.interests).length
+          ? `Interested in: ${toList(payload.interests).join(', ')}`
+          : null,
+        softwareList.length ? `Software: ${softwareList.join(', ')}` : null,
+        location ? `Location: ${location}` : null,
+        payload.message ? `Message: ${payload.message}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      await tx.query(
+        `INSERT INTO activities (id, entity_type, entity_id, company_id, contact_id, lead_id, activity_type, title, detail)
+         VALUES ($1, 'lead', $2, $3, $4, $2, 'website_inquiry', $5, $6)`,
+        [
+          `act_${randomUUID()}`,
+          leadId,
+          companyId,
+          contactId,
+          `Website ${payload.formType} form submitted`,
+          inquiryDetail || 'No details given on the form.',
+        ],
+      );
+
+      // 7. Record consent evidence. An inquiry is implied consent, not express consent
+      // (PRD §5.3). CASL limits it to 6 months; the U.S. has no expiry.
+      const consentBasis = 'implied_inquiry';
       await tx.query(
         `INSERT INTO consent_records (
            id, email, contact_id, market, basis, status, source, proof_text, captured_at, expires_at
@@ -288,7 +381,10 @@ export class WebsiteIntakeService {
         ],
       );
 
-      // 8. Create 15-minute First-Response SLA Task (PRD §4.10 A1)
+      // 8. "Reply to website inquiry" task, due one business day later in the prospect's
+      // market calendar: the website promises a reply within one business day (PRD §4.10).
+      const prospectZone = market === 'CA' ? 'America/Toronto' : 'America/New_York';
+      const slaDueAt = addBusinessDays(new Date(), 1, prospectZone, market === 'CA' ? 'CA' : 'US');
       const slaTaskId = `tsk_sla_${randomUUID()}`;
       await tx.query(
         `INSERT INTO tasks (
@@ -297,17 +393,18 @@ export class WebsiteIntakeService {
            assignee_user_id, team_id, lead_id, company_id, contact_id
          ) VALUES (
            $1, $2, 'sla_first_response', 'urgent', 'open',
-           NOW() + INTERVAL '15 minutes', NOW() + INTERVAL '15 minutes', FALSE,
+           $8, $8, FALSE,
            $3, $4, $5, $6, $7
          )`,
         [
           slaTaskId,
-          `First response SLA (15m): ${firstName} ${lastName} (${firmName ?? cleanEmail})`,
+          `Reply to website inquiry: ${firstName} ${lastName} (${firmName ?? cleanEmail})`,
           assignedUserId,
           teamId,
           leadId,
           companyId,
           contactId,
+          slaDueAt.toISOString(),
         ],
       );
 

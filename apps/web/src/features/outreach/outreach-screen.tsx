@@ -125,9 +125,9 @@ export function OutreachScreen() {
       '',
       '---',
       'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
-      'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+      'ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA',
     ].join('\n'),
-    postalFooter: 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+    postalFooter: 'ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA',
     spamRiskScore: 0,
     jitterMinutes: 7,
     verdict: 'INBOX_READY',
@@ -215,9 +215,9 @@ export function OutreachScreen() {
           '',
           '---',
           'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
-          'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+          'ADAS Globus Pro · 9622 42 Ave NW, Edmonton, AB T6E 5Y4, Canada',
         ].join('\n'),
-        postalFooter: 'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+        postalFooter: 'ADAS Globus Pro · 9622 42 Ave NW, Edmonton, AB T6E 5Y4, Canada',
         spamRiskScore: 0,
         jitterMinutes: 11,
         verdict: 'INBOX_READY',
@@ -243,9 +243,9 @@ export function OutreachScreen() {
           '',
           '---',
           'If you\'d rather not hear from me, reply "no thanks" or unsubscribe in one click: https://go.adasglobuspro.com/u/preview-token',
-          'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+          'ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA',
         ].join('\n'),
-        postalFooter: 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA',
+        postalFooter: 'ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA',
         spamRiskScore: 0,
         jitterMinutes: 7,
         verdict: 'INBOX_READY',
@@ -297,7 +297,7 @@ export function OutreachScreen() {
     <div className="space-y-[16px] pb-[32px]" data-testid="outreach-screen">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="kicker mb-[4px]">Compliant sequences & campaigns (PRD 4.12, 4.13, 5)</div>
+          <div className="kicker mb-[4px]">Compliant sequences & campaigns</div>
           <h1 className="text-display text-ink m-0">
             <strong>Outreach</strong>{' '}
             <span className="text-ink-3 font-light tabular-nums">&amp; compliance gate</span>
@@ -319,7 +319,7 @@ export function OutreachScreen() {
         <Panel className="p-[20px] space-y-[14px]">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-eyebrow text-ink-3">PHASE 5A · SEQUENCES</div>
+              <div className="text-eyebrow text-ink-3">SEQUENCES</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">Active multi-step sequences</h2>
             </div>
             <StatusBadge tone="success">50/day mailbox cap</StatusBadge>
@@ -357,7 +357,7 @@ export function OutreachScreen() {
         <Panel className="p-[20px] space-y-[14px]">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-eyebrow text-ink-3">PHASE 5B · CAMPAIGNS</div>
+              <div className="text-eyebrow text-ink-3">CAMPAIGNS</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">
                 Bulk campaigns &amp; auto-pause guard
               </h2>
@@ -382,7 +382,7 @@ export function OutreachScreen() {
             <div className="flex flex-wrap gap-[8px] pt-[4px]">
               <Button size="sm" variant="secondary" onClick={() => setCampaignStatus('approved')}>
                 <CheckCircle2 size={14} aria-hidden="true" />
-                <span>Marketing Manager Approve (A19)</span>
+                <span>Marketing Manager Approve</span>
               </Button>
               <Button
                 size="sm"
@@ -390,7 +390,7 @@ export function OutreachScreen() {
                 onClick={() => setCampaignStatus('paused_deliverability')}
               >
                 <PauseCircle size={14} aria-hidden="true" />
-                <span>Simulate &gt;3% Bounce Auto-Pause (A20)</span>
+                <span>Simulate &gt;3% Bounce Auto-Pause</span>
               </Button>
             </div>
           </div>
@@ -400,7 +400,7 @@ export function OutreachScreen() {
       {/* Interactive checkSendable() Simulator & Public Unsubscribe Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[16px]">
         <Panel className="p-[20px] space-y-[14px]">
-          <div className="text-eyebrow text-ink-3">PRD 5.1 · SINGLE COMPLIANCE GATE (A12)</div>
+          <div className="text-eyebrow text-ink-3">SINGLE COMPLIANCE GATE</div>
           <h2 className="text-title text-ink m-0">checkSendable() reason code inspector</h2>
 
           <div className="flex flex-wrap gap-[8px]">
@@ -441,11 +441,9 @@ export function OutreachScreen() {
 
         <Panel className="p-[20px] space-y-[14px]">
           <div className="text-eyebrow text-ink-3">
-            PRD 5.4 · PUBLIC UNSUBSCRIBE HOST (go.adasglobuspro.com)
+            PUBLIC UNSUBSCRIBE HOST (go.adasglobuspro.com)
           </div>
-          <h2 className="text-title text-ink m-0">
-            One-click unsubscribe &amp; preference center (A17)
-          </h2>
+          <h2 className="text-title text-ink m-0">One-click unsubscribe &amp; preference center</h2>
           <p className="text-[13px] text-ink-2 m-0">
             Served on <code className="text-mono">go.adasglobuspro.com/u/:token</code> with zero
             login required. Immediately writes to <code className="text-mono">suppressions</code>{' '}
@@ -474,7 +472,7 @@ export function OutreachScreen() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-[10px]">
           <div>
             <div className="text-eyebrow text-ink-3">
-              PHASE 6 · N8N MARKETING &amp; EMAIL AUTOMATION PIPELINE (PRD 4.14, 10.2)
+              N8N MARKETING &amp; EMAIL AUTOMATION PIPELINE
             </div>
             <h2 className="text-title text-ink m-0 mt-[2px]">
               Signed outbox webhooks (<code className="text-mono">X-ADAS-Signature</code>) &amp;
@@ -580,9 +578,7 @@ export function OutreachScreen() {
         <Panel className="p-[20px] space-y-[14px]" data-testid="warmup-deliverability-panel">
           <div className="flex flex-wrap items-center justify-between gap-[8px]">
             <div>
-              <div className="text-eyebrow text-ink-3">
-                PRD 5.4, 5.6, 8.3 · ANTI-SPAM &amp; WARM-UP RAMP
-              </div>
+              <div className="text-eyebrow text-ink-3">ANTI-SPAM &amp; WARM-UP RAMP</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">
                 Domain authentication &amp; gradual warm-up schedule
               </h2>
@@ -640,9 +636,7 @@ export function OutreachScreen() {
         <Panel className="p-[20px] space-y-[14px]" data-testid="email-tailoring-panel">
           <div className="flex flex-wrap items-center justify-between gap-[8px]">
             <div>
-              <div className="text-eyebrow text-ink-3">
-                PRD 4.12, 5.5 · CPA FIRMOGRAPHIC EMAIL TAILORING
-              </div>
+              <div className="text-eyebrow text-ink-3">CPA FIRMOGRAPHIC EMAIL TAILORING</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">
                 Software-stack &amp; market-tailored plain-text preview
               </h2>
@@ -702,7 +696,7 @@ export function OutreachScreen() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-[10px]">
           <div>
             <div className="text-eyebrow text-ink-3">
-              PRD 10.1–10.4 · ONE-CLICK 16GB SERVER &amp; CLOUDFLARE TUNNEL DEPLOYER (.EXE)
+              ONE-CLICK 16GB SERVER &amp; CLOUDFLARE TUNNEL DEPLOYER (.EXE)
             </div>
             <h2 className="text-title text-ink m-0 mt-[2px]">
               Standalone <code className="text-mono">ADAS-CRM-Deployer.exe</code> with built-in

@@ -311,11 +311,16 @@ export class AuthAndUsersService {
 
   async listAuditLogs(actor: SessionUser): Promise<Record<string, unknown>[]> {
     requireCapability(actor, 'audit.read');
+    // Managers hold audit.read with "team" scope: they see their own team's actions only.
+    const scope = ROLE_CAPABILITY_MATRIX[actor.role]['audit.read'];
+    const teamOnly = scope !== 'all';
     const res = await this.db.query(
       `SELECT id, actor_user_id, actor_email, action, entity_type, entity_id, metadata, ip_address, created_at
        FROM audit_logs
+       ${teamOnly ? 'WHERE actor_user_id = ANY($1::text[])' : ''}
        ORDER BY created_at DESC
        LIMIT 100`,
+      teamOnly ? [[actor.id, ...actor.teamMemberIds]] : [],
     );
     return res.rows;
   }

@@ -104,7 +104,7 @@ export function InboxScreen() {
     <div className="space-y-[16px] pb-[32px]" data-testid="inbox-screen">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="kicker mb-[4px]">Microsoft 365 delegated sync (PRD 4.11)</div>
+          <div className="kicker mb-[4px]">Microsoft 365 delegated sync</div>
           <h1 className="text-display text-ink m-0">
             <strong>Connected inbox</strong>{' '}
             <span className="text-ink-3 font-light tabular-nums">{threads.length} threads</span>

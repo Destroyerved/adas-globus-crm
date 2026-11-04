@@ -112,6 +112,22 @@ export function toProblemDetails(exception: unknown, instance?: string): Problem
     };
   }
 
+  // PostgreSQL unique_violation (23505): a record with the same key already exists.
+  if (
+    typeof exception === 'object' &&
+    exception !== null &&
+    (exception as { code?: unknown }).code === '23505'
+  ) {
+    return {
+      type: 'https://crm.adasglobuspro.com/problems/duplicate_record',
+      title: 'Duplicate record',
+      status: 409,
+      code: 'DUPLICATE_RECORD',
+      detail: 'A record with the same unique value (for example the same email) already exists.',
+      instance,
+    };
+  }
+
   const detail = exception instanceof Error ? exception.message : 'Unexpected server error';
   return {
     type: 'https://crm.adasglobuspro.com/problems/internal_error',

@@ -148,7 +148,7 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
     await page.click('button:has-text("Canada Cold Prospect (No CASL Consent)")');
     await expect(page.locator('text=Reason Code: NO_LAWFUL_BASIS')).toBeVisible();
 
-    await page.click('button:has-text("Simulate >3% Bounce Auto-Pause (A20)")');
+    await page.click('button:has-text("Simulate >3% Bounce Auto-Pause")');
     await expect(page.locator('text=Auto-Paused (>3% bounce)')).toBeVisible();
 
     await page.click('button:has-text("Confirm one-click unsubscribe")');
@@ -184,7 +184,7 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
       'CA · Edmonton, AB Footer',
     );
     await expect(page.getByTestId('email-tailoring-panel')).toContainText(
-      '10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
+      '9622 42 Ave NW, Edmonton, AB T6E 5Y4, Canada',
     );
 
     // Test One-Click 16GB Server & Cloudflare Tunnel Deployer Blueprint Generator (PRD §10.1–10.4)
@@ -307,7 +307,7 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
     await expect(page.locator('text=Pinned partner notes (3)')).toBeVisible();
 
     await page.click('button[role="tab"]:has-text("History")');
-    await expect(page.locator('text=Field-level record history (PRD 7.3)')).toBeVisible();
+    await expect(page.locator('text=Field-level record history')).toBeVisible();
 
     // Log call via header button + quick-log composer
     await page.click('button:has-text("Log call")');

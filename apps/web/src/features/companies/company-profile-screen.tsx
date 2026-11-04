@@ -490,7 +490,7 @@ export function CompanyProfileScreen({ onOpenDeals }: CompanyProfileScreenProps)
           )}
 
           {activeTab === 'history' && (
-            <Panel title="Field-level record history (PRD 7.3)" padded>
+            <Panel title="Field-level record history" padded>
               <div className="divide-y divide-line text-[13px]">
                 <div className="py-[10px] first:pt-0 flex items-center justify-between gap-[8px]">
                   <span>

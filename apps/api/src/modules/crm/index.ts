@@ -20,6 +20,7 @@ import {
 } from '@adas/shared';
 import { type DatabaseService } from '../../platform/db/index.js';
 import {
+  DomainError,
   NotFoundDomainError,
   ValidationDomainError,
   VersionConflictError,
@@ -469,6 +470,15 @@ export class CrmService {
       const lead = leadRes.rows[0];
       if (!lead) {
         throw new NotFoundDomainError('Lead', input.leadId);
+      }
+      if (lead.status === 'Converted') {
+        throw new DomainError({
+          status: 409,
+          code: 'LEAD_ALREADY_CONVERTED',
+          title: 'Lead already converted',
+          detail:
+            'This lead has already been converted. Open its deal instead of converting again.',
+        });
       }
 
       // 1. Resolve or create Company

@@ -533,6 +533,22 @@ export class OutreachService {
       });
     }
 
+    // PRD §5.6: only one active sequence per contact, across all sequences.
+    const activeRes = await this.db.query<{ id: string; sequence_id: string }>(
+      `SELECT id, sequence_id FROM sequence_enrollments
+       WHERE contact_id = $1 AND status IN ('active', 'paused')
+       LIMIT 1`,
+      [contact.id],
+    );
+    if (activeRes.rows[0]) {
+      throw new DomainError({
+        status: 409,
+        code: 'IN_OTHER_ACTIVE_SEQUENCE',
+        title: 'Contact is already in an active sequence',
+        detail: 'Stop or finish the contact’s current sequence before enrolling them in another.',
+      });
+    }
+
     const enrollmentId = `enr_${randomUUID()}`;
     const nextSendDate = addBusinessDays(new Date(), 0, contact.timezone, contact.market);
 
@@ -719,6 +735,25 @@ export class OutreachService {
     requireCapability(user, 'campaigns.approve');
 
     return this.db.transaction(async (tx) => {
+      // PRD §2.4 and A19: a campaign must be approved by someone other than its creator.
+      // Admin may override; the override is recorded in the audit log.
+      const existing = await tx.query<{ owner_user_id: string | null }>(
+        `SELECT owner_user_id FROM campaigns WHERE id = $1 LIMIT 1`,
+        [campaignId],
+      );
+      if (!existing.rows[0]) {
+        throw new NotFoundDomainError('Campaign', campaignId);
+      }
+      const isSelfApproval = existing.rows[0].owner_user_id === user.id;
+      if (isSelfApproval && user.role !== 'Admin') {
+        throw new DomainError({
+          status: 403,
+          code: 'SELF_APPROVAL_NOT_ALLOWED',
+          title: 'Campaign needs a second approver',
+          detail: 'You created this campaign, so someone else has to approve it.',
+        });
+      }
+
       const updated = await tx.query(
         `UPDATE campaigns
          SET status = 'approved',
@@ -741,6 +776,7 @@ export class OutreachService {
         action: 'campaign.approved',
         entityType: 'campaign',
         entityId: campaignId,
+        metadata: isSelfApproval ? { adminSelfApprovalOverride: true } : {},
       });
 
       return campaign;
@@ -1163,12 +1199,12 @@ export class OutreachService {
     const primaryService =
       servicesNeeded[0] ?? (market === 'CA' ? 'Canadian T1/T2 Tax' : 'Tax Preparation');
 
-    // Market-specific postal footer per PRD §5.5:
-    // US -> Sheridan, Wyoming; Canada -> Edmonton, Alberta
+    // Market-specific postal footer per PRD §5.5, matching the offices listed on
+    // adasglobuspro.com (website repo: src/lib/site.mjs). CAN-SPAM and CASL need a real address.
     const postalFooter =
       market === 'CA'
-        ? 'ADAS Globus Pro · 10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada'
-        : 'ADAS Globus Pro · 30 N Gould St Ste R, Sheridan, WY 82801, USA';
+        ? 'ADAS Globus Pro · 9622 42 Ave NW, Edmonton, AB T6E 5Y4, Canada'
+        : 'ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA';
 
     const taxRegimePhrase =
       market === 'CA'

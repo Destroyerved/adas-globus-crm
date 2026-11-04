@@ -270,6 +270,10 @@ export const WebsiteInquiryPayloadSchema = z.object({
   services: z.union([z.array(z.string()), z.string()]).optional(),
   software: z.union([z.array(z.string()), z.string()]).optional(),
   message: z.string().optional().nullable(),
+  // Fields the live website forms send (website repo: src/pages/home.html, src/pages/contact.mjs)
+  need: z.string().optional().nullable(), // trial form "What do you need?"
+  location: z.string().optional().nullable(), // contact form state / province
+  interests: z.union([z.array(z.string()), z.string()]).optional(), // contact form chips, comma-separated
   formType: z.enum(['trial', 'contact', 'consultation']).default('trial'),
   utmSource: z.string().optional().nullable(),
   utmMedium: z.string().optional().nullable(),

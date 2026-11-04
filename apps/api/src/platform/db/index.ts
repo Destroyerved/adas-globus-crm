@@ -221,9 +221,10 @@ export class DatabaseService {
       INSERT INTO settings (key, value_json, updated_by_user_id) VALUES
         ('mail.live_enabled', 'false'::jsonb, 'usr_admin_1'),
         ('compliance.counsel_signed_off', 'false'::jsonb, 'usr_admin_1'),
-        ('compliance.physical_postal_address', '"ADAS Globus Pro · 402 Shivalik Shilp, Iskcon Cross Road, SG Highway, Ahmedabad 380015, India"'::jsonb, 'usr_admin_1'),
+        ('compliance.postal_address.US', '"ADAS Globus Pro · 30 N Gould St, Sheridan, WY 82801, USA"'::jsonb, 'usr_admin_1'),
+        ('compliance.postal_address.CA', '"ADAS Globus Pro · 9622 42 Ave NW, Edmonton, AB T6E 5Y4, Canada"'::jsonb, 'usr_admin_1'),
         ('apollo.daily_credit_limit', '200'::jsonb, 'usr_admin_1'),
-        ('sla.first_response_minutes', '15'::jsonb, 'usr_admin_1')
+        ('sla.first_response_business_days', '1'::jsonb, 'usr_admin_1')
       ON CONFLICT (key) DO NOTHING;
 
       INSERT INTO fx_rates (id, from_currency, to_currency, rate_scaled, effective_date) VALUES

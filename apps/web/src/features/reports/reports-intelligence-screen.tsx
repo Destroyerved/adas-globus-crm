@@ -17,9 +17,7 @@ export function ReportsIntelligenceScreen() {
     <div className="space-y-[16px] pb-[32px]" data-testid="reports-intelligence-screen">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
         <div>
-          <div className="kicker mb-[4px]">
-            Reports, integrations &amp; security audit (PRD 4.15, 4.16, 8, 9)
-          </div>
+          <div className="kicker mb-[4px]">Reports, integrations &amp; security audit</div>
           <h1 className="text-display text-ink m-0">
             <strong>Reports</strong>{' '}
             <span className="text-ink-3 font-light tabular-nums">
@@ -82,7 +80,7 @@ export function ReportsIntelligenceScreen() {
         <Panel className="p-[20px] space-y-[12px]">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-eyebrow text-ink-3">PRD 4.16 · EXPLAINABLE LEAD SCORING</div>
+              <div className="text-eyebrow text-ink-3">EXPLAINABLE LEAD SCORING</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">
                 Jane Patel · Acme Tax &amp; Advisory LLP
               </h2>
@@ -117,9 +115,7 @@ export function ReportsIntelligenceScreen() {
         <Panel className="p-[20px] space-y-[12px]">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-eyebrow text-ink-3">
-                PHASE 6 · APOLLO, BOOKINGS & N8N WEBHOOKS
-              </div>
+              <div className="text-eyebrow text-ink-3">APOLLO, BOOKINGS & N8N WEBHOOKS</div>
               <h2 className="text-title text-ink m-0 mt-[2px]">Integrations &amp; credit guard</h2>
             </div>
             <StatusBadge tone="brand">
@@ -162,9 +158,7 @@ export function ReportsIntelligenceScreen() {
       <Panel className="p-[20px] space-y-[12px]">
         <div className="flex flex-wrap items-center justify-between gap-[8px]">
           <div>
-            <div className="text-eyebrow text-ink-3">
-              PRD 9 · APPEND-ONLY SECURITY & PRIVACY AUDIT LOG
-            </div>
+            <div className="text-eyebrow text-ink-3">APPEND-ONLY SECURITY & PRIVACY AUDIT LOG</div>
             <h2 className="text-title text-ink m-0 mt-[2px]">Database-protected audit trail</h2>
           </div>
           <StatusBadge tone="neutral">
@@ -212,7 +206,7 @@ export function ReportsIntelligenceScreen() {
               <tr>
                 <td className="py-[8px] pr-[12px] text-mono text-[12px]">2026-11-04 14:28:40Z</td>
                 <td className="py-[8px] pr-[12px]">Ved Shah (Admin)</td>
-                <td className="py-[8px] pr-[12px] font-[550]">privacy.erasure (A14)</td>
+                <td className="py-[8px] pr-[12px] font-[550]">privacy.erasure</td>
                 <td className="py-[8px] pr-[12px]">SHA-256 Retained · PII Redacted</td>
                 <td className="py-[8px]">
                   <StatusBadge tone="success">

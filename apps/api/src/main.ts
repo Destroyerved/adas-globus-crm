@@ -21,16 +21,84 @@ function serializeJson(data: unknown): string {
   );
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+const MAX_JSON_BODY_BYTES = 1_048_576; // 1 MB for internal API calls
+const MAX_PUBLIC_BODY_BYTES = 16_384; // 16 KB for website inquiries (PRD §4.10)
+
+async function readJsonBody(
+  req: IncomingMessage,
+  maxBytes = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new DomainError({
+        status: 413,
+        code: 'PAYLOAD_TOO_LARGE',
+        title: 'Request body too large',
+        detail: `Request bodies are limited to ${maxBytes} bytes.`,
+      });
+    }
+    chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString('utf-8').trim();
   if (!raw) {
     return {};
   }
-  return JSON.parse(raw) as Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('not an object');
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new DomainError({
+      status: 400,
+      code: 'INVALID_JSON',
+      title: 'Invalid JSON',
+      detail: 'The request body must be a JSON object.',
+    });
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Public unsubscribe pages use the website's look (DESIGN §6.15): off-white canvas, one white card. */
+function publicPage(title: string, bodyHtml: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>${escapeHtml(title)} · ADAS Globus Pro</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#FBFCFB;color:#0F1B2A;
+font:17px/1.6 "Hanken Grotesk","Helvetica Neue",Helvetica,Arial,sans-serif;padding:16px}
+.card{max-width:480px;width:100%;background:#fff;border:1px solid #DCE2E2;border-radius:14px;padding:40px}
+h1{margin:0 0 12px;font-size:28px;font-weight:300;letter-spacing:-.02em;line-height:1.15}
+p{margin:0 0 20px;color:#445161}
+button{height:52px;padding:0 26px;border:0;border-radius:999px;background:#00778A;color:#fff;font:600 16px/1 inherit;cursor:pointer}
+button:hover{background:#005E6D}
+button:focus-visible{outline:2px solid #015FA7;outline-offset:3px}
+.brand{font-weight:650;margin-bottom:24px;letter-spacing:-.01em}
+</style></head><body><main class="card"><div class="brand">ADAS Globus Pro</div>${bodyHtml}</main></body></html>`;
+}
+
+function sendHtml(res: ServerResponse, status: number, html: string): void {
+  res.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'X-Frame-Options': 'DENY',
+  });
+  res.end(html);
 }
 
 export function createAppServer(env: AppEnv = validateEnv(), existingDb?: DatabaseService) {
@@ -44,6 +112,11 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
   const dataQuality = new DataQualityService(db);
   const outreach = new OutreachService(db, compliance, transport);
   const intelligence = new IntelligenceService(db);
+  const devLoginEnabled = isDevLoginEnabled(env);
+  const webOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  const inquiryOrigins = env.INQUIRY_CORS_ORIGINS.split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const method = req.method ?? 'GET';
@@ -52,14 +125,23 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
     const pathname = parsedUrl.pathname;
     const hostHeader = req.headers.host ?? 'crm.localhost:3000';
 
-    // CORS headers for web app (`http://localhost:5174`) and marketing website
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Dev-User-Id, X-CSRF-Token, Idempotency-Key',
-    );
+    // CORS: only the CRM web app (with credentials) and the marketing website (intake only).
+    // Never reflect arbitrary origins (PRD §9).
+    const origin = req.headers.origin;
+    res.setHeader('Vary', 'Origin');
+    if (origin && pathname.startsWith('/api/v1/public/') && inquiryOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+    } else if (origin && origin === webOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-Dev-User-Id, X-CSRF-Token, Idempotency-Key',
+      );
+    }
 
     if (method === 'OPTIONS') {
       res.writeHead(204);
@@ -97,22 +179,71 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
 
       await db.ensureInitialized();
 
-      // Public RFC 8058 One-Click Unsubscribe (`POST /u/:token` or `GET /u/:token` — PRD §5.4 A17)
-      if (pathname.startsWith('/u/')) {
-        const token = pathname.slice('/u/'.length);
-        const result = await compliance.handleUnsubscribeToken(token);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
+      // Public unsubscribe (PRD §5.5, §8.6). GET only shows a confirmation page, because
+      // mail security scanners open links automatically. POST (the button, or the RFC 8058
+      // one-click request a mail app sends) performs the unsubscribe.
+      if (pathname.startsWith('/u/') && (method === 'GET' || method === 'POST')) {
+        const token = decodeURIComponent(pathname.slice('/u/'.length));
+        try {
+          if (method === 'POST') {
+            await compliance.handleUnsubscribeToken(token);
+            sendHtml(
+              res,
+              200,
+              publicPage(
+                'Unsubscribed',
+                `<h1>You're <strong>unsubscribed</strong></h1><p>You won't receive any more emails from ADAS Globus Pro at this address. This takes effect immediately.</p>`,
+              ),
+            );
+            return;
+          }
+          const info = await compliance.describeUnsubscribeToken(token);
+          const action = `/u/${encodeURIComponent(token)}`;
+          sendHtml(
+            res,
+            200,
+            publicPage(
+              'Unsubscribe',
+              info.alreadyUnsubscribed
+                ? `<h1>Already <strong>unsubscribed</strong></h1><p>${escapeHtml(info.maskedEmail)} won't receive any more emails from ADAS Globus Pro.</p>`
+                : `<h1>Unsubscribe from <strong>ADAS Globus Pro</strong> emails?</h1><p>Stop all emails to ${escapeHtml(info.maskedEmail)}.</p><form method="post" action="${escapeHtml(action)}"><button type="submit">Unsubscribe</button></form>`,
+            ),
+          );
+        } catch (err) {
+          if (err instanceof DomainError && err.status === 404) {
+            sendHtml(
+              res,
+              404,
+              publicPage(
+                'Link not found',
+                `<h1>This link <strong>isn't valid</strong></h1><p>It may be incomplete. To stop emails from us, reply to any message with "unsubscribe" or write to info@adasglobuspro.com.</p>`,
+              ),
+            );
+            return;
+          }
+          throw err;
+        }
         return;
       }
 
       // Public Website Inquiry Intake (`POST /api/v1/public/inquiries` — PRD §4.10 A1 & A2)
       if (method === 'POST' && pathname === '/api/v1/public/inquiries') {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
         const result = await intake.handlePublicInquiry(body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson(result));
         return;
+      }
+
+      // Sign-in endpoints are development stubs: they don't check a Microsoft token or a real
+      // password. They are switched off outside development (PRD §6.6 is not built yet).
+      if (pathname.startsWith('/api/v1/auth/') && !devLoginEnabled) {
+        throw new DomainError({
+          status: 501,
+          code: 'SIGN_IN_NOT_IMPLEMENTED',
+          title: 'Sign-in not available',
+          detail: 'Microsoft Entra sign-in is not built yet.',
+        });
       }
 
       // Auth endpoints
@@ -133,7 +264,16 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
-      // Resolve current user (via X-Dev-User-Id in non-production or default manager)
+      // Resolve current user. Development only: the X-Dev-User-Id header picks a seeded user.
+      // There are no real sessions yet, so outside development every request is refused.
+      if (!devLoginEnabled) {
+        throw new DomainError({
+          status: 401,
+          code: 'UNAUTHENTICATED',
+          title: 'Sign-in required',
+          detail: 'Real sign-in is not built yet, so the API refuses requests outside development.',
+        });
+      }
       const headerUserId = req.headers['x-dev-user-id'];
       const activeUserId =
         typeof headerUserId === 'string' && headerUserId.trim() !== ''
@@ -595,6 +735,14 @@ const isMainModule =
 
 if (isMainModule) {
   const { server, logger, env, db } = createAppServer();
+  // Fail closed: this build keeps all data in memory (PGlite, wiped on every restart) and
+  // has no real sign-in. It must not run as production until both exist (docs/PROGRESS.md).
+  if (env.NODE_ENV === 'production') {
+    logger.fatal(
+      'Refusing to start with NODE_ENV=production: data is in-memory only and sign-in is a development stub. See docs/PROGRESS.md, "Not production-ready".',
+    );
+    process.exit(1);
+  }
   void (async () => {
     await db.ensureInitialized();
     server.listen(env.PORT, () => {

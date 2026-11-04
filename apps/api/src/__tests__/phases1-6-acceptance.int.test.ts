@@ -134,7 +134,7 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
   // Phase 2: Core Records, Intake, Imports, Duplicates, Suppressions & Privacy
   // -------------------------------------------------------------------------
 
-  it('A1 & A2: Website inquiry endpoint creates Lead, Company, Contact, Consent, and 15m SLA task; deduplicates repeat in 24h; skips company on gmail.com (PRD §4.10)', async () => {
+  it('A1 & A2: Website inquiry endpoint creates Lead, Company, Contact, Consent, and one-business-day reply task; deduplicates repeat in 24h; skips company on gmail.com (PRD §4.10)', async () => {
     // A1: Corporate trial form submission
     const first = await services.intake.handlePublicInquiry({
       name: 'bourbon partner',
@@ -192,6 +192,76 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
     expect(freeMail.accepted).toBe(true);
     expect(freeMail.companyId).toBeNull();
     expect(freeMail.contactId).toMatch(/^cnt_/);
+  });
+
+  it('A13: accepts the live website form payloads exactly as adasglobuspro.com sends them (PRD §4.10)', async () => {
+    // Homepage trial form: name, email, firm, phone, need, country (full name), software, message
+    const trial = await services.intake.handlePublicInquiry({
+      name: 'Tara Trial',
+      email: 'tara@trialform.example.ca',
+      firm: 'Trial Form CPA',
+      phone: '+1 416 555 0100',
+      need: 'Tax preparation and review',
+      country: 'Canada',
+      software: 'TaxCycle, CaseWare',
+      message: 'Busy season help',
+    } as never);
+    const trialLead = await db.query<{
+      market: string;
+      source: string;
+      services_needed: string[];
+      software_stack: string[];
+    }>(`SELECT market, source, services_needed, software_stack FROM leads WHERE id = $1`, [
+      trial.leadId,
+    ]);
+    expect(trialLead.rows[0]).toMatchObject({
+      market: 'CA',
+      source: 'Website: trial form',
+      services_needed: ['Tax preparation and review'],
+      software_stack: ['TaxCycle', 'CaseWare'],
+    });
+    const consent = await db.query<{ basis: string }>(
+      `SELECT basis FROM consent_records WHERE contact_id = $1`,
+      [trial.contactId],
+    );
+    expect(consent.rows[0]?.basis).toBe('implied_inquiry');
+
+    // Contact form: location, interests (comma-separated), and an empty `website` honeypot
+    const contact = await services.intake.handlePublicInquiry({
+      name: 'Cara Contact',
+      email: 'cara@contactform.example.com',
+      firm: 'Contact Form CPA',
+      phone: '',
+      location: 'Ontario',
+      interests: 'Audit support, A dedicated team',
+      message: 'Hello',
+      website: '',
+    } as never);
+    const contactLead = await db.query<{
+      market: string;
+      source: string;
+      state_province: string;
+      services_needed: string[];
+    }>(`SELECT market, source, state_province, services_needed FROM leads WHERE id = $1`, [
+      contact.leadId,
+    ]);
+    expect(contactLead.rows[0]).toMatchObject({
+      market: 'CA',
+      source: 'Website: contact form',
+      state_province: 'Ontario',
+      services_needed: ['Audit support', 'A dedicated team'],
+    });
+
+    // A bot that fills the contact form's hidden `website` field is dropped
+    const bot = await services.intake.handlePublicInquiry({
+      name: 'Bot',
+      email: 'bot@spamform.example.com',
+      location: 'Texas',
+      interests: 'x',
+      website: 'http://spam.example.com',
+    } as never);
+    expect(bot.honeypotDropped).toBe(true);
+    expect(bot.leadId).toBeNull();
   });
 
   it('A3 & A4: Company domain normalization deduplicates existing firm, and stale version throws 409 Conflict (PRD §4.3, §6.5)', async () => {
@@ -634,8 +704,15 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
       code: 'FORBIDDEN_CAPABILITY',
     });
 
-    // Marketing Manager approves successfully
-    const approved = await services.outreach.approveCampaign(mktManager, campaignId);
+    // A19: the creator cannot approve their own campaign (PRD §2.4)
+    await expect(services.outreach.approveCampaign(mktManager, campaignId)).rejects.toMatchObject({
+      status: 403,
+      code: 'SELF_APPROVAL_NOT_ALLOWED',
+    });
+
+    // A second approver (Admin) approves successfully
+    const admin = await services.auth.resolveSessionUser('usr_admin_1');
+    const approved = await services.outreach.approveCampaign(admin, campaignId);
     expect(approved['status']).toBe('approved');
 
     // A20: 4 bounces out of 100 sends (4.0% > 3.0% threshold) immediately auto-pauses the campaign
