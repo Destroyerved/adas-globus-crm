@@ -1,4 +1,7 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AuthAndUsersService } from './modules/auth/index.js';
 import { ComplianceService, checkSendable } from './modules/compliance/index.js';
 import { CrmService } from './modules/crm/index.js';
@@ -431,6 +434,123 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson(report));
         return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/deployment/blueprint') {
+        const body = await readJsonBody(req);
+        const rawDomain =
+          typeof body['domain'] === 'string' && body['domain'].trim() !== ''
+            ? body['domain']
+                .trim()
+                .toLowerCase()
+                .replace(/^https?:\/\//, '')
+                .replace(/\/.*$/, '')
+            : 'adasglobuspro.com';
+        const tunnelName =
+          typeof body['tunnelName'] === 'string' && body['tunnelName'].trim() !== ''
+            ? body['tunnelName'].trim()
+            : 'adas-crm-prod-16gb';
+
+        const cloudflareTunnelYaml = [
+          `# ADAS CRM Production Cloudflare Tunnel Config (PRD §10.4)`,
+          `tunnel: ${tunnelName}`,
+          `credentials-file: /etc/cloudflared/${tunnelName}.json`,
+          `ingress:`,
+          `  - hostname: crm.${rawDomain}`,
+          `    service: http://localhost:3000`,
+          `  - hostname: go.${rawDomain}`,
+          `    service: http://localhost:3000`,
+          `  - hostname: status.${rawDomain}`,
+          `    service: http://localhost:3001`,
+          `  - hostname: automation.${rawDomain}`,
+          `    service: http://localhost:5678`,
+          `  - service: http_status:404`,
+        ].join('\n');
+
+        const dnsRecordsBind = [
+          `; --- ADAS CRM Cloudflare Tunnel CNAMEs & Anti-Spam Email Records (PRD §5.4, §10.4) ---`,
+          `crm.${rawDomain}.         1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
+          `go.${rawDomain}.          1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
+          `status.${rawDomain}.      1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
+          `automation.${rawDomain}.  1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
+          `${rawDomain}.             300 IN  TXT     "v=spf1 include:spf.protection.outlook.com -all"`,
+          `mail.${rawDomain}.        300 IN  TXT     "v=spf1 include:amazonses.com -all"`,
+          `_dmarc.${rawDomain}.      300 IN  TXT     "v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@${rawDomain}; adkim=s; aspf=s"`,
+          `_dmarc.mail.${rawDomain}. 300 IN  TXT     "v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@${rawDomain}"`,
+        ].join('\n');
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          serializeJson({
+            domain: rawDomain,
+            tunnelName,
+            serverMemoryGb: 16,
+            memoryAllocationMb: {
+              postgres: 4096,
+              apiAndSpa: 1024,
+              worker: 768,
+              n8n: 1536,
+              uptimeKuma: 256,
+              cloudflared: 128,
+              osAndPostgresPageCache: 8448,
+            },
+            postgresTuning: {
+              shared_buffers: '2GB',
+              effective_cache_size: '8GB',
+              work_mem: '16MB',
+              maintenance_work_mem: '512MB',
+              max_connections: 60,
+              wal_compression: 'on',
+            },
+            hostRoutes: {
+              crmAppUrl: `https://crm.${rawDomain}`,
+              publicIntakeAndUnsubUrl: `https://go.${rawDomain}`,
+              uptimeStatusUrl: `https://status.${rawDomain}`,
+              n8nAutomationUrl: `https://automation.${rawDomain}`,
+            },
+            cloudflareTunnelYaml,
+            dnsRecordsBind,
+            exeInstallerPath: 'dist/deployer/ADAS-CRM-Deployer.exe',
+          }),
+        );
+        return;
+      }
+
+      // Serve static built SPA (`apps/web/dist`) on non-API GET requests (PRD §6.2 & §10.2)
+      if (method === 'GET' && !pathname.startsWith('/api/')) {
+        const currentDir = path.dirname(fileURLToPath(import.meta.url));
+        const webDistDir = path.resolve(currentDir, '../../web/dist');
+        const indexHtmlPath = path.join(webDistDir, 'index.html');
+        if (existsSync(indexHtmlPath)) {
+          const safeRel = pathname.replace(/^\/+/, '');
+          const candidatePath = path.resolve(webDistDir, safeRel);
+          const isInsideDist = candidatePath.startsWith(webDistDir);
+          const targetFile =
+            isInsideDist &&
+            safeRel !== '' &&
+            existsSync(candidatePath) &&
+            statSync(candidatePath).isFile()
+              ? candidatePath
+              : indexHtmlPath;
+          const ext = path.extname(targetFile).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'application/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.woff2': 'font/woff2',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.json': 'application/json; charset=utf-8',
+          };
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+          res.setHeader('X-Frame-Options', 'DENY');
+          res.writeHead(200, {
+            'Content-Type': mimeMap[ext] ?? 'application/octet-stream',
+          });
+          res.end(readFileSync(targetFile));
+          return;
+        }
       }
 
       res.writeHead(404, { 'Content-Type': 'application/problem+json; charset=utf-8' });

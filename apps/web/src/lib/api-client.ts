@@ -182,4 +182,23 @@ export const apiClient = {
       body: JSON.stringify(payload),
     });
   },
+  generateDeploymentBlueprint(payload: { domain: string; tunnelName?: string }) {
+    return requestJson<{
+      domain: string;
+      tunnelName: string;
+      serverMemoryGb: number;
+      hostRoutes: {
+        crmAppUrl: string;
+        publicIntakeAndUnsubUrl: string;
+        uptimeStatusUrl: string;
+        n8nAutomationUrl: string;
+      };
+      cloudflareTunnelYaml: string;
+      dnsRecordsBind: string;
+      exeInstallerPath: string;
+    }>('/api/v1/deployment/blueprint', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };

@@ -22,7 +22,8 @@
     "test:int": "vitest run --project integration",
     "test:e2e": "playwright test",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:int",
-    "build": "pnpm --filter @adas/shared build && pnpm --filter @adas/api build && pnpm --filter @adas/web build",
+    "build": "pnpm --filter @adas/shared build && pnpm --filter @adas/api build && pnpm --filter @adas/web build && node scripts/build-deployer-exe.mjs",
+    "build:exe": "node scripts/build-deployer-exe.mjs",
     "api:openapi": "pnpm --filter @adas/api openapi:generate"
   },
   "devDependencies": {

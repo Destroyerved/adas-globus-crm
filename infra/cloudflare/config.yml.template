@@ -1,0 +1,28 @@
+# =============================================================================
+# ADAS CRM — Cloudflare Tunnel Configuration (PRD §10.4)
+# Generated automatically by ADAS-CRM-Deployer.exe for your domain.
+# Zero inbound router ports required (outbound-only Cloudflare Argo Tunnel).
+# =============================================================================
+
+tunnel: adas-crm-prod-16gb
+credentials-file: /etc/cloudflared/adas-crm-prod-16gb.json
+
+ingress:
+  # 1. Authenticated Employee CRM (Protected by Cloudflare Access + Entra SSO)
+  - hostname: crm.adasglobuspro.com
+    service: http://localhost:3000
+
+  # 2. Public Website Intake (/api/v1/public/inquiries) & One-Click Unsubscribe (/u/:token)
+  - hostname: go.adasglobuspro.com
+    service: http://localhost:3000
+
+  # 3. Uptime Kuma Health Status Dashboard (Protected by Cloudflare Access)
+  - hostname: status.adasglobuspro.com
+    service: http://localhost:3001
+
+  # 4. Phase 6 n8n Marketing & Email Automation (Protected by Cloudflare Access)
+  - hostname: automation.adasglobuspro.com
+    service: http://localhost:5678
+
+  # Catch-all 404
+  - service: http_status:404

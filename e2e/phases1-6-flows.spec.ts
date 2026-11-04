@@ -187,6 +187,17 @@ test.describe('Phases 1–6 E2E Flows, WCAG 2.2 AA (axe), and Responsive Verific
       '10180 101 St NW Suite 3400, Edmonton, AB T5J 3S4, Canada',
     );
 
+    // Test One-Click 16GB Server & Cloudflare Tunnel Deployer Blueprint Generator (PRD §10.1–10.4)
+    await page.fill('input[aria-label="Target deployment domain"]', 'cpa-staffing.example.com');
+    await page.click('button:has-text("Generate Cloudflare & 16GB Server Blueprint")');
+    await expect(page.getByTestId('deploy-blueprint-output')).toBeVisible();
+    await expect(page.getByTestId('deploy-blueprint-output')).toContainText(
+      'hostname: crm.cpa-staffing.example.com',
+    );
+    await expect(page.getByTestId('deploy-blueprint-output')).toContainText(
+      'hostname: automation.cpa-staffing.example.com',
+    );
+
     // 4. Imports & Duplicates screen: execute import, rollback, merge, and undo merge
     await page.goto('/?screen=imports');
     await page.click('button:has-text("Execute Verified Import")');

@@ -132,8 +132,48 @@ export function OutreachScreen() {
     jitterMinutes: 7,
     verdict: 'INBOX_READY',
   });
+  const [deployDomain, setDeployDomain] = useState('adasglobuspro.com');
+  const [deployBlueprint, setDeployBlueprint] = useState<{
+    domain: string;
+    tunnelName: string;
+    cloudflareTunnelYaml: string;
+    dnsRecordsBind: string;
+    exeInstallerPath: string;
+  } | null>(null);
 
   const activeScenario = SCENARIOS[scenario];
+
+  const handleGenerateDeployBlueprint = async () => {
+    const cleanDomain = deployDomain.trim().toLowerCase() || 'adasglobuspro.com';
+    const live = await apiClient.generateDeploymentBlueprint({
+      domain: cleanDomain,
+      tunnelName: 'adas-crm-prod-16gb',
+    });
+    if (live) {
+      setDeployBlueprint({
+        domain: live.domain,
+        tunnelName: live.tunnelName,
+        cloudflareTunnelYaml: live.cloudflareTunnelYaml,
+        dnsRecordsBind: live.dnsRecordsBind,
+        exeInstallerPath: live.exeInstallerPath,
+      });
+      return;
+    }
+    setDeployBlueprint({
+      domain: cleanDomain,
+      tunnelName: 'adas-crm-prod-16gb',
+      cloudflareTunnelYaml: [
+        'tunnel: adas-crm-prod-16gb',
+        'ingress:',
+        `  - hostname: crm.${cleanDomain} -> http://localhost:3000`,
+        `  - hostname: go.${cleanDomain} -> http://localhost:3000`,
+        `  - hostname: status.${cleanDomain} -> http://localhost:3001`,
+        `  - hostname: automation.${cleanDomain} -> http://localhost:5678`,
+      ].join('\n'),
+      dnsRecordsBind: `crm.${cleanDomain}. CNAME adas-crm-prod-16gb.cfargotunnel.com.`,
+      exeInstallerPath: 'ADAS-CRM-Deployer.exe',
+    });
+  };
 
   const handleSelectTailorProfile = async (contactId: 'cnt_jane' | 'cnt_marcus' | 'cnt_elena') => {
     setTailorProfileId(contactId);
@@ -656,6 +696,76 @@ export function OutreachScreen() {
           </div>
         </Panel>
       </div>
+
+      {/* One-Click 16GB Server & Cloudflare Tunnel Deployer (.exe) (PRD §10.1–10.4) */}
+      <Panel className="p-[20px] space-y-[14px]" data-testid="one-click-deployer-panel">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-[10px]">
+          <div>
+            <div className="text-eyebrow text-ink-3">
+              PRD 10.1–10.4 · ONE-CLICK 16GB SERVER &amp; CLOUDFLARE TUNNEL DEPLOYER (.EXE)
+            </div>
+            <h2 className="text-title text-ink m-0 mt-[2px]">
+              Standalone <code className="text-mono">ADAS-CRM-Deployer.exe</code> with built-in
+              Cloudflare Tunnel &amp; Anti-Spam DNS setup
+            </h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-[8px]">
+            <StatusBadge tone="brand">16 GB RAM Tuned (7.75 GB Cap + 8.25 GB Cache)</StatusBadge>
+            <StatusBadge tone="success">ADAS-CRM-Deployer.exe Ready</StatusBadge>
+          </div>
+        </div>
+
+        <p className="text-[13px] text-ink-2 m-0">
+          Double-click <code className="text-mono">ADAS-CRM-Deployer.exe</code> (or run{' '}
+          <code className="text-mono">
+            .\ADAS-CRM-Deployer.exe --provision --domain yourdomain.com
+          </code>
+          ) to automatically generate 256-bit secrets, configure the 16 GB PostgreSQL 17 memory
+          profile (<code className="text-mono">shared_buffers=2GB</code>,{' '}
+          <code className="text-mono">effective_cache_size=8GB</code>), write Cloudflare Tunnel
+          ingress (<code className="text-mono">crm.</code>, <code className="text-mono">go.</code>,{' '}
+          <code className="text-mono">status.</code>, <code className="text-mono">automation.</code>
+          ), and output your Anti-Spam <code className="text-mono">SPF/DKIM/DMARC</code> DNS zone.
+        </p>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-[10px]">
+          <input
+            type="text"
+            aria-label="Target deployment domain"
+            value={deployDomain}
+            onChange={(e) => setDeployDomain(e.target.value)}
+            placeholder="e.g. adasglobuspro.com"
+            className="h-[36px] min-h-[36px] w-full sm:w-[280px] shrink-0 rounded-[8px] border border-line bg-surface px-[12px] text-[13.5px] text-ink focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <Button size="sm" variant="primary" onClick={() => void handleGenerateDeployBlueprint()}>
+            Generate Cloudflare &amp; 16GB Server Blueprint
+          </Button>
+        </div>
+
+        {deployBlueprint && (
+          <div
+            className="grid grid-cols-1 lg:grid-cols-2 gap-[12px]"
+            data-testid="deploy-blueprint-output"
+          >
+            <div className="rounded-[10px] border border-line bg-bg-alt p-[12px] space-y-[6px]">
+              <div className="text-[12.5px] font-[600] text-ink">
+                infra/cloudflare/config.yml ({deployBlueprint.domain})
+              </div>
+              <pre className="text-[11.5px] text-ink-2 text-mono whitespace-pre-wrap m-0">
+                {deployBlueprint.cloudflareTunnelYaml}
+              </pre>
+            </div>
+            <div className="rounded-[10px] border border-line bg-bg-alt p-[12px] space-y-[6px]">
+              <div className="text-[12.5px] font-[600] text-ink">
+                infra/cloudflare/dns-records.bind (Tunnel CNAMEs + SPF/DMARC)
+              </div>
+              <pre className="text-[11.5px] text-ink-2 text-mono whitespace-pre-wrap m-0">
+                {deployBlueprint.dnsRecordsBind}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

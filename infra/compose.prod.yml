@@ -1,0 +1,150 @@
+# =============================================================================
+# ADAS CRM — 16GB RAM Production Stack & Cloudflare Tunnel (PRD §10.1–10.4)
+# Total Container Memory Cap: 7.75 GB (leaves 8.25 GB OS + PostgreSQL Page Cache)
+# =============================================================================
+
+name: adas-crm-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: adas-crm-postgres-prod
+    restart: unless-stopped
+    mem_limit: 4096m
+    environment:
+      POSTGRES_USER: adas_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: adas_crm
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-init-extensions.sql:ro
+      - ./postgres/postgresql.16gb.conf:/etc/postgresql/postgresql.conf:ro
+      - ../secrets/postgres_password.txt:/run/secrets/postgres_password:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adas_app -d adas_crm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: adas-crm-api-prod
+    restart: unless-stopped
+    mem_limit: 1024m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - ../.env.production
+    volumes:
+      - ../secrets:/app/secrets:ro
+      - ../data/files:/app/data/files
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: adas-crm-worker-prod
+    restart: unless-stopped
+    mem_limit: 768m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "apps/api/dist/worker.js"]
+    env_file:
+      - ../.env.production
+    volumes:
+      - ../secrets:/app/secrets:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.76.1
+    container_name: adas-crm-n8n-prod
+    restart: unless-stopped
+    mem_limit: 1536m
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      N8N_HOST: automation.${ADAS_DOMAIN:-adasglobuspro.com}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      NODE_ENV: production
+      WEBHOOK_URL: https://automation.${ADAS_DOMAIN:-adasglobuspro.com}/
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+      ADAS_API_BASE_URL: http://api:3000/api/v1
+    volumes:
+      - n8n_prod_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/workflows:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: adas-crm-uptime-kuma
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: adas-crm-cloudflared
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      - api
+      - n8n
+      - uptime-kuma
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflare:/etc/cloudflared:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  postgres_prod_data:
+  n8n_prod_data:
+  uptime_kuma_data:
