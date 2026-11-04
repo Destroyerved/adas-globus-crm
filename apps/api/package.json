@@ -18,6 +18,7 @@
   "dependencies": {
     "@adas/shared": "workspace:*",
     "@electric-sql/pglite": "^0.5.14",
+    "openid-client": "^6.8.9",
     "pg": "^8.23.1",
     "pino": "^9.6.0",
     "zod": "^3.24.2"

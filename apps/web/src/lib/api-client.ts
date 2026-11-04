@@ -1,46 +1,55 @@
-import { type SystemRoleName } from '@adas/shared';
+/**
+ * Development sign-in only. These are the synthetic users from the seed data
+ * (apps/api/src/platform/db/seed.ts). Production builds never show them.
+ */
 
-export interface DevUser {
+export interface DevSignInUser {
   id: string;
   displayName: string;
   email: string;
-  initials: string;
-  role: SystemRoleName;
-  timeZone: string;
+  role: string;
 }
 
-export const DEFAULT_DEV_USER: DevUser = {
-  id: 'usr_01',
-  displayName: 'Ved Shah',
-  email: 'ved.shah@adasglobuspro.example.com',
-  initials: 'VS',
-  role: 'Super Admin',
-  timeZone: 'Asia/Kolkata',
-};
-
-export const SYNTHETIC_DEV_USERS: readonly DevUser[] = [
-  DEFAULT_DEV_USER,
+export const DEV_SIGN_IN_USERS: readonly DevSignInUser[] = [
   {
-    id: 'usr_02',
+    id: 'usr_mgr_1',
     displayName: 'Arjun Mehta',
-    email: 'arjun.mehta@adasglobuspro.example.com',
-    initials: 'AM',
-    role: 'Sales Executive',
-    timeZone: 'Asia/Kolkata',
+    email: 'arjun@adasglobuspro.example.com',
+    role: 'Sales Manager (U.S.)',
   },
   {
-    id: 'usr_03',
+    id: 'usr_admin_1',
+    displayName: 'Ved Shah',
+    email: 'ved@adasglobuspro.example.com',
+    role: 'Admin',
+  },
+  {
+    id: 'usr_bdr_1',
     displayName: 'Priya Nair',
-    email: 'priya.nair@adasglobuspro.example.com',
-    initials: 'PN',
-    role: 'Sales Manager',
-    timeZone: 'Asia/Kolkata',
+    email: 'priya@adasglobuspro.example.com',
+    role: 'BDR / SDR (Canada)',
+  },
+  {
+    id: 'usr_ae_1',
+    displayName: 'Rohan Desai',
+    email: 'rohan@adasglobuspro.example.com',
+    role: 'Account Executive',
+  },
+  {
+    id: 'usr_mkt_1',
+    displayName: 'Ananya Iyer',
+    email: 'ananya@adasglobuspro.example.com',
+    role: 'Marketing Manager',
+  },
+  {
+    id: 'usr_ro_1',
+    displayName: 'Devika Joshi',
+    email: 'dev@adasglobuspro.example.com',
+    role: 'Read-only analyst',
   },
 ];
 
-/**
- * Dev login is compiled out of production builds (AGENTS.md §6).
- */
+/** Development sign-in is compiled out of production builds (AGENTS.md §6). */
 export function canUseDevLogin(isProdBuild: boolean = import.meta.env.PROD): boolean {
   return !isProdBuild;
 }

@@ -38,7 +38,10 @@ export const EnvSchema = z
 
     ENTRA_TENANT_ID: z.string().min(1).default('00000000-0000-0000-0000-000000000000'),
     ENTRA_CLIENT_ID: z.string().min(1).default('00000000-0000-0000-0000-000000000000'),
-    ENTRA_REDIRECT_URI: z.string().url().default('http://localhost:3000/api/v1/auth/sso/callback'),
+    ENTRA_CLIENT_SECRET_FILE: z.string().min(1).default('./secrets/entra_client_secret.txt'),
+    // Must match a redirect URI on the Entra app registration. In development the web app
+    // proxies /api, so sign-in stays on one origin.
+    ENTRA_REDIRECT_URI: z.string().url().default('http://localhost:5174/api/v1/auth/sso/callback'),
 
     CF_ACCESS_TEAM_DOMAIN: z.string().min(1).default('adasglobuspro.cloudflareaccess.com'),
     CF_ACCESS_AUD: z

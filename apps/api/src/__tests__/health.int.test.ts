@@ -35,12 +35,12 @@ describe('API HTTP server integration', () => {
     expect(body.mailLive).toBe(false);
   });
 
-  it('returns RFC 9457 application/problem+json on unknown routes (PRD §6.7)', async () => {
+  it('returns RFC 9457 application/problem+json, and hides routes from callers who are not signed in (PRD §6.7, §9)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/does-not-exist`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
     expect(res.headers.get('content-type')).toContain('application/problem+json');
     const body = (await res.json()) as { code: string; status: number };
-    expect(body.code).toBe('route_not_found');
-    expect(body.status).toBe(404);
+    expect(body.code).toBe('UNAUTHENTICATED');
+    expect(body.status).toBe(401);
   });
 });

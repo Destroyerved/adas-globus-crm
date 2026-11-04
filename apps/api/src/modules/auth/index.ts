@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  BreakGlassLoginInputSchema,
-  type BreakGlassLoginInput,
-  type Market,
-  type SessionUser,
-  type UserRoleName,
-} from '@adas/shared';
+import { type Market, type SessionUser, type UserRoleName } from '@adas/shared';
 import { type DatabaseService } from '../../platform/db/index.js';
 import {
   DomainError,
@@ -109,123 +103,64 @@ export class AuthAndUsersService {
   }
 
   /**
-   * PRD §3.1 — Invite-only Entra OIDC sign-in: rejects any Microsoft 365 user
-   * who has not been pre-invited in `users`.
+   * PRD 6.6: invite-only Microsoft sign-in. Matches a Microsoft account to an invited CRM
+   * user by email, then pins the Microsoft object ID so a renamed or reused mailbox can't
+   * take over the account. Returns the CRM user ID to start a session for.
    */
-  async signInWithEntraOidc(
-    email: string,
-    ipAddress = '127.0.0.1',
-  ): Promise<{
-    sessionId: string;
-    csrfToken: string;
-    user: SessionUser;
-  }> {
-    const cleanEmail = email.trim().toLowerCase();
-    const res = await this.db.query<{ id: string; status: string }>(
-      `SELECT id, status FROM users WHERE LOWER(email) = $1 LIMIT 1`,
-      [cleanEmail],
+  async findUserForEntraSignIn(identity: { objectId: string; email: string }): Promise<string> {
+    const res = await this.db.query<{
+      id: string;
+      status: string;
+      entra_object_id: string | null;
+    }>(
+      `SELECT id, status, entra_object_id FROM users
+       WHERE entra_object_id = $1 OR LOWER(email) = $2
+       ORDER BY (entra_object_id = $1) DESC NULLS LAST
+       LIMIT 1`,
+      [identity.objectId, identity.email.trim().toLowerCase()],
     );
-    const found = res.rows[0];
-    if (!found || found.status === 'disabled') {
+    const user = res.rows[0];
+    if (!user || user.status === 'disabled') {
       throw new DomainError({
         status: 403,
         code: 'USER_NOT_INVITED',
         title: 'Access restricted to invited employees',
-        detail: `No active invitation exists for '${cleanEmail}'. Ask an Admin to invite your @adasglobuspro.com account.`,
+        detail:
+          'Your Microsoft account has not been invited to ADAS CRM. Ask an admin to invite you.',
       });
     }
-
-    const sessionId = `ses_${randomUUID()}`;
-    const csrfToken = `csrf_${randomUUID().replace(/-/g, '')}`;
-
-    await this.db.transaction(async (tx) => {
-      if (found.status === 'invited') {
-        await tx.query(`UPDATE users SET status = 'active', updated_at = NOW() WHERE id = $1`, [
-          found.id,
-        ]);
-      }
-      await tx.query(
-        `INSERT INTO sessions (id, user_id, csrf_token, ip_address, expires_at)
-         VALUES ($1, $2, $3, $4, NOW() + INTERVAL '12 hours')`,
-        [sessionId, found.id, csrfToken, ipAddress],
-      );
-      await this.db.writeAuditLog(tx, {
-        actorUserId: found.id,
-        actorEmail: cleanEmail,
-        action: 'auth.entra_oidc_login',
-        entityType: 'session',
-        entityId: sessionId,
-        ipAddress,
+    if (user.entra_object_id && user.entra_object_id !== identity.objectId) {
+      throw new DomainError({
+        status: 403,
+        code: 'ENTRA_ACCOUNT_MISMATCH',
+        title: 'Different Microsoft account',
+        detail:
+          'This CRM user is linked to a different Microsoft account. Ask an admin to check it.',
       });
-    });
-
-    const user = await this.resolveSessionUser(found.id);
-    return { sessionId, csrfToken, user };
+    }
+    await this.db.query(
+      `UPDATE users
+       SET entra_object_id = $2,
+           status = CASE WHEN status = 'invited' THEN 'active' ELSE status END,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [user.id, identity.objectId],
+    );
+    return user.id;
   }
 
-  /**
-   * PRD §3.1 — Break-glass local admin sign-in (Argon2id + TOTP).
-   */
-  async signInBreakGlass(
-    rawInput: BreakGlassLoginInput,
-    ipAddress = '127.0.0.1',
-  ): Promise<{ sessionId: string; csrfToken: string; user: SessionUser }> {
-    const input = BreakGlassLoginInputSchema.parse(rawInput);
-    const cleanEmail = input.email.trim().toLowerCase();
-
-    const res = await this.db.query<{
-      id: string;
-      is_break_glass: boolean;
-      password_hash: string | null;
-      totp_secret: string | null;
-    }>(
-      `SELECT id, is_break_glass, password_hash, totp_secret
-       FROM users
-       WHERE LOWER(email) = $1 AND status = 'active'
-       LIMIT 1`,
-      [cleanEmail],
-    );
-
-    const row = res.rows[0];
-    if (!row || !row.is_break_glass || !row.password_hash || !row.totp_secret) {
+  /** Development and tests only: the seeded user to sign in as (never in production). */
+  async findUserForDevSignIn(userId: string): Promise<string> {
+    if (!this.isDevLoginAllowed()) {
       throw new DomainError({
-        status: 401,
-        code: 'INVALID_BREAK_GLASS_CREDENTIALS',
-        title: 'Break-glass authentication failed',
-        detail: 'Account is not configured for break-glass admin sign-in.',
+        status: 404,
+        code: 'NOT_FOUND',
+        title: 'Not found',
+        detail: 'Not found.',
       });
     }
-
-    if (input.password.length < 12 || input.totpCode !== '123456') {
-      throw new DomainError({
-        status: 401,
-        code: 'INVALID_BREAK_GLASS_CREDENTIALS',
-        title: 'Break-glass authentication failed',
-        detail: 'Invalid password or 6-digit TOTP verification code.',
-      });
-    }
-
-    const sessionId = `ses_bg_${randomUUID()}`;
-    const csrfToken = `csrf_${randomUUID().replace(/-/g, '')}`;
-
-    await this.db.transaction(async (tx) => {
-      await tx.query(
-        `INSERT INTO sessions (id, user_id, csrf_token, ip_address, expires_at)
-         VALUES ($1, $2, $3, $4, NOW() + INTERVAL '4 hours')`,
-        [sessionId, row.id, csrfToken, ipAddress],
-      );
-      await this.db.writeAuditLog(tx, {
-        actorUserId: row.id,
-        actorEmail: cleanEmail,
-        action: 'auth.break_glass_login',
-        entityType: 'session',
-        entityId: sessionId,
-        ipAddress,
-      });
-    });
-
-    const user = await this.resolveSessionUser(row.id);
-    return { sessionId, csrfToken, user };
+    const user = await this.resolveSessionUser(userId);
+    return user.id;
   }
 
   async inviteUser(
@@ -325,3 +260,13 @@ export class AuthAndUsersService {
     return res.rows;
   }
 }
+
+export {
+  SessionService,
+  CookieSigner,
+  readCookies,
+  serializeCookie,
+  sessionCookieName,
+  clientIp,
+} from './sessions.js';
+export { EntraSignIn, type EntraIdentity, type PendingSignIn } from './entra.js';

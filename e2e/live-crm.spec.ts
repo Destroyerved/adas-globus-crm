@@ -39,10 +39,16 @@ const SCREENS = [
 
 test.beforeAll(() => mkdirSync(SCREENS_DIR, { recursive: true }));
 
+test.beforeEach(async ({ page }) => {
+  const res = await page.request.post('/api/v1/auth/dev-login', { data: { userId: 'usr_mgr_1' } });
+  expect(res.ok()).toBe(true);
+});
+
 for (const screen of SCREENS) {
   test(`${screen.name} loads live data, passes axe and fits 1440px and 375px`, async ({ page }) => {
     for (const width of [1440, 375]) {
       await page.setViewportSize({ width, height: 900 });
+      if (screen.name === '01-login') await page.context().clearCookies();
       await page.goto(`/${screen.query}`);
       await expect(page.getByText(screen.ready, { exact: false }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
@@ -119,7 +125,10 @@ test('a new lead is saved, survives a reload, converts to a deal and moves throu
 
 test('the command palette finds a real company', async ({ page }) => {
   await page.goto('/?screen=leads&palette=1');
+  const palette = page.getByTestId('command-palette');
+  await expect(palette).toBeVisible();
   await page.keyboard.type('Ridgeway');
+  await expect(palette.getByText('Ridgeway CPA Group', { exact: true })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Ridgeway CPA Group' })).toBeVisible();
 });
@@ -129,4 +138,32 @@ test('screens show an error with a retry when the API is unreachable', async ({ 
   await page.goto('/?screen=leads');
   await expect(page.getByText("Can't reach the CRM server")).toBeVisible();
   await expect(page.getByRole('button', { name: /retry/i })).toBeVisible();
+});
+
+test('without a session the app shows sign-in, and Microsoft sign-in says it is not set up yet', async ({
+  page,
+}) => {
+  await page.context().clearCookies();
+  await page.goto('/?screen=deals');
+  await expect(page.getByRole('heading', { name: 'Sign in to ADAS CRM' })).toBeVisible();
+  await expect(page.getByTestId('microsoft-signin-btn')).toBeDisabled();
+  await expect(page.getByText('Not available yet')).toBeVisible();
+  // Production builds never offer the development sign-in
+  await expect(page.locator('#dev-user-select')).toHaveCount(0);
+
+  // The API refuses data without a session
+  const res = await page.request.get('/api/v1/leads');
+  expect(res.status()).toBe(401);
+});
+
+test('signing out ends the session', async ({ page }) => {
+  await page.goto('/?screen=leads');
+  await expect(page.getByText('Jane Patel').first()).toBeVisible();
+  await page
+    .getByRole('button', { name: /^Sign out/ })
+    .first()
+    .click();
+  await expect(page.getByRole('heading', { name: 'Sign in to ADAS CRM' })).toBeVisible();
+  const res = await page.request.get('/api/v1/auth/me');
+  expect(res.status()).toBe(401);
 });

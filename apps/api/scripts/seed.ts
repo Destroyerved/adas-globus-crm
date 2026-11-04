@@ -5,9 +5,10 @@
  *   pnpm db:seed
  */
 import pg from 'pg';
-import { validateEnv } from '../src/platform/config/index.js';
+import { loadDotEnv, validateEnv } from '../src/platform/config/index.js';
 import { seedSyntheticBaseline } from '../src/platform/db/seed.js';
 
+loadDotEnv();
 const env = validateEnv();
 if (env.NODE_ENV === 'production') {
   console.error('[seed] Refusing to load demo data into a production database.');

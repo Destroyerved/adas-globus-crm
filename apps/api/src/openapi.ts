@@ -22,21 +22,46 @@ const openApiSpec = {
         responses: { '200': { description: 'Healthy' } },
       },
     },
-    '/auth/entra-oidc': {
-      post: {
-        operationId: 'signInEntraOidc',
-        summary: 'Invite-only Microsoft Entra OIDC sign-in (PRD §3.1)',
+    '/auth/config': {
+      get: {
+        operationId: 'getAuthConfig',
+        summary: 'Which sign-in methods are available (PRD 6.6)',
+        responses: { '200': { description: 'Sign-in options' } },
+      },
+    },
+    '/auth/sso/start': {
+      get: {
+        operationId: 'startMicrosoftSignIn',
+        summary: 'Redirects to Microsoft Entra sign-in (authorization code flow with PKCE)',
         responses: {
-          '200': { description: 'Authenticated' },
-          '403': { description: 'Not invited' },
+          '302': { description: 'Redirect to Microsoft, or to the login page if not configured' },
         },
       },
     },
-    '/auth/break-glass': {
+    '/auth/sso/callback': {
+      get: {
+        operationId: 'finishMicrosoftSignIn',
+        summary: 'Microsoft redirects here; validates the ID token and starts a session',
+        responses: {
+          '302': { description: 'Redirect to the app, or to the login page with an error' },
+        },
+      },
+    },
+    '/auth/me': {
+      get: {
+        operationId: 'getCurrentUser',
+        summary: 'The signed-in user',
+        responses: {
+          '200': { description: 'Current user' },
+          '401': { description: 'Not signed in' },
+        },
+      },
+    },
+    '/auth/logout': {
       post: {
-        operationId: 'signInBreakGlass',
-        summary: 'Break-glass local admin sign-in (Argon2id + TOTP, PRD §3.1)',
-        responses: { '200': { description: 'Authenticated' } },
+        operationId: 'signOut',
+        summary: 'Ends the current session',
+        responses: { '204': { description: 'Signed out' } },
       },
     },
     '/users': {

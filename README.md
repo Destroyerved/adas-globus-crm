@@ -11,7 +11,16 @@ The internal CRM for ADAS Globus Pro: companies, contacts, leads, deals and task
 
 ## What works today
 
-Leads, Contacts, Companies (list and profile), Deals (pipeline board) and Tasks read and write real data through the API and PostgreSQL. Website inquiries from adasglobuspro.com are accepted at `POST /api/v1/public/inquiries`. Permissions are scoped per role (own, team, all) in every query.
+Leads, Contacts, Companies (list and profile), Deals (pipeline board) and Tasks read and write real data through the API and PostgreSQL. Website inquiries from adasglobuspro.com are accepted at `POST /api/v1/public/inquiries`. Permissions are scoped per role (own, team, all) in every query. Every API call needs a signed-in session (an HttpOnly cookie); writes must come from the CRM web app.
+
+## Microsoft sign-in
+
+Employees sign in with their Microsoft 365 account. Until it's configured, the button on the sign-in page says it isn't available. To turn it on, an Entra admin creates an app registration (single tenant, platform "Web") with the redirect URI `http://localhost:5174/api/v1/auth/sso/callback` (plus the production URL later), then:
+
+- set `ENTRA_TENANT_ID` and `ENTRA_CLIENT_ID` in `.env`
+- save a client secret in `secrets/entra_client_secret.txt` (git-ignored)
+
+Only users invited in the CRM can sign in. The first sign-in links their Microsoft account to their CRM user.
 
 ## Set up a development machine
 

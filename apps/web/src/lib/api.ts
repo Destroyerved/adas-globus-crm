@@ -17,27 +17,30 @@ export class ApiError extends Error {
   }
 }
 
-/** Development only: which seeded user the API should act as. Real sign-in replaces this (R3). */
-let devUserId: string | null = import.meta.env.PROD ? null : 'usr_01';
-export function setDevUserId(id: string): void {
-  if (!import.meta.env.PROD) devUserId = id;
+/** Who is signed in. The session lives in an HttpOnly cookie the browser sends itself. */
+export interface CurrentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  teamId: string | null;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body !== undefined) headers.set('Content-Type', 'application/json');
-  if (devUserId) headers.set('X-Dev-User-Id', devUserId);
 
   let response: Response;
   try {
-    response = await fetch(`/api/v1${path}`, { ...init, headers });
+    response = await fetch(`/api/v1${path}`, { ...init, headers, credentials: 'same-origin' });
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', "Can't reach the CRM server. Check that it's running.");
   }
 
   const text = await response.text();
   const body: unknown = text ? safeJson(text) : null;
+  if (response.status === 204) return undefined as T;
   if (!response.ok) {
     const problem = (body ?? {}) as {
       code?: string;
@@ -200,6 +203,11 @@ export const PIPELINE_STAGES = [
 type Items<T> = { items: T[] };
 
 export const api = {
+  authConfig: () => request<{ microsoftSignIn: boolean; devSignIn: boolean }>('/auth/config'),
+  me: () => request<CurrentUser>('/auth/me'),
+  devLogin: (userId: string) => post<CurrentUser>('/auth/dev-login', { userId }),
+  logout: () => post<undefined>('/auth/logout', {}),
+
   listUsers: () => request<Items<UserRow>>('/users').then((r) => r.items),
 
   listLeads: () => request<Items<LeadRow>>('/leads').then((r) => r.items),

@@ -29,37 +29,28 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
   // -------------------------------------------------------------------------
 
   it('Phase 1: enforces invite-only Entra OIDC, break-glass TOTP login, CSRF & host routing (PRD §3.1, §6.1, §9)', async () => {
-    // Uninvited user is rejected with 403 USER_NOT_INVITED
+    // A Microsoft account that hasn't been invited is rejected
     await expect(
-      services.auth.signInWithEntraOidc('stranger@external.example.com'),
-    ).rejects.toMatchObject({
-      status: 403,
-      code: 'USER_NOT_INVITED',
-    });
-
-    // Invited user succeeds and writes audit_logs
-    const oidcSession = await services.auth.signInWithEntraOidc('arjun@adasglobuspro.example.com');
-    expect(oidcSession.user.role).toBe('Sales Manager');
-    expect(oidcSession.sessionId).toMatch(/^ses_/);
-
-    // Break-glass admin login requires valid password + 6-digit TOTP
-    await expect(
-      services.auth.signInBreakGlass({
-        email: 'ved@adasglobuspro.example.com',
-        password: 'correct-horse-battery-staple',
-        totpCode: '000000',
+      services.auth.findUserForEntraSignIn({
+        objectId: 'oid-stranger',
+        email: 'stranger@external.example.com',
       }),
-    ).rejects.toMatchObject({
-      status: 401,
-      code: 'INVALID_BREAK_GLASS_CREDENTIALS',
-    });
+    ).rejects.toMatchObject({ status: 403, code: 'USER_NOT_INVITED' });
 
-    const bgSession = await services.auth.signInBreakGlass({
-      email: 'ved@adasglobuspro.example.com',
-      password: 'correct-horse-battery-staple',
-      totpCode: '123456',
+    // An invited user is matched by email and their Microsoft object ID is pinned
+    const userId = await services.auth.findUserForEntraSignIn({
+      objectId: 'oid-arjun',
+      email: 'Arjun@AdasGlobusPro.example.com',
     });
-    expect(bgSession.user.role).toBe('Admin');
+    expect(userId).toBe('usr_mgr_1');
+
+    // A different Microsoft account using the same email can't take over the user
+    await expect(
+      services.auth.findUserForEntraSignIn({
+        objectId: 'oid-someone-else',
+        email: 'arjun@adasglobuspro.example.com',
+      }),
+    ).rejects.toMatchObject({ status: 403, code: 'ENTRA_ACCOUNT_MISMATCH' });
 
     // Host routing: go.* allows /u/* and /api/v1/public/*, blocks /api/v1/deals
     expect(

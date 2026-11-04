@@ -8,8 +8,9 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { readMigrations } from '../src/platform/db/index.js';
-import { validateEnv } from '../src/platform/config/index.js';
+import { loadDotEnv, validateEnv } from '../src/platform/config/index.js';
 
+loadDotEnv();
 const env = validateEnv();
 const client = new pg.Client({ connectionString: env.DATABASE_ADMIN_URL });
 

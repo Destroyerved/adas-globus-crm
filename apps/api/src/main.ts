@@ -1,17 +1,31 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AuthAndUsersService } from './modules/auth/index.js';
+import {
+  AuthAndUsersService,
+  CookieSigner,
+  EntraSignIn,
+  SessionService,
+  readCookies,
+  serializeCookie,
+  sessionCookieName,
+} from './modules/auth/index.js';
 import { ComplianceService, checkSendable } from './modules/compliance/index.js';
 import { CrmService } from './modules/crm/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
 import { WebsiteIntakeService } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
-import { isDevLoginEnabled, validateEnv, type AppEnv } from './platform/config/index.js';
+import {
+  isDevLoginEnabled,
+  loadDotEnv,
+  validateEnv,
+  type AppEnv,
+} from './platform/config/index.js';
 import { DatabaseService } from './platform/db/index.js';
-import { DomainError, toProblemDetails } from './platform/errors/index.js';
+import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
 import { MailpitTransport } from './platform/mail-transport/index.js';
 
@@ -61,6 +75,16 @@ async function readJsonBody(
       detail: 'The request body must be a JSON object.',
     });
   }
+}
+
+/** Secret for signing short-lived cookies. Production must provide the file. */
+function loadSessionSecret(file: string, production: boolean): string {
+  if (existsSync(file) && readFileSync(file, 'utf8').trim().length >= 32) {
+    return readFileSync(file, 'utf8').trim();
+  }
+  if (production)
+    throw new Error(`SESSION_SECRET_FILE ${file} is missing or shorter than 32 characters.`);
+  return randomBytes(32).toString('hex'); // development: valid until the API restarts
 }
 
 function escapeHtml(value: string): string {
@@ -113,6 +137,25 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
   const outreach = new OutreachService(db, compliance, transport);
   const intelligence = new IntelligenceService(db);
   const devLoginEnabled = isDevLoginEnabled(env);
+  const production = env.NODE_ENV === 'production';
+  const sessions = new SessionService(
+    db,
+    env.SESSION_IDLE_TIMEOUT_HOURS,
+    env.SESSION_ABSOLUTE_TIMEOUT_DAYS,
+  );
+  const entra = new EntraSignIn({
+    tenantId: env.ENTRA_TENANT_ID,
+    clientId: env.ENTRA_CLIENT_ID,
+    clientSecretFile: env.ENTRA_CLIENT_SECRET_FILE,
+    redirectUri: env.ENTRA_REDIRECT_URI,
+  });
+  const signer = new CookieSigner(loadSessionSecret(env.SESSION_SECRET_FILE, production));
+  const OIDC_COOKIE = production ? '__Host-adas_oidc' : 'adas_oidc';
+  const sessionCookie = (token: string) =>
+    serializeCookie(sessionCookieName(production), token, {
+      maxAgeSeconds: env.SESSION_ABSOLUTE_TIMEOUT_DAYS * 86_400,
+      secure: production,
+    });
   const webOrigin = new URL(env.PUBLIC_WEB_URL).origin;
   const inquiryOrigins = env.INQUIRY_CORS_ORIGINS.split(',')
     .map((o) => o.trim())
@@ -235,51 +278,136 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
-      // Sign-in endpoints are development stubs: they don't check a Microsoft token or a real
-      // password. They are switched off outside development (PRD §6.6 is not built yet).
-      if (pathname.startsWith('/api/v1/auth/') && !devLoginEnabled) {
+      // ---- Sign-in, sessions and sign-out (PRD 6.6) ----
+      const cookies = readCookies(req);
+      const sendJson = (
+        status: number,
+        data: unknown,
+        extraHeaders: Record<string, string | string[]> = {},
+      ) => {
+        res.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          ...extraHeaders,
+        });
+        res.end(serializeJson(data));
+      };
+      const redirect = (location: string, setCookies: string[] = []) => {
+        res.writeHead(302, {
+          Location: location,
+          'Cache-Control': 'no-store',
+          'Set-Cookie': setCookies,
+        });
+        res.end();
+      };
+
+      if (method === 'GET' && pathname === '/api/v1/auth/config') {
+        sendJson(200, { microsoftSignIn: entra.isConfigured(), devSignIn: devLoginEnabled });
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/auth/sso/start') {
+        if (!entra.isConfigured()) {
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=login&error=sso_not_configured`);
+          return;
+        }
+        const { url, pending } = await entra.start();
+        redirect(url, [
+          serializeCookie(OIDC_COOKIE, signer.sign(JSON.stringify(pending)), {
+            maxAgeSeconds: 600,
+            secure: production,
+          }),
+        ]);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/auth/sso/callback') {
+        const clearPending = serializeCookie(OIDC_COOKIE, '', {
+          maxAgeSeconds: 0,
+          secure: production,
+        });
+        try {
+          const pendingRaw = signer.verify(cookies[OIDC_COOKIE]);
+          if (!pendingRaw) throw new Error('Sign-in expired or was started in another browser.');
+          if (parsedUrl.searchParams.get('error')) {
+            throw new Error(
+              parsedUrl.searchParams.get('error_description') ?? 'Microsoft sign-in was cancelled.',
+            );
+          }
+          const identity = await entra.finish(parsedUrl.search, JSON.parse(pendingRaw));
+          const userId = await auth.findUserForEntraSignIn(identity);
+          const token = await sessions.create(userId, req, 'microsoft');
+          redirect(`${env.PUBLIC_WEB_URL}/`, [clearPending, sessionCookie(token)]);
+        } catch (err) {
+          const code = err instanceof DomainError ? err.code.toLowerCase() : 'sso_failed';
+          logger.warn(
+            { code, err: err instanceof Error ? err.message : String(err) },
+            'Microsoft sign-in failed',
+          );
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=login&error=${encodeURIComponent(code)}`, [
+            clearPending,
+          ]);
+        }
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/auth/dev-login') {
+        // Development and tests only: sign in as a seeded user with a real session.
+        if (!devLoginEnabled) throw new NotFoundDomainError('Route', pathname);
+        const body = await readJsonBody(req);
+        const userId = await auth.findUserForDevSignIn(String(body['userId'] ?? ''));
+        const token = await sessions.create(userId, req, 'dev');
+        sendJson(200, await auth.resolveSessionUser(userId), {
+          'Set-Cookie': [sessionCookie(token)],
+        });
+        return;
+      }
+
+      if (pathname === '/api/v1/auth/break-glass') {
         throw new DomainError({
           status: 501,
-          code: 'SIGN_IN_NOT_IMPLEMENTED',
-          title: 'Sign-in not available',
-          detail: 'Microsoft Entra sign-in is not built yet.',
+          code: 'BREAK_GLASS_NOT_BUILT',
+          title: 'Not available yet',
+          detail: 'Break-glass admin sign-in (password plus authenticator code) is not built yet.',
         });
       }
 
-      // Auth endpoints
-      if (method === 'POST' && pathname === '/api/v1/auth/break-glass') {
-        const body = await readJsonBody(req);
-        const result = await auth.signInBreakGlass(body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
+      if (method === 'POST' && pathname === '/api/v1/auth/logout') {
+        await sessions.revoke(cookies[sessionCookieName(production)]);
+        res.writeHead(204, {
+          'Set-Cookie': serializeCookie(sessionCookieName(production), '', {
+            maxAgeSeconds: 0,
+            secure: production,
+          }),
+        });
+        res.end();
         return;
       }
 
-      if (method === 'POST' && pathname === '/api/v1/auth/entra-oidc') {
-        const body = await readJsonBody(req);
-        const email = typeof body['email'] === 'string' ? body['email'] : '';
-        const result = await auth.signInWithEntraOidc(email);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
-        return;
-      }
-
-      // Resolve current user. Development only: the X-Dev-User-Id header picks a seeded user.
-      // There are no real sessions yet, so outside development every request is refused.
-      if (!devLoginEnabled) {
+      // Every other API route needs a signed-in session.
+      const userId = await sessions.resolve(cookies[sessionCookieName(production)]);
+      if (!userId) {
         throw new DomainError({
           status: 401,
           code: 'UNAUTHENTICATED',
           title: 'Sign-in required',
-          detail: 'Real sign-in is not built yet, so the API refuses requests outside development.',
+          detail: 'Your session has ended. Sign in again.',
         });
       }
-      const headerUserId = req.headers['x-dev-user-id'];
-      const activeUserId =
-        typeof headerUserId === 'string' && headerUserId.trim() !== ''
-          ? headerUserId.trim()
-          : 'usr_mgr_1';
-      const user = await auth.resolveSessionUser(activeUserId);
+      // Cross-site request forgery: state-changing requests must come from the CRM web app.
+      if (method !== 'GET' && method !== 'HEAD' && req.headers.origin !== webOrigin) {
+        throw new DomainError({
+          status: 403,
+          code: 'CSRF_ORIGIN_REJECTED',
+          title: 'Request blocked',
+          detail: 'This request did not come from the CRM web app.',
+        });
+      }
+      const user = await auth.resolveSessionUser(userId);
+
+      if (method === 'GET' && pathname === '/api/v1/auth/me') {
+        sendJson(200, user);
+        return;
+      }
 
       // Users & Audit Logs
       if (method === 'GET' && pathname === '/api/v1/users') {
@@ -752,12 +880,14 @@ const isMainModule =
   process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 
 if (isMainModule) {
+  loadDotEnv();
   const { server, logger, env, db } = createAppServer();
-  // Fail closed: this build keeps all data in memory (PGlite, wiped on every restart) and
-  // has no real sign-in. It must not run as production until both exist (docs/PROGRESS.md).
+  // Fail closed until the remaining production blockers in docs/PROGRESS.md are done:
+  // the background worker, the connectors, break-glass sign-in, and verification on real
+  // PostgreSQL and Microsoft Entra. Remove this guard in R8 (production deploy).
   if (env.NODE_ENV === 'production') {
     logger.fatal(
-      'Refusing to start with NODE_ENV=production: data is in-memory only and sign-in is a development stub. See docs/PROGRESS.md, "Not production-ready".',
+      'Refusing to start with NODE_ENV=production: the CRM is not production-ready yet (worker, connectors and verification outstanding). See docs/PROGRESS.md, "Not production-ready".',
     );
     process.exit(1);
   }

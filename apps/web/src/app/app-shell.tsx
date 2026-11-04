@@ -10,7 +10,6 @@ import {
   PanelLeftOpen,
   Plus,
   Search,
-  Settings,
   UserPlus,
   Users,
   X,
@@ -18,13 +17,19 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { StatusBadge } from '@/components/ui/badge.js';
 import { type AppScreenId } from '@/features/command-palette/command-palette.js';
-import { type DevUser } from '@/lib/api-client.js';
+/** The signed-in user, as the shell shows it. */
+export interface ShellUser {
+  displayName: string;
+  initials: string;
+  role: string;
+}
 
 export interface AppShellProps {
   activeScreen: AppScreenId;
   onNavigate: (screen: AppScreenId) => void;
   onOpenCommandPalette: () => void;
-  currentUser: DevUser;
+  currentUser: ShellUser;
+  onSignOut: () => void;
   children: ReactNode;
 }
 
@@ -73,6 +78,7 @@ export function AppShell({
   onNavigate,
   onOpenCommandPalette,
   currentUser,
+  onSignOut,
   children,
 }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -299,28 +305,19 @@ export function AppShell({
         </div>
       </div>
 
-      {/* Bottom utilities: Settings & Sign-in screen link */}
+      {/* Bottom utilities: Settings returns when the Settings screen exists (PRD 4.17) */}
       <div className="pt-[12px] border-t border-navy-line space-y-[2px]">
         <button
           type="button"
-          title={isCollapsedView ? 'Settings' : undefined}
-          onClick={() => onOpenCommandPalette()}
-          className="w-full h-[36px] px-[10px] rounded-[8px] flex items-center gap-[10px] bg-transparent text-sidebar-foreground font-medium hover:bg-navy-2 hover:text-primary-foreground cursor-pointer border-0 transition-colors duration-120"
-        >
-          <Settings size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
-          {!isCollapsedView && <span className="text-[14px]">Settings</span>}
-        </button>
-        <button
-          type="button"
-          title={isCollapsedView ? 'Sign-in screen' : undefined}
+          title={isCollapsedView ? 'Sign out' : undefined}
           onClick={() => {
-            onNavigate('login');
+            onSignOut();
             setMobileDrawerOpen(false);
           }}
           className="w-full h-[36px] px-[10px] rounded-[8px] flex items-center gap-[10px] bg-transparent text-sidebar-foreground font-medium hover:bg-navy-2 hover:text-primary-foreground cursor-pointer border-0 transition-colors duration-120"
         >
           <LogOut size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
-          {!isCollapsedView && <span className="text-[14px]">Sign-in screen</span>}
+          {!isCollapsedView && <span className="text-[14px]">Sign out</span>}
         </button>
       </div>
     </div>
@@ -503,15 +500,15 @@ export function AppShell({
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => onNavigate('login')}
-              aria-label={`${currentUser.initials} — Signed in as ${currentUser.displayName}`}
+            <span
               title={`${currentUser.displayName} · ${currentUser.role}`}
-              className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-tint text-primary-ink text-[12px] font-semibold cursor-pointer border border-line"
+              className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-tint text-primary-ink text-[12px] font-semibold border border-line"
             >
-              {currentUser.initials}
-            </button>
+              <span aria-hidden="true">{currentUser.initials}</span>
+              <span className="sr-only">
+                Signed in as {currentUser.displayName}, {currentUser.role}
+              </span>
+            </span>
           </div>
         </header>
 
