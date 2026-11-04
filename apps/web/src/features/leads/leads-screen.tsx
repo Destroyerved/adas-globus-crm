@@ -1,755 +1,280 @@
-import { useMemo, useRef, useState, useEffect } from 'react';
-import {
-  ArrowUpDown,
-  ClockAlert,
-  Download,
-  MoreHorizontal,
-  Plus,
-  Search,
-  SlidersHorizontal,
-  Upload,
-  X,
-} from 'lucide-react';
-import {
-  formatDate,
-  formatDateTime,
-  formatNumber,
-  formatPersonWithCompany,
-  formatRelative,
-  type Market,
-} from '@adas/shared';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
+import { formatRelative, type Market, type StatusTone } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
-import { AddFilterChip, FilterChip } from '@/components/ui/chip.js';
+import { FilterChip } from '@/components/ui/chip.js';
 import { Input } from '@/components/ui/input.js';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ui/state-views.js';
-import { apiClient } from '@/lib/api-client.js';
+import { api, type LeadRow } from '@/lib/api.js';
 import {
-  SYNTHETIC_LEADS,
-  SYNTHETIC_LEADS_TOTAL,
-  type SyntheticLeadRow,
-} from '@/lib/synthetic-data.js';
+  CreateForm,
+  DataPanel,
+  Field,
+  PageHeader,
+  SearchBox,
+  errorMessage,
+  fieldError,
+  matches,
+  rowClass,
+  str,
+  tableClass,
+  tdClass,
+  thClass,
+  theadRowClass,
+  useUserNames,
+} from '@/features/shared/live-kit.js';
 
 export type ScreenDataState = 'loaded' | 'empty' | 'loading' | 'error';
 
-export interface LeadsScreenProps {
-  initialState?: ScreenDataState;
-  initialSelectedIds?: string[];
-  onOpenCompany: (companyId: string) => void;
-}
+const STATUS_TONE: Record<string, StatusTone> = {
+  New: 'info',
+  Researching: 'neutral',
+  Contacted: 'neutral',
+  Engaged: 'brand',
+  Qualified: 'success',
+  Disqualified: 'neutral',
+  Converted: 'success',
+};
 
-const REFERENCE_NOW = '2026-11-04T14:30:00Z';
+type MarketFilter = 'all' | 'US' | 'CA';
+type StatusFilter = 'open' | 'all';
 
-export function LeadsScreen({
-  initialState = 'loaded',
-  initialSelectedIds = ['lead_01', 'lead_02'],
-  onOpenCompany,
-}: LeadsScreenProps) {
-  const [leadsList, setLeadsList] = useState<SyntheticLeadRow[]>(SYNTHETIC_LEADS);
-  const [viewTab, setViewTab] = useState<'all' | 'mine' | 'website' | 'unassigned'>('all');
-  const [dataState, setDataState] = useState<ScreenDataState>(initialState);
-  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
-  const [marketFilter, setMarketFilter] = useState<Market | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedIds, setSelectedIds] = useState<string[]>(initialSelectedIds);
-  const [sortAsc, setSortAsc] = useState<boolean | null>(null);
-  const [newLeadOpen, setNewLeadOpen] = useState(false);
-  const [newLeadContact, setNewLeadContact] = useState('');
-  const [newLeadFirm, setNewLeadFirm] = useState('');
-  const [newLeadEmail, setNewLeadEmail] = useState('');
-  const [newLeadMarket, setNewLeadMarket] = useState<Market>('US');
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+export function LeadsScreen({ onOpenCompany }: { onOpenCompany: (companyId: string) => void }) {
+  const queryClient = useQueryClient();
+  const ownerName = useUserNames();
+  const leads = useQuery({ queryKey: ['leads'], queryFn: api.listLeads });
+  const [search, setSearch] = useState('');
+  const [market, setMarket] = useState<MarketFilter>('all');
+  const [status, setStatus] = useState<StatusFilter>('open');
+  const [formOpen, setFormOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDataState(initialState);
-  }, [initialState]);
+  const visible = useMemo(
+    () =>
+      (leads.data ?? []).filter(
+        (l: LeadRow) =>
+          (market === 'all' || l.market === market) &&
+          (status === 'all' || l.status_category !== 'closed') &&
+          matches(search, l.full_name, l.email, l.firm_name, l.source),
+      ),
+    [leads.data, market, status, search],
+  );
 
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isInput =
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.tagName === 'SELECT' ||
-        target?.isContentEditable;
-      if (isInput) {
-        return;
-      }
-      if (event.key === '/') {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  const filteredLeads = useMemo(() => {
-    if (dataState === 'empty') {
-      return [];
-    }
-    const base = leadsList.filter((lead) => {
-      if (viewTab === 'mine' && lead.ownerName !== 'Arjun Mehta') {
-        return false;
-      }
-      if (viewTab === 'website' && !lead.source.startsWith('Website')) {
-        return false;
-      }
-      if (marketFilter && lead.market !== marketFilter) {
-        return false;
-      }
-      if (statusFilter && lead.status !== statusFilter) {
-        return false;
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        return (
-          lead.contactName.toLowerCase().includes(q) ||
-          lead.companyName.toLowerCase().includes(q) ||
-          lead.email.toLowerCase().includes(q) ||
-          lead.source.toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-    if (sortAsc === null) {
-      return base;
-    }
-    return [...base].sort((a, b) =>
-      sortAsc
-        ? a.contactName.localeCompare(b.contactName)
-        : b.contactName.localeCompare(a.contactName),
-    );
-  }, [leadsList, dataState, viewTab, marketFilter, statusFilter, searchQuery, sortAsc]);
-
-  const handleCreateLead = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newLeadContact.trim() || !newLeadFirm.trim() || !newLeadEmail.trim()) {
-      return;
-    }
-    const created: SyntheticLeadRow = {
-      id: `lead_${Date.now()}`,
-      companyId: 'comp_01',
-      contactName: newLeadContact.trim(),
-      contactTitle: 'Managing Partner',
-      companyName: newLeadFirm.trim(),
-      email: newLeadEmail.trim().toLowerCase(),
-      market: newLeadMarket,
-      firmSize: '21-50',
-      software: ['UltraTax CS'],
-      status: 'New',
-      statusTone: 'info',
-      source: 'Manual entry',
-      ownerName: 'Arjun Mehta',
-      ownerInitials: 'AM',
-      lastContactedAt: '2026-11-04T14:25:00Z',
-      nextFollowUpAt: '2026-11-05T15:00:00Z',
-      overdueFollowUp: false,
-    };
-    setLeadsList((prev) => [created, ...prev]);
-    void apiClient.createLead({
-      firstName: newLeadContact.trim(),
-      email: newLeadEmail.trim().toLowerCase(),
-      companyName: newLeadFirm.trim(),
-      market: newLeadMarket,
-      source: 'Manual entry',
-    });
-    setNewLeadContact('');
-    setNewLeadFirm('');
-    setNewLeadEmail('');
-    setNewLeadOpen(false);
-    setActionNotice(
-      `Created lead ${created.contactName} (${created.companyName}) in ${created.market} pipeline.`,
-    );
-  };
-
-  const handleConvertLead = (lead: SyntheticLeadRow) => {
-    setLeadsList((prev) =>
-      prev.map((row) =>
-        row.id === lead.id ? { ...row, status: 'Converted', statusTone: 'success' } : row,
+  const refreshRecords = () =>
+    Promise.all(
+      ['leads', 'deals', 'companies', 'contacts', 'tasks'].map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] }),
       ),
     );
-    void apiClient.convertLead(lead.id, {
-      dealName: `${lead.companyName} — 3-Day Free Trial Pod`,
-      startTrial: true,
-    });
-    setActionNotice(
-      `Converted ${lead.contactName} (${lead.companyName}) → Created Company, Contact, Deal & 3-day free trial check-in tasks (Day 1, Day 2, Day 3).`,
-    );
-  };
 
-  const allVisibleSelected =
-    filteredLeads.length > 0 && filteredLeads.every((row) => selectedIds.includes(row.id));
+  const createLead = useMutation({
+    mutationFn: api.createLead,
+    onSuccess: async (lead) => {
+      setFormOpen(false);
+      setNotice(`Added ${lead.full_name} as a new lead.`);
+      await refreshRecords();
+    },
+  });
 
-  const toggleSelectAll = () => {
-    if (allVisibleSelected) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(filteredLeads.map((row) => row.id));
-    }
-  };
+  const convertLead = useMutation({
+    mutationFn: (lead: LeadRow) => api.convertLead({ leadId: lead.id }),
+    onSuccess: async (_result, lead) => {
+      setNotice(`Converted ${lead.full_name}. A deal was created in New business.`);
+      await refreshRecords();
+    },
+    onError: (err) => setNotice(errorMessage(err)),
+  });
 
-  const toggleRow = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
-  };
-
-  const rowHeightClass = density === 'compact' ? 'h-[36px]' : 'h-[44px]';
+  const filtered = search !== '' || market !== 'all' || status !== 'open';
 
   return (
-    <div className="space-y-[16px] pb-[64px]" data-testid="leads-screen">
-      {/* Page header (DESIGN.md §5.3) */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
-        <div>
-          <div className="kicker mb-[4px]">Qualification pipeline</div>
-          <h1 className="text-display text-ink m-0">
-            <strong>Leads</strong>{' '}
-            <span className="text-ink-3 font-light tabular-nums">
-              {formatNumber(SYNTHETIC_LEADS_TOTAL)}
-            </span>
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-[8px]">
-          <Button variant="outline" onClick={() => setDataState('empty')}>
-            <Upload size={16} strokeWidth={1.6} aria-hidden="true" />
-            <span>Import leads</span>
-          </Button>
-          <Button variant="primary" onClick={() => setNewLeadOpen((prev) => !prev)}>
+    <div className="space-y-[16px]" data-testid="leads-screen">
+      <PageHeader
+        kicker="Qualification pipeline"
+        title="Leads"
+        count={leads.data ? visible.length : undefined}
+        actions={
+          <Button variant="primary" onClick={() => setFormOpen(true)}>
             <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
             <span>New lead</span>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      {actionNotice && (
+      {notice && (
         <div
           role="status"
           className="rounded-[10px] border border-line bg-tint px-[16px] py-[10px] text-[13.5px] text-primary-ink flex items-center justify-between gap-[12px]"
         >
-          <span>{actionNotice}</span>
-          <button
-            type="button"
-            onClick={() => setActionNotice(null)}
-            aria-label="Dismiss notification"
-            className="text-primary-ink bg-transparent border-0 cursor-pointer p-0"
-          >
-            <X size={15} aria-hidden="true" />
-          </button>
+          <span>{notice}</span>
+          <Button variant="link" onClick={() => setNotice(null)}>
+            Dismiss
+          </Button>
         </div>
       )}
 
-      {newLeadOpen && (
-        <form
-          onSubmit={handleCreateLead}
-          aria-label="Create new lead"
-          className="bg-surface border border-line rounded-[10px] p-[16px] space-y-[12px]"
+      {formOpen && (
+        <CreateForm
+          title="New lead"
+          submitLabel="Save lead"
+          pending={createLead.isPending}
+          error={createLead.error}
+          onClose={() => setFormOpen(false)}
+          onSubmit={(data) => {
+            const [firstName = '', ...rest] = str(data, 'name').split(/\s+/);
+            createLead.mutate({
+              firstName,
+              lastName: rest.join(' '),
+              email: str(data, 'email'),
+              firmName: str(data, 'firm') || undefined,
+              title: str(data, 'title') || undefined,
+              market: str(data, 'market') as Market,
+            });
+          }}
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-title text-ink m-0">New qualification lead</h2>
-            <button
-              type="button"
-              onClick={() => setNewLeadOpen(false)}
-              aria-label="Close new lead form"
-              className="text-ink-3 hover:text-ink bg-transparent border-0 cursor-pointer"
+          <Field label="Full name" error={fieldError(createLead.error, 'firstName')}>
+            <Input name="name" required autoComplete="off" />
+          </Field>
+          <Field label="Work email" error={fieldError(createLead.error, 'email')}>
+            <Input name="email" type="email" required autoComplete="off" />
+          </Field>
+          <Field label="Firm" optional>
+            <Input name="firm" autoComplete="off" />
+          </Field>
+          <Field label="Job title" optional>
+            <Input name="title" autoComplete="off" />
+          </Field>
+          <Field label="Market">
+            <select
+              name="market"
+              defaultValue="US"
+              className="h-[36px] rounded-[8px] border border-input bg-surface px-[12px] text-[14px]"
             >
-              <X size={16} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-[10px]">
-            <Input
-              placeholder="Contact full name"
-              aria-label="Contact full name"
-              value={newLeadContact}
-              onChange={(e) => setNewLeadContact(e.target.value)}
-              required
-            />
-            <Input
-              placeholder="CPA firm name"
-              aria-label="CPA firm name"
-              value={newLeadFirm}
-              onChange={(e) => setNewLeadFirm(e.target.value)}
-              required
-            />
-            <Input
-              type="email"
-              placeholder="Work email"
-              aria-label="Work email"
-              value={newLeadEmail}
-              onChange={(e) => setNewLeadEmail(e.target.value)}
-              required
-            />
-            <div className="flex items-center gap-[8px]">
-              <select
-                aria-label="Lead market"
-                value={newLeadMarket}
-                onChange={(e) => setNewLeadMarket(e.target.value as Market)}
-                className="h-[36px] rounded-[8px] border border-line-field bg-surface px-[10px] text-[14px] text-ink"
-              >
-                <option value="US">US (CAN-SPAM)</option>
-                <option value="CA">CA (CASL)</option>
-              </select>
-              <Button type="submit" variant="primary" size="md">
-                Save lead
-              </Button>
-            </div>
-          </div>
-        </form>
+              <option value="US">United States</option>
+              <option value="CA">Canada</option>
+            </select>
+          </Field>
+        </CreateForm>
       )}
 
-      {/* View tabs (DESIGN.md §5.3) */}
-      <div
-        className="flex items-center gap-[20px] border-b border-line overflow-x-auto"
-        role="tablist"
-        aria-label="Lead views"
+      <div className="flex flex-col lg:flex-row lg:items-center gap-[8px]">
+        <SearchBox value={search} onChange={setSearch} label="Search name, email, firm or source" />
+        <div className="flex flex-wrap gap-[8px]">
+          {(['all', 'US', 'CA'] as const).map((m) => (
+            <FilterChip
+              key={m}
+              label={m === 'all' ? 'All markets' : m === 'US' ? 'United States' : 'Canada'}
+              active={market === m}
+              onClick={() => setMarket(m)}
+            />
+          ))}
+          <FilterChip
+            label={status === 'open' ? 'Open leads' : 'All statuses'}
+            active={status === 'open'}
+            onClick={() => setStatus(status === 'open' ? 'all' : 'open')}
+          />
+        </div>
+      </div>
+
+      <DataPanel
+        query={leads}
+        isEmpty={visible.length === 0}
+        emptyTitle={filtered ? 'No leads match these filters' : 'No leads yet'}
+        emptyDescription={
+          filtered
+            ? 'Clear the search or filters to see every lead.'
+            : 'Leads from the website forms appear here automatically, or add one by hand.'
+        }
+        emptyActionLabel={filtered ? 'Clear filters' : 'New lead'}
+        onEmptyAction={() => {
+          if (filtered) {
+            setSearch('');
+            setMarket('all');
+            setStatus('open');
+          } else {
+            setFormOpen(true);
+          }
+        }}
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={viewTab === 'all' && dataState === 'loaded'}
-          onClick={() => {
-            setViewTab('all');
-            setDataState('loaded');
-          }}
-          className="view-tab"
-        >
-          <span>All leads</span>
-          <span className="text-ink-3 text-[12.5px] tabular-nums">12,480</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={viewTab === 'mine' && dataState === 'loaded'}
-          onClick={() => {
-            setViewTab('mine');
-            setDataState('loaded');
-          }}
-          className="view-tab"
-        >
-          <span>My open leads</span>
-          <span className="text-ink-3 text-[12.5px] tabular-nums">142</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={viewTab === 'website' && dataState === 'loaded'}
-          onClick={() => {
-            setViewTab('website');
-            setDataState('loaded');
-          }}
-          className="view-tab"
-        >
-          <span>Website inquiries</span>
-          <span className="text-ink-3 text-[12.5px] tabular-nums">18</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={dataState === 'empty'}
-          onClick={() => setDataState('empty')}
-          className="view-tab"
-        >
-          <span>Empty state</span>
-        </button>
-      </div>
-
-      {/* Filter chips, list search, density and state controls (DESIGN.md §5, §6.3) */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-[12px]">
-        <div className="flex flex-wrap items-center gap-[8px]">
-          <FilterChip
-            label="Market"
-            value={marketFilter ?? 'All (US & CA)'}
-            active={marketFilter !== null}
-            onClick={() =>
-              setMarketFilter((prev) => (prev === null ? 'US' : prev === 'US' ? 'CA' : null))
-            }
-            onRemove={marketFilter ? () => setMarketFilter(null) : undefined}
-          />
-          <FilterChip
-            label="Status"
-            value={statusFilter ?? 'Open & Qualified'}
-            active={statusFilter !== null}
-            onClick={() =>
-              setStatusFilter((prev) =>
-                prev === null ? 'Qualified' : prev === 'Qualified' ? 'Engaged' : null,
-              )
-            }
-            onRemove={statusFilter ? () => setStatusFilter(null) : undefined}
-          />
-          <AddFilterChip
-            onClick={() => {
-              setMarketFilter('US');
-              setStatusFilter('Qualified');
-            }}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-[8px]">
-          <div className="relative w-full sm:w-[240px]">
-            <Search
-              size={15}
-              strokeWidth={1.6}
-              className="absolute left-[11px] top-1/2 -translate-y-1/2 text-ink-3 pointer-events-none"
-              aria-hidden="true"
-            />
-            <Input
-              ref={searchInputRef}
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter list… (/)"
-              aria-label="Filter leads list"
-              className="pl-[32px]"
-            />
-          </div>
-
-          <div
-            className="inline-flex items-center rounded-pill border border-line-strong bg-surface p-[2px]"
-            role="group"
-            aria-label="Row density"
-          >
-            <button
-              type="button"
-              aria-pressed={density === 'comfortable'}
-              onClick={() => setDensity('comfortable')}
-              className={`h-[28px] px-[10px] rounded-pill text-[12.5px] font-semibold cursor-pointer border-0 ${
-                density === 'comfortable'
-                  ? 'bg-navy text-primary-foreground'
-                  : 'bg-transparent text-ink-2'
-              }`}
-            >
-              Comfortable
-            </button>
-            <button
-              type="button"
-              aria-pressed={density === 'compact'}
-              onClick={() => setDensity('compact')}
-              className={`h-[28px] px-[10px] rounded-pill text-[12.5px] font-semibold cursor-pointer border-0 ${
-                density === 'compact'
-                  ? 'bg-navy text-primary-foreground'
-                  : 'bg-transparent text-ink-2'
-              }`}
-            >
-              Compact
-            </button>
-          </div>
-
-          <div
-            className="inline-flex items-center rounded-pill border border-line bg-surface p-[2px]"
-            role="group"
-            aria-label="Screen state preview"
-          >
-            {(['loaded', 'empty', 'loading', 'error'] as const).map((st) => (
-              <button
-                key={st}
-                type="button"
-                aria-pressed={dataState === st}
-                onClick={() => setDataState(st)}
-                className={`h-[28px] px-[9px] rounded-pill text-[12px] font-medium capitalize cursor-pointer border-0 ${
-                  dataState === st
-                    ? 'bg-tint text-primary-ink font-semibold'
-                    : 'bg-transparent text-ink-3'
-                }`}
-              >
-                {st}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* White panel with hairline table or state view (DESIGN.md §6.5, §6.13) */}
-      <div className="bg-surface border border-line rounded-[10px] overflow-hidden">
-        {dataState === 'loading' && <LoadingState rows={7} />}
-
-        {dataState === 'error' && (
-          <ErrorState
-            message="Could not load leads from the server. Check your connection and try again."
-            requestId="req_01jc9x8k2m4p7v"
-            onRetry={() => setDataState('loaded')}
-          />
-        )}
-
-        {(dataState === 'empty' || (dataState === 'loaded' && filteredLeads.length === 0)) && (
-          <EmptyState
-            title={
-              searchQuery || marketFilter || statusFilter
-                ? 'No leads match these filters'
-                : 'No leads yet'
-            }
-            description={
-              searchQuery || marketFilter || statusFilter
-                ? 'Try clearing a filter chip or searching by company domain.'
-                : 'Import a spreadsheet from Apollo or Bigin, or add a prospect by hand.'
-            }
-            actionLabel={
-              searchQuery || marketFilter || statusFilter ? 'Clear filters' : 'Import leads'
-            }
-            actionVariant="primary"
-            onAction={() => {
-              setMarketFilter(null);
-              setStatusFilter(null);
-              setSearchQuery('');
-              setDataState('loaded');
-            }}
-          />
-        )}
-
-        {dataState === 'loaded' && filteredLeads.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="h-[36px] border-b border-line bg-surface text-label text-ink-3">
-                  <th scope="col" className="w-[40px] pl-[16px] pr-[8px]">
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleSelectAll}
-                      aria-label="Select all visible leads"
-                      className="h-[16px] w-[16px] rounded-[4px] accent-primary cursor-pointer"
-                    />
-                  </th>
-                  <th scope="col" className="px-[12px] min-w-[240px]">
+        <table className={tableClass}>
+          <thead>
+            <tr className={theadRowClass}>
+              <th scope="col" className={`${thClass} pl-[16px]`}>
+                Name · Firm
+              </th>
+              <th scope="col" className={thClass}>
+                Market
+              </th>
+              <th scope="col" className={thClass}>
+                Status
+              </th>
+              <th scope="col" className={thClass}>
+                Source
+              </th>
+              <th scope="col" className={thClass}>
+                Owner
+              </th>
+              <th scope="col" className={thClass}>
+                Added
+              </th>
+              <th scope="col" className={thClass}>
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((lead) => (
+              <tr key={lead.id} className={rowClass}>
+                <td className={`${tdClass} pl-[16px] min-w-[240px]`}>
+                  {lead.company_id ? (
                     <button
                       type="button"
-                      onClick={() => setSortAsc((prev) => (prev === null ? true : !prev))}
-                      className="inline-flex items-center gap-[4px] bg-transparent border-0 p-0 text-label text-ink-3 hover:text-ink cursor-pointer"
+                      onClick={() => onOpenCompany(lead.company_id as string)}
+                      className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
                     >
-                      <span>Name · Firm</span>
-                      <ArrowUpDown size={13} strokeWidth={1.6} aria-hidden="true" />
+                      {lead.full_name}
+                      {lead.firm_name ? ` · ${lead.firm_name}` : ''}
                     </button>
-                  </th>
-                  <th scope="col" className="px-[12px] w-[80px]">
-                    Market
-                  </th>
-                  <th scope="col" className="px-[12px] w-[130px]">
-                    Status
-                  </th>
-                  <th scope="col" className="px-[12px] min-w-[160px]">
-                    Source
-                  </th>
-                  <th scope="col" className="px-[12px] min-w-[140px]">
-                    Owner
-                  </th>
-                  <th scope="col" className="px-[12px] min-w-[120px]">
-                    Last contacted
-                  </th>
-                  <th scope="col" className="px-[12px] min-w-[140px]">
-                    Next follow-up
-                  </th>
-                  <th scope="col" aria-label="Actions" className="w-[52px] pr-[16px] text-right" />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLeads.map((lead) => {
-                  const isSelected = selectedIds.includes(lead.id);
-                  return (
-                    <tr
-                      key={lead.id}
-                      className={`${rowHeightClass} border-b border-line last:border-b-0 transition-colors duration-120 ${
-                        isSelected
-                          ? 'bg-tint shadow-[inset_2px_0_0_0_var(--primary)]'
-                          : 'hover:bg-bg-alt'
-                      }`}
+                  ) : (
+                    <span className="font-semibold text-ink">
+                      {lead.full_name}
+                      {lead.firm_name ? ` · ${lead.firm_name}` : ''}
+                    </span>
+                  )}
+                  <div className="text-[13px] text-ink-3">{lead.email}</div>
+                </td>
+                <td className={tdClass}>
+                  <MarketBadge market={lead.market} />
+                </td>
+                <td className={tdClass}>
+                  <StatusBadge tone={STATUS_TONE[lead.status] ?? 'neutral'}>
+                    {lead.status}
+                  </StatusBadge>
+                </td>
+                <td className={`${tdClass} text-ink-2`}>{lead.source}</td>
+                <td className={`${tdClass} text-ink-2`}>{ownerName(lead.owner_user_id)}</td>
+                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
+                  {formatRelative(lead.created_at)}
+                </td>
+                <td className={`${tdClass} text-right pr-[16px]`}>
+                  {lead.status_category !== 'closed' && lead.status !== 'Converted' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={convertLead.isPending}
+                      onClick={() => convertLead.mutate(lead)}
+                      aria-label={`Convert ${lead.full_name} to a deal`}
                     >
-                      <td className="pl-[16px] pr-[8px]">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleRow(lead.id)}
-                          aria-label={`Select ${lead.contactName}`}
-                          className="h-[16px] w-[16px] rounded-[4px] accent-primary cursor-pointer"
-                        />
-                      </td>
-                      <td className="px-[12px]">
-                        <div className="flex flex-col">
-                          <button
-                            type="button"
-                            onClick={() => onOpenCompany(lead.companyId)}
-                            className="text-left font-semibold text-ink hover:underline cursor-pointer bg-transparent border-0 p-0 truncate max-w-[300px]"
-                          >
-                            {formatPersonWithCompany(lead.contactName, lead.companyName)}
-                          </button>
-                          <span
-                            className={`text-body-sm ${
-                              isSelected ? 'text-ink-2' : 'text-ink-3'
-                            } truncate max-w-[300px]`}
-                          >
-                            {lead.contactTitle} · {lead.email}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-[12px]">
-                        <MarketBadge market={lead.market} />
-                      </td>
-                      <td className="px-[12px]">
-                        <StatusBadge tone={lead.statusTone}>{lead.status}</StatusBadge>
-                      </td>
-                      <td className="px-[12px] text-ink-2 whitespace-nowrap">{lead.source}</td>
-                      <td className="px-[12px] whitespace-nowrap">
-                        <span className="inline-flex items-center gap-[8px]">
-                          <span
-                            className="inline-grid place-items-center h-[24px] w-[24px] rounded-pill bg-tint text-primary-ink text-[11px] font-semibold"
-                            aria-hidden="true"
-                          >
-                            {lead.ownerInitials}
-                          </span>
-                          <span className="text-ink-2">{lead.ownerName}</span>
-                        </span>
-                      </td>
-                      <td
-                        className="px-[12px] text-ink-2 whitespace-nowrap"
-                        title={
-                          lead.lastContactedAt
-                            ? formatDateTime(lead.lastContactedAt, 'Asia/Kolkata')
-                            : undefined
-                        }
-                      >
-                        {lead.lastContactedAt ? (
-                          formatRelative(lead.lastContactedAt, REFERENCE_NOW)
-                        ) : (
-                          <span className="text-ink-3">—</span>
-                        )}
-                      </td>
-                      <td className="px-[12px] whitespace-nowrap">
-                        {lead.nextFollowUpAt ? (
-                          lead.overdueFollowUp ? (
-                            <StatusBadge
-                              tone="danger"
-                              icon={<ClockAlert size={13} strokeWidth={1.6} aria-hidden="true" />}
-                            >
-                              Overdue · Today
-                            </StatusBadge>
-                          ) : (
-                            <span className="text-ink-2">
-                              {formatDate(lead.nextFollowUpAt, 'UTC')}
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-ink-3">—</span>
-                        )}
-                      </td>
-                      <td className="pr-[16px] text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-[4px]">
-                          {lead.status !== 'Converted' && (
-                            <button
-                              type="button"
-                              onClick={() => handleConvertLead(lead)}
-                              className="h-[26px] px-[8px] rounded-pill bg-tint text-primary-ink hover:bg-primary hover:text-primary-foreground text-[12px] font-semibold cursor-pointer border-0 transition-colors"
-                            >
-                              Convert
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => onOpenCompany(lead.companyId)}
-                            aria-label={`More actions for ${lead.contactName}`}
-                            className="inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill text-ink-2 hover:bg-bg-alt hover:text-ink cursor-pointer border-0 bg-transparent"
-                          >
-                            <MoreHorizontal size={16} strokeWidth={1.6} aria-hidden="true" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Floating navy bulk-action bar on selection (DESIGN.md §6.5) */}
-      {selectedIds.length > 0 && dataState === 'loaded' && (
-        <div
-          className="fixed bottom-[20px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-[6px] sm:gap-[10px] px-[16px] py-[8px] rounded-pill bg-navy text-primary-foreground border border-navy-line max-w-[calc(100vw-24px)] overflow-x-auto"
-          style={{ boxShadow: 'var(--shadow-pop)' }}
-          role="region"
-          aria-label="Bulk actions"
-          data-testid="bulk-action-bar"
-        >
-          <span className="text-[13px] font-semibold whitespace-nowrap">
-            <span className="text-cyan tabular-nums">{selectedIds.length}</span> selected
-          </span>
-          <span className="text-navy-line" aria-hidden="true">
-            ·
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setLeadsList((prev) =>
-                prev.map((row) =>
-                  selectedIds.includes(row.id)
-                    ? { ...row, ownerName: 'Priya Nair', ownerInitials: 'PN' }
-                    : row,
-                ),
-              );
-              setActionNotice(`Assigned ${selectedIds.length} selected leads to Priya Nair.`);
-            }}
-            className="h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
-          >
-            Assign
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setLeadsList((prev) =>
-                prev.map((row) =>
-                  selectedIds.includes(row.id)
-                    ? { ...row, status: 'Qualified', statusTone: 'success' }
-                    : row,
-                ),
-              );
-              setActionNotice(
-                `Updated status to Qualified for ${selectedIds.length} selected leads.`,
-              );
-            }}
-            className="h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
-          >
-            Change status
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setActionNotice(
-                `Tagged ${selectedIds.length} selected leads with "2027 Tax Season Pod".`,
-              )
-            }
-            className="hidden sm:inline-flex items-center h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
-          >
-            Add tag
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setActionNotice(
-                `Exported ${selectedIds.length} selected leads to CSV (audit log entry recorded).`,
-              )
-            }
-            className="hidden md:inline-flex items-center gap-[5px] h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
-          >
-            <Download size={14} strokeWidth={1.6} aria-hidden="true" />
-            <span>Export</span>
-          </button>
-          <button
-            type="button"
-            className="hidden sm:inline-flex items-center gap-[5px] h-[30px] px-[10px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground text-[13px] font-medium cursor-pointer border-0 whitespace-nowrap"
-          >
-            <SlidersHorizontal size={14} strokeWidth={1.6} aria-hidden="true" />
-            <span>More</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds([])}
-            aria-label="Clear selection"
-            className="inline-flex items-center justify-center h-[28px] w-[28px] rounded-pill bg-transparent hover:bg-navy-2 text-sidebar-foreground hover:text-primary-foreground cursor-pointer border-0 shrink-0"
-          >
-            <X size={15} strokeWidth={1.6} aria-hidden="true" />
-          </button>
-        </div>
-      )}
+                      Convert
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </DataPanel>
     </div>
   );
 }

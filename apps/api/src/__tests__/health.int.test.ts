@@ -2,9 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type AddressInfo } from 'node:net';
 import { createAppServer } from '../main.js';
 import { validateEnv } from '../platform/config/index.js';
+import { DatabaseService } from '../platform/db/index.js';
 
 describe('API HTTP server integration', () => {
-  const { server } = createAppServer(validateEnv({ NODE_ENV: 'test', LOG_LEVEL: 'error' }));
+  const { server } = createAppServer(
+    validateEnv({ NODE_ENV: 'test', LOG_LEVEL: 'error' }),
+    DatabaseService.forTests(),
+  );
   let baseUrl = '';
 
   beforeAll(async () => {

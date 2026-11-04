@@ -70,6 +70,61 @@ export class CrmService {
   }
 
   /**
+   * Company profile (PRD 4.3): the company plus its contacts, deals, open tasks and
+   * timeline. Each related list applies the viewer's own scope for that record type.
+   */
+  async getCompanyProfile(user: SessionUser, companyId: string): Promise<Record<string, unknown>> {
+    const company = await this.getCompany(user, companyId);
+    const contactScope = scopeWhere(user, 'contacts.read', { startParamIndex: 2 });
+    const dealScope = scopeWhere(user, 'deals.read', { startParamIndex: 2 });
+    const taskScope = scopeWhere(user, 'tasks.read', {
+      ownerColumn: 'assignee_user_id',
+      startParamIndex: 2,
+    });
+    const [contacts, deals, tasks, activities] = await Promise.all([
+      this.db.query(
+        `SELECT id, full_name, title, primary_email, phone_e164, market, timezone,
+                owner_user_id, do_not_contact, email_verification_status, lead_score, updated_at
+         FROM contacts
+         WHERE company_id = $1 AND deleted_at IS NULL AND ${contactScope.sql}
+         ORDER BY full_name ASC`,
+        [companyId, ...contactScope.params],
+      ),
+      this.db.query(
+        `SELECT id, name, stage_name, stage_category, monthly_value_minor, currency,
+                probability, expected_close_date, owner_user_id, updated_at
+         FROM deals
+         WHERE company_id = $1 AND deleted_at IS NULL AND ${dealScope.sql}
+         ORDER BY updated_at DESC`,
+        [companyId, ...dealScope.params],
+      ),
+      this.db.query(
+        `SELECT id, title, task_type, priority, status, due_at, assignee_user_id
+         FROM tasks
+         WHERE company_id = $1 AND status = 'open' AND deleted_at IS NULL AND ${taskScope.sql}
+         ORDER BY due_at ASC
+         LIMIT 20`,
+        [companyId, ...taskScope.params],
+      ),
+      this.db.query(
+        `SELECT id, activity_type, title, detail, actor_user_id, occurred_at
+         FROM activities
+         WHERE company_id = $1
+         ORDER BY occurred_at DESC
+         LIMIT 50`,
+        [companyId],
+      ),
+    ]);
+    return {
+      company,
+      contacts: contacts.rows,
+      deals: deals.rows,
+      tasks: tasks.rows,
+      activities: activities.rows,
+    };
+  }
+
+  /**
    * PRD §4.3 (A3) — Normalizes company domain (strips protocol/www/path/port),
    * blocks free-mail domains from being stored as company domains, and deduplicates
    * against existing active companies by normalized domain.
@@ -360,6 +415,24 @@ export class CrmService {
       : null;
 
     return this.db.transaction(async (tx) => {
+      // PRD 3.1: at most one open lead per person. Checked across all owners, so two
+      // people can't unknowingly prospect the same contact (PRD 2.3).
+      const openLead = await tx.query<{ full_name: string }>(
+        `SELECT full_name FROM leads
+         WHERE email = $1 AND status_category IN ('open', 'qualified') AND deleted_at IS NULL
+         LIMIT 1`,
+        [cleanEmail],
+      );
+      if (openLead.rows[0]) {
+        throw new DomainError({
+          status: 409,
+          code: 'DUPLICATE_OPEN_LEAD',
+          title: 'Lead already exists',
+          detail: `There's already an open lead for this email (${openLead.rows[0].full_name}). Update that lead instead.`,
+          fieldErrors: { email: ['This email already has an open lead.'] },
+        });
+      }
+
       const id = `lead_${randomUUID()}`;
       const fullName = `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
       const ownerId = input.ownerUserId ?? user.id;

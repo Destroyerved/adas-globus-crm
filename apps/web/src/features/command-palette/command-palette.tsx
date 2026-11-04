@@ -9,10 +9,66 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { COMMAND_PALETTE_ITEMS, type CommandPaletteItem } from '@/lib/synthetic-data.js';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api.js';
+
+interface CommandPaletteItem {
+  id: string;
+  group: 'RECORDS' | 'ACTIONS' | 'NAVIGATION';
+  label: string;
+  meta: string;
+  shortcut?: string;
+  targetScreen?: AppScreenId;
+  targetId?: string;
+}
+
+const NAVIGATION_ITEMS: CommandPaletteItem[] = [
+  {
+    id: 'nav_leads',
+    group: 'NAVIGATION',
+    label: 'Leads',
+    meta: 'Go to leads',
+    shortcut: 'G L',
+    targetScreen: 'leads',
+  },
+  {
+    id: 'nav_contacts',
+    group: 'NAVIGATION',
+    label: 'Contacts',
+    meta: 'Go to contacts',
+    shortcut: 'G C',
+    targetScreen: 'contacts',
+  },
+  {
+    id: 'nav_companies',
+    group: 'NAVIGATION',
+    label: 'Companies',
+    meta: 'Go to companies',
+    shortcut: 'G O',
+    targetScreen: 'companies',
+  },
+  {
+    id: 'nav_deals',
+    group: 'NAVIGATION',
+    label: 'Deals',
+    meta: 'Go to the deals board',
+    shortcut: 'G D',
+    targetScreen: 'deals',
+  },
+  {
+    id: 'nav_tasks',
+    group: 'NAVIGATION',
+    label: 'Tasks',
+    meta: 'Go to tasks',
+    shortcut: 'G T',
+    targetScreen: 'tasks',
+  },
+];
 
 export type AppScreenId =
   | 'leads'
+  | 'companies'
+  | 'contacts'
   | 'company'
   | 'deals'
   | 'tasks'
@@ -26,7 +82,7 @@ export type AppScreenId =
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
-  onSelectScreen: (screen: AppScreenId) => void;
+  onSelectScreen: (screen: AppScreenId, id?: string) => void;
 }
 
 const GROUP_ORDER: Array<CommandPaletteItem['group']> = ['RECORDS', 'ACTIONS', 'NAVIGATION'];
@@ -35,19 +91,49 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const companies = useQuery({
+    queryKey: ['companies'],
+    queryFn: api.listCompanies,
+    enabled: open,
+  });
+  const leads = useQuery({ queryKey: ['leads'], queryFn: api.listLeads, enabled: open });
+
+  const allItems = useMemo<CommandPaletteItem[]>(
+    () => [
+      ...(companies.data ?? []).map((c) => ({
+        id: `cmp_${c.id}`,
+        group: 'RECORDS' as const,
+        label: c.name,
+        meta: `Company · ${c.market}${c.city ? ` · ${c.city}` : ''}`,
+        targetScreen: 'company' as const,
+        targetId: c.id,
+      })),
+      ...(leads.data ?? []).map((l) => ({
+        id: `lead_${l.id}`,
+        group: 'RECORDS' as const,
+        label: l.firm_name ? `${l.full_name} · ${l.firm_name}` : l.full_name,
+        meta: `Lead · ${l.status} · ${l.market}`,
+        targetScreen: (l.company_id ? 'company' : 'leads') as AppScreenId,
+        targetId: l.company_id ?? undefined,
+      })),
+      ...NAVIGATION_ITEMS,
+    ],
+    [companies.data, leads.data],
+  );
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) {
-      return COMMAND_PALETTE_ITEMS;
+      // With no query, show navigation plus a few recent records.
+      return [...allItems.filter((i) => i.group === 'RECORDS').slice(0, 5), ...NAVIGATION_ITEMS];
     }
-    return COMMAND_PALETTE_ITEMS.filter(
+    return allItems.filter(
       (item) =>
         item.label.toLowerCase().includes(q) ||
         item.meta.toLowerCase().includes(q) ||
         item.group.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, allItems]);
 
   useEffect(() => {
     if (open) {
@@ -67,7 +153,7 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
 
   const handleSelect = (item: CommandPaletteItem) => {
     if (item.targetScreen) {
-      onSelectScreen(item.targetScreen);
+      onSelectScreen(item.targetScreen, item.targetId);
     }
     onClose();
   };

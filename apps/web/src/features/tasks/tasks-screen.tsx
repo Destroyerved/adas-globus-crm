@@ -1,239 +1,186 @@
-import { useState } from 'react';
-import { Calendar, CheckCircle2, Clock, Plus } from 'lucide-react';
-import { formatCount } from '@adas/shared';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, Plus } from 'lucide-react';
+import { formatDateTime, type StatusTone } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { StatusBadge } from '@/components/ui/badge.js';
-import { Panel } from '@/components/ui/panel.js';
+import { Input } from '@/components/ui/input.js';
+import { ErrorState, LoadingState, EmptyState } from '@/components/ui/state-views.js';
+import { api, type TaskRow } from '@/lib/api.js';
+import {
+  CreateForm,
+  Field,
+  PageHeader,
+  errorMessage,
+  fieldError,
+  str,
+  useUserNames,
+} from '@/features/shared/live-kit.js';
 
-interface TaskRow {
-  id: string;
-  title: string;
-  firmName: string;
-  contactName: string;
-  taskType: 'sla_first_response' | 'trial_checkin' | 'call' | 'follow_up';
-  priority: 'urgent' | 'high' | 'normal';
-  dueLabel: string;
-  slaCountdown?: string;
-  market: 'US' | 'CA';
-  assignee: string;
-  completed: boolean;
+const PRIORITY_TONE: Record<TaskRow['priority'], StatusTone> = {
+  urgent: 'danger',
+  high: 'warning',
+  normal: 'neutral',
+  low: 'neutral',
+};
+
+/** "Today" and "Overdue" use the viewer's own time zone (PRD 4.7). */
+function bucketOf(task: TaskRow, now: Date): 'overdue' | 'today' | 'upcoming' {
+  const due = new Date(task.due_at);
+  if (due < now) return 'overdue';
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+  return due <= endOfToday ? 'today' : 'upcoming';
 }
 
-const INITIAL_TASKS: TaskRow[] = [
-  {
-    id: 'tsk_sla_1',
-    title: 'First response SLA (15m): Jane Patel (3-day trial inquiry)',
-    firmName: 'Acme Tax & Advisory LLP',
-    contactName: 'Jane Patel',
-    taskType: 'sla_first_response',
-    priority: 'urgent',
-    dueLabel: 'Due in 11 min',
-    slaCountdown: '11m remaining',
-    market: 'US',
-    assignee: 'Arjun Mehta',
-    completed: false,
-  },
-  {
-    id: 'tsk_trial_d1',
-    title: 'Day 1 Free Trial check-in: Review UltraTax CS workpaper batch',
-    firmName: 'Acme Tax & Advisory LLP',
-    contactName: 'Jane Patel',
-    taskType: 'trial_checkin',
-    priority: 'high',
-    dueLabel: 'Today · 2:00 pm CT',
-    market: 'US',
-    assignee: 'Arjun Mehta',
-    completed: false,
-  },
-  {
-    id: 'tsk_trial_d2',
-    title: 'Day 2 Free Trial check-in: Turnaround time & reviewer feedback',
-    firmName: 'Acme Tax & Advisory LLP',
-    contactName: 'Jane Patel',
-    taskType: 'trial_checkin',
-    priority: 'high',
-    dueLabel: 'Tomorrow · 2:00 pm CT',
-    market: 'US',
-    assignee: 'Arjun Mehta',
-    completed: false,
-  },
-  {
-    id: 'tsk_trial_d3',
-    title: 'Day 3 Free Trial wrap-up & FTE conversion proposal',
-    firmName: 'Acme Tax & Advisory LLP',
-    contactName: 'Jane Patel',
-    taskType: 'trial_checkin',
-    priority: 'high',
-    dueLabel: '6 Nov 2026 · 3:00 pm CT',
-    market: 'US',
-    assignee: 'Arjun Mehta',
-    completed: false,
-  },
-  {
-    id: 'tsk_ca_call',
-    title: 'Discovery prep call: T1/T2 CaseWare pod scoping',
-    firmName: 'Northstar Chartered Accountants',
-    contactName: 'Marcus Vance',
-    taskType: 'call',
-    priority: 'normal',
-    dueLabel: '5 Nov 2026 · 10:30 am ET',
-    market: 'CA',
-    assignee: 'Priya Nair',
-    completed: false,
-  },
-];
+const GROUPS = [
+  { key: 'overdue', title: 'Overdue', tone: 'danger' },
+  { key: 'today', title: 'Due today', tone: 'warning' },
+  { key: 'upcoming', title: 'Upcoming', tone: 'neutral' },
+] as const;
 
 export function TasksScreen() {
-  const [tasks, setTasks] = useState<TaskRow[]>(INITIAL_TASKS);
-  const [filterType, setFilterType] = useState<'all' | 'sla' | 'trial'>('all');
-  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const queryClient = useQueryClient();
+  const ownerName = useUserNames();
+  const tasks = useQuery({ queryKey: ['tasks'], queryFn: api.listTasks });
+  const [formOpen, setFormOpen] = useState(false);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const filteredTasks = tasks.filter((t) => {
-    if (filterType === 'sla') return t.taskType === 'sla_first_response';
-    if (filterType === 'trial') return t.taskType === 'trial_checkin';
-    return true;
+  const open = useMemo(
+    () =>
+      (tasks.data ?? [])
+        .filter((t) => t.status === 'open')
+        .sort((a, b) => a.due_at.localeCompare(b.due_at)),
+    [tasks.data],
+  );
+  const now = new Date();
+
+  const complete = useMutation({
+    mutationFn: (task: TaskRow) => api.completeTask(task.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 
-  const toggleComplete = (id: string) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
-  };
-
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTaskTitle.trim()) return;
-    setTasks((prev) => [
-      {
-        id: `tsk_${Date.now()}`,
-        title: newTaskTitle.trim(),
-        firmName: 'Ridgeway CPA Group',
-        contactName: 'Elena Rostova',
-        taskType: 'follow_up',
-        priority: 'normal',
-        dueLabel: 'Today · 4:30 pm CT',
-        market: 'US',
-        assignee: 'Arjun Mehta',
-        completed: false,
-      },
-      ...prev,
-    ]);
-    setNewTaskTitle('');
-  };
-
-  const openCount = tasks.filter((t) => !t.completed).length;
+  const create = useMutation({
+    mutationFn: api.createTask,
+    onSuccess: async () => {
+      setFormOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
 
   return (
-    <div className="space-y-[16px] pb-[32px]" data-testid="tasks-screen">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-[12px]">
-        <div>
-          <div className="kicker mb-[4px]">Execution & SLA timers</div>
-          <h1 className="text-display text-ink m-0">
-            <strong>Tasks</strong>{' '}
-            <span className="text-ink-3 font-light tabular-nums">
-              {formatCount(openCount, 'open task')}
-            </span>
-          </h1>
-        </div>
-
-        <div
-          className="flex flex-wrap items-center gap-[8px]"
-          role="group"
-          aria-label="Task filter"
-        >
-          {(
-            [
-              { id: 'all', label: 'All tasks' },
-              { id: 'sla', label: '15m Website SLA' },
-              { id: 'trial', label: '3-day free trial check-ins' },
-            ] as const
-          ).map((tab) => (
-            <Button
-              key={tab.id}
-              size="sm"
-              variant={filterType === tab.id ? 'navy' : 'secondary'}
-              onClick={() => setFilterType(tab.id)}
-            >
-              {tab.label}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      <Panel className="p-[16px]">
-        <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row gap-[10px]">
-          <input
-            type="text"
-            value={newTaskTitle}
-            onChange={(e) => setNewTaskTitle(e.target.value)}
-            placeholder="Add follow-up or trial check-in task…"
-            aria-label="New task title"
-            className="h-[36px] min-h-[36px] w-full sm:flex-1 shrink-0 rounded-[8px] border border-line-field bg-surface px-[12px] text-[14px] text-ink"
-          />
-          <Button type="submit" variant="primary" size="md">
-            <Plus size={15} strokeWidth={1.8} aria-hidden="true" />
-            <span>Add task</span>
+    <div className="space-y-[16px]" data-testid="tasks-screen">
+      <PageHeader
+        kicker="Follow-ups"
+        title="Tasks"
+        count={tasks.data ? open.length : undefined}
+        actions={
+          <Button variant="primary" onClick={() => setFormOpen(true)}>
+            <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
+            <span>New task</span>
           </Button>
-        </form>
-      </Panel>
+        }
+      />
 
-      <Panel padded={false} className="overflow-hidden">
-        <div className="divide-y divide-line">
-          {filteredTasks.map((task) => (
-            <div
-              key={task.id}
-              className="p-[16px] flex flex-col sm:flex-row sm:items-center justify-between gap-[12px] hover:bg-surface-hover transition-colors"
+      {formOpen && (
+        <CreateForm
+          title="New task"
+          submitLabel="Save task"
+          pending={create.isPending}
+          error={create.error}
+          onClose={() => setFormOpen(false)}
+          onSubmit={(data) =>
+            create.mutate({
+              title: str(data, 'title'),
+              dueAt: new Date(str(data, 'due')).toISOString(),
+              priority: str(data, 'priority') as TaskRow['priority'],
+            })
+          }
+        >
+          <Field label="Task" error={fieldError(create.error, 'title')}>
+            <Input name="title" required autoComplete="off" />
+          </Field>
+          <Field label="Due" error={fieldError(create.error, 'dueAt')}>
+            <Input name="due" type="datetime-local" required />
+          </Field>
+          <Field label="Priority">
+            <select
+              name="priority"
+              defaultValue="normal"
+              className="h-[36px] rounded-[8px] border border-input bg-surface px-[12px] text-[14px]"
             >
-              <div className="flex items-start gap-[12px] min-w-0">
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => toggleComplete(task.id)}
-                  aria-label={`Complete task ${task.title}`}
-                  className="mt-[3px] w-[16px] h-[16px] accent-primary cursor-pointer shrink-0"
-                />
-                <div className="min-w-0">
-                  <div
-                    className={`text-[14px] font-[550] ${
-                      task.completed ? 'line-through text-ink-3' : 'text-ink'
-                    }`}
-                  >
-                    {task.title}
-                  </div>
-                  <div className="text-[12.5px] text-ink-2 mt-[2px] flex flex-wrap items-center gap-[8px]">
-                    <span>
-                      {task.contactName} · {task.firmName}
-                    </span>
-                    <StatusBadge tone="neutral">{task.market}</StatusBadge>
-                    <span>Assignee: {task.assignee}</span>
-                  </div>
-                </div>
-              </div>
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </Field>
+        </CreateForm>
+      )}
 
-              <div className="flex items-center gap-[8px] shrink-0">
-                {task.slaCountdown && !task.completed && (
-                  <StatusBadge tone="warning">
-                    <Clock size={12} className="inline mr-[4px]" aria-hidden="true" />
-                    {task.slaCountdown}
-                  </StatusBadge>
-                )}
-                {task.taskType === 'trial_checkin' && (
-                  <StatusBadge tone="brand">Free trial check-in</StatusBadge>
-                )}
-                {task.completed ? (
-                  <StatusBadge tone="success">
-                    <CheckCircle2 size={12} className="inline mr-[4px]" aria-hidden="true" />
-                    Completed
-                  </StatusBadge>
-                ) : (
-                  <span className="text-[12.5px] text-ink-3 tabular-nums inline-flex items-center gap-[4px]">
-                    <Calendar size={13} aria-hidden="true" />
-                    {task.dueLabel}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
+      {complete.isError && (
+        <p role="alert" className="m-0 text-[13px] text-danger">
+          {errorMessage(complete.error)}
+        </p>
+      )}
+
+      <div className="bg-surface border border-line rounded-[10px] overflow-hidden">
+        {tasks.isPending && <LoadingState rows={5} />}
+        {tasks.isError && (
+          <ErrorState message={errorMessage(tasks.error)} onRetry={() => void tasks.refetch()} />
+        )}
+        {tasks.isSuccess && open.length === 0 && (
+          <EmptyState
+            title="No open tasks"
+            description="Tasks you schedule appear here, with today’s at the top."
+            actionLabel="New task"
+            actionVariant="primary"
+            onAction={() => setFormOpen(true)}
+          />
+        )}
+        {tasks.isSuccess &&
+          open.length > 0 &&
+          GROUPS.map((group) => {
+            const items = open.filter((t) => bucketOf(t, now) === group.key);
+            if (items.length === 0) return null;
+            return (
+              <section key={group.key} aria-label={group.title}>
+                <h2 className="m-0 px-[16px] pt-[16px] pb-[8px] text-eyebrow text-ink-3">
+                  {group.title.toUpperCase()} · {items.length}
+                </h2>
+                <ul className="m-0 p-0 list-none">
+                  {items.map((t) => (
+                    <li
+                      key={t.id}
+                      className="flex items-center gap-[12px] px-[16px] py-[10px] border-t border-line"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={complete.isPending}
+                        onClick={() => complete.mutate(t)}
+                        aria-label={`Mark "${t.title}" done`}
+                      >
+                        <Check size={16} strokeWidth={1.6} aria-hidden="true" />
+                      </Button>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-ink">{t.title}</div>
+                        <div className="text-[13px] text-ink-3">
+                          {formatDateTime(t.due_at, timeZone)} · {ownerName(t.assignee_user_id)}
+                        </div>
+                      </div>
+                      <StatusBadge
+                        tone={group.key === 'overdue' ? 'danger' : PRIORITY_TONE[t.priority]}
+                      >
+                        {group.key === 'overdue' ? 'Overdue' : t.priority}
+                      </StatusBadge>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+      </div>
     </div>
   );
 }

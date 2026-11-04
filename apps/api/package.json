@@ -10,9 +10,10 @@
     "dev:worker": "tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:new": "prisma migrate dev --create-only",
-    "openapi:generate": "tsx src/openapi.ts"
+    "db:migrate": "tsx scripts/migrate.ts",
+    "openapi:generate": "tsx src/openapi.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "start:e2e": "tsx src/e2e-server.ts"
   },
   "dependencies": {
     "@adas/shared": "workspace:*",

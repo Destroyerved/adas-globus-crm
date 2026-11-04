@@ -103,7 +103,7 @@ function sendHtml(res: ServerResponse, status: number, html: string): void {
 
 export function createAppServer(env: AppEnv = validateEnv(), existingDb?: DatabaseService) {
   const logger = createLogger(env.LOG_LEVEL);
-  const db = existingDb ?? new DatabaseService();
+  const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
   const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV);
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
   const compliance = new ComplianceService(db);
@@ -314,6 +314,14 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
+      if (method === 'GET' && /^\/api\/v1\/companies\/[^/]+$/.test(pathname)) {
+        const companyId = decodeURIComponent(pathname.slice('/api/v1/companies/'.length));
+        const profile = await crm.getCompanyProfile(user, companyId);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(profile));
+        return;
+      }
+
       if (method === 'PATCH' && pathname.startsWith('/api/v1/companies/')) {
         const companyId = pathname.slice('/api/v1/companies/'.length);
         const body = await readJsonBody(req);
@@ -405,6 +413,16 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         const items = await crm.listTasks(user);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
+        return;
+      }
+
+      if (method === 'POST' && /^\/api\/v1\/tasks\/[^/]+\/complete$/.test(pathname)) {
+        const taskId = decodeURIComponent(
+          pathname.slice('/api/v1/tasks/'.length, -'/complete'.length),
+        );
+        const done = await crm.completeTask(user, taskId);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(serializeJson(done));
         return;
       }
 

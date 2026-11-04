@@ -8,6 +8,12 @@
       "port": 3000
     },
     {
+      "name": "crm-api-test-db",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@adas/api", "start:e2e"],
+      "port": 3000
+    },
+    {
       "name": "crm-web",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@adas/web", "dev"],

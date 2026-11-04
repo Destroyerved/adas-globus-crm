@@ -1,22 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  BarChart3,
   Bell,
   Building2,
   CheckSquare,
   Handshake,
-  Inbox,
-  LayoutDashboard,
   LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
-  Send,
   Settings,
-  Upload,
   UserPlus,
+  Users,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
@@ -39,23 +35,13 @@ interface NavItem {
   count?: string;
 }
 
+// Only modules that work end to end appear here (AGENTS.md section 3). Inbox, Outreach,
+// Imports and Reports return when their real connectors and data exist.
 const WORK_ITEMS: NavItem[] = [
   {
     id: 'tasks',
-    label: 'Tasks & SLA',
+    label: 'Tasks',
     icon: CheckSquare,
-    count: '5',
-  },
-  {
-    id: 'inbox',
-    label: 'Inbox (M365)',
-    icon: Inbox,
-    count: '2',
-  },
-  {
-    id: 'empty',
-    label: 'Empty state',
-    icon: LayoutDashboard,
   },
 ];
 
@@ -64,10 +50,14 @@ const RECORD_ITEMS: NavItem[] = [
     id: 'leads',
     label: 'Leads',
     icon: UserPlus,
-    count: '12,480',
   },
   {
-    id: 'company',
+    id: 'contacts',
+    label: 'Contacts',
+    icon: Users,
+  },
+  {
+    id: 'companies',
     label: 'Companies',
     icon: Building2,
   },
@@ -75,22 +65,6 @@ const RECORD_ITEMS: NavItem[] = [
     id: 'deals',
     label: 'Deals',
     icon: Handshake,
-    count: '8',
-  },
-  {
-    id: 'outreach',
-    label: 'Outreach & CASL',
-    icon: Send,
-  },
-  {
-    id: 'imports',
-    label: 'Imports & Merge',
-    icon: Upload,
-  },
-  {
-    id: 'reports',
-    label: 'Reports & Audit',
-    icon: BarChart3,
   },
 ];
 
@@ -111,7 +85,7 @@ export function AppShell({
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState<number>(2);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
   const [scrolled, setScrolled] = useState(false);
   const gChordRef = useRef<boolean>(false);
 
@@ -164,19 +138,19 @@ export function AppShell({
 
       if (gChordRef.current) {
         gChordRef.current = false;
-        const k = event.key.toLowerCase();
-        if (k === 'l') {
+        // DESIGN 9.3 keyboard map: G then L, C, O, D, T
+        const targets: Record<string, AppScreenId> = {
+          l: 'leads',
+          c: 'contacts',
+          o: 'companies',
+          d: 'deals',
+          t: 'tasks',
+          h: 'leads',
+        };
+        const target = targets[event.key.toLowerCase()];
+        if (target) {
           event.preventDefault();
-          onNavigate('leads');
-        } else if (k === 'o' || k === 'c') {
-          event.preventDefault();
-          onNavigate('company');
-        } else if (k === 'd') {
-          event.preventDefault();
-          onNavigate('deals');
-        } else if (k === 'h' || k === 'e') {
-          event.preventDefault();
-          onNavigate('empty');
+          onNavigate(target);
         }
       }
     };
@@ -521,34 +495,10 @@ export function AppShell({
                       Mark all read
                     </button>
                   </div>
-                  <div className="space-y-[8px] text-[13px]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        onNavigate('tasks');
-                      }}
-                      className="w-full text-left p-[8px] rounded-[8px] bg-bg-alt hover:bg-tint border-0 cursor-pointer"
-                    >
-                      <div className="font-semibold text-ink">15m Website SLA: Jane Patel</div>
-                      <div className="text-[12px] text-ink-2">
-                        Acme Tax &amp; Advisory LLP · 11m remaining
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        onNavigate('inbox');
-                      }}
-                      className="w-full text-left p-[8px] rounded-[8px] bg-bg-alt hover:bg-tint border-0 cursor-pointer"
-                    >
-                      <div className="font-semibold text-ink">Inbound reply received</div>
-                      <div className="text-[12px] text-ink-2">
-                        Jane Patel replied · Sequence auto-stopped
-                      </div>
-                    </button>
-                  </div>
+                  <p className="text-[13px] text-ink-2 m-0">
+                    No notifications yet. Assignments and reminders will appear here once the
+                    background worker is running.
+                  </p>
                 </div>
               )}
             </div>

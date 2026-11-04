@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createAppServer } from '../main.js';
 import { validateEnv } from '../platform/config/index.js';
+import { DatabaseService } from '../platform/db/index.js';
 
 describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 A1–A20)', () => {
   const env = validateEnv({
@@ -12,7 +13,7 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
     MAIL_LIVE: 'false',
   });
 
-  const app = createAppServer(env);
+  const app = createAppServer(env, DatabaseService.forTests());
   const { db, services, transport } = app;
 
   beforeAll(async () => {
@@ -262,6 +263,24 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
     } as never);
     expect(bot.honeypotDropped).toBe(true);
     expect(bot.leadId).toBeNull();
+  });
+
+  it('refuses a second open lead for the same email (PRD §3.1)', async () => {
+    const manager = await services.auth.resolveSessionUser('usr_mgr_1');
+    await services.crm.createLead(manager, {
+      firstName: 'Una',
+      lastName: 'Once',
+      email: 'una.once@onelead.example.com',
+      market: 'US',
+    } as never);
+    await expect(
+      services.crm.createLead(manager, {
+        firstName: 'Una',
+        lastName: 'Twice',
+        email: 'UNA.ONCE@onelead.example.com',
+        market: 'US',
+      } as never),
+    ).rejects.toMatchObject({ status: 409, code: 'DUPLICATE_OPEN_LEAD' });
   });
 
   it('A3 & A4: Company domain normalization deduplicates existing firm, and stale version throws 409 Conflict (PRD §4.3, §6.5)', async () => {

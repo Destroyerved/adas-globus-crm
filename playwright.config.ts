@@ -19,15 +19,15 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm --filter @adas/api start',
+      command: 'pnpm --filter @adas/api start:e2e',
       url: 'http://localhost:3000/api/v1/health',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 60_000,
     },
     {
       command: 'pnpm --filter @adas/web preview --port 5174',
       url: 'http://localhost:5174',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 60_000,
     },
   ],
