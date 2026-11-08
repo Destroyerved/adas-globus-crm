@@ -21,10 +21,11 @@ export default defineConfig({
           include: ['apps/api/src/**/*.int.test.ts', 'packages/**/src/**/*.int.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           environment: 'node',
-          testTimeout: 30000,
-          // Each file starts its own migrated database; under parallel load that can take
-          // longer than the 10s default.
-          hookTimeout: 30000,
+          // Each file builds its own PGlite database (every migration plus the seed) on first
+          // use. With six files building at once on a busy machine that has taken just over
+          // 30s, so the first test or hook in a file gets 90s; a real hang still fails.
+          testTimeout: 90000,
+          hookTimeout: 90000,
         },
       },
     ],
