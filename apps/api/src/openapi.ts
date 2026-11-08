@@ -57,6 +57,21 @@ const openApiSpec = {
         },
       },
     },
+    '/auth/local/login': {
+      post: {
+        operationId: 'emergencyAdminSignIn',
+        summary:
+          'Emergency admin sign-in with a password and an authenticator code (PRD 6.6). Same 401 for every wrong detail; locks after five wrong tries',
+        responses: {
+          '200': { description: 'Signed in; sets the session cookie' },
+          '401': { description: 'Email, password or code wrong, or the account is locked' },
+          '403': { description: 'Not sent from the CRM web app' },
+          '422': { description: 'Missing or malformed fields' },
+          '429': { description: 'Too many attempts from this network' },
+          '503': { description: 'Not set up on this server (no encryption key)' },
+        },
+      },
+    },
     '/auth/logout': {
       post: {
         operationId: 'signOut',

@@ -13,11 +13,13 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "openapi:generate": "tsx src/openapi.ts && prettier --write openapi.json",
     "db:seed": "tsx scripts/seed.ts",
+    "break-glass": "tsx scripts/break-glass.ts",
     "start:e2e": "tsx src/e2e-server.ts"
   },
   "dependencies": {
     "@adas/shared": "workspace:*",
     "@electric-sql/pglite": "^0.5.14",
+    "@node-rs/argon2": "^2.2.2",
     "openid-client": "^6.8.9",
     "pg": "^8.23.1",
     "pg-boss": "^10.4.2",

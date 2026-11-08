@@ -109,10 +109,14 @@ export const SessionUserSchema = z.object({
 });
 export type SessionUser = z.infer<typeof SessionUserSchema>;
 
+/** Emergency admin sign-in (PRD 6.6): `POST /auth/local/login`. */
 export const BreakGlassLoginInputSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  totpCode: z.string().regex(/^\d{6}$/, 'Enter a 6-digit TOTP code'),
+  email: z.string().trim().email('Enter the account’s email address'),
+  password: z.string().min(1, 'Enter the password').max(256),
+  totpCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the 6-digit code from your authenticator app'),
 });
 export type BreakGlassLoginInput = z.infer<typeof BreakGlassLoginInputSchema>;
 

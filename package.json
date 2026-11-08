@@ -14,6 +14,7 @@
     "dev:api": "pnpm --filter @adas/api dev",
     "db:migrate": "pnpm --filter @adas/api db:migrate",
     "db:seed": "pnpm --filter @adas/api db:seed",
+    "break-glass": "pnpm --filter @adas/api break-glass",
     "lint": "eslint . --max-warnings 0 && prettier --check \"**/*.{ts,tsx,mjs,json,css,md}\"",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,json,css,md}\"",
     "typecheck": "pnpm -r typecheck",

@@ -21,7 +21,7 @@ export const SEED_SQL: readonly string[] = [
       ON CONFLICT (id) DO NOTHING;
 
       INSERT INTO users (id, email, name, role_id, team_id, market_focus, status, is_break_glass, password_hash, totp_secret, daily_send_cap) VALUES
-        ('usr_admin_1', 'ved@adasglobuspro.example.com', 'Ved Shah', 'role_admin', 'team_us', 'US', 'active', TRUE, 'argon2id$v=19$m=65536,t=3,p=4$breakglass-admin', 'JBSWY3DPEHPK3PXP', 50),
+        ('usr_admin_1', 'ved@adasglobuspro.example.com', 'Ved Shah', 'role_admin', 'team_us', 'US', 'active', FALSE, NULL, NULL, 50),
         ('usr_mgr_1', 'arjun@adasglobuspro.example.com', 'Arjun Mehta', 'role_sales_mgr', 'team_us', 'US', 'active', FALSE, NULL, NULL, 50),
         ('usr_bdr_1', 'priya@adasglobuspro.example.com', 'Priya Nair', 'role_bdr', 'team_ca', 'CA', 'active', FALSE, NULL, NULL, 50),
         ('usr_bdr_2', 'kabir@adasglobuspro.example.com', 'Kabir Rao', 'role_bdr', 'team_us', 'US', 'active', FALSE, NULL, NULL, 50),

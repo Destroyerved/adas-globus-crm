@@ -61,13 +61,16 @@ export function NotificationBell({
     };
   }, [open]);
 
+  // The badge's text must be a word of the button's name (WCAG 2.5.3): "Notifications, 3 unread".
+  const badge = unread > 99 ? '99+' : String(unread);
+
   return (
     <div className="relative" ref={wrapRef}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
-        aria-label={`Notifications (${unread} unread)`}
+        aria-label={unread > 0 ? `Notifications, ${badge} unread` : 'Notifications'}
         className="relative inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-transparent hover:bg-bg-alt text-ink-2 hover:text-ink cursor-pointer border-0"
       >
         <Bell size={18} strokeWidth={1.6} aria-hidden="true" />
@@ -76,7 +79,7 @@ export function NotificationBell({
             className="absolute top-[3px] right-[2px] min-w-[16px] h-[16px] px-[4px] rounded-pill bg-primary text-primary-foreground text-[10.5px] font-semibold leading-[16px] text-center tabular-nums"
             aria-hidden="true"
           >
-            {unread > 99 ? '99+' : unread}
+            {badge}
           </span>
         )}
       </button>

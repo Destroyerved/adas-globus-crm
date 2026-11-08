@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { totpCode, totpStep } from '../apps/api/src/platform/crypto/totp.js';
 
 /**
  * End-to-end tests of the live CRM screens against the e2e test API (a throw-away database).
@@ -201,7 +202,7 @@ test('reassigning a lead notifies the new owner', async ({ page }) => {
   const res = await page.request.post('/api/v1/auth/dev-login', { data: { userId: 'usr_ae_1' } });
   expect(res.ok()).toBe(true);
   await page.goto('/?screen=leads');
-  await page.getByRole('button', { name: /^Notifications \(\d+ unread\)/ }).click();
+  await page.getByRole('button', { name: /^Notifications, \d+ unread$/ }).click();
   const panel = page.getByRole('dialog', { name: 'Notifications' });
   await expect(panel.getByText(/Elena Rostova/).first()).toBeVisible();
   await panel
@@ -243,6 +244,60 @@ test('without a session the app shows sign-in, and Microsoft sign-in says it is 
   // The API refuses data without a session
   const res = await page.request.get('/api/v1/leads');
   expect(res.status()).toBe(401);
+});
+
+test('an emergency admin signs in with a password and an authenticator code', async ({ page }) => {
+  test.setTimeout(90_000);
+  const password = process.env['E2E_ADMIN_PASSWORD'] ?? '';
+  const secret = process.env['E2E_ADMIN_TOTP_SECRET'] ?? '';
+  expect(password).not.toBe('');
+  await page.context().clearCookies();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?screen=login');
+    await page.getByRole('button', { name: 'Admin sign-in' }).click();
+    const form = page.getByRole('form', { name: 'Admin sign-in' });
+    await expect(form.getByLabel('Email')).toBeFocused();
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `13-admin-sign-in-${width}w.png`),
+      fullPage: true,
+    });
+  }
+
+  // Fields are checked before anything is sent.
+  const form = page.getByRole('form', { name: 'Admin sign-in' });
+  await form.getByRole('button', { name: 'Sign in' }).click();
+  await expect(form.getByText('Enter the 6-digit code from your authenticator app')).toBeVisible();
+  await expect(form.getByLabel('Email')).toBeFocused();
+
+  // A wrong detail gets the same answer whichever part was wrong.
+  await form.getByLabel('Email').fill('emergency.admin@adasglobuspro.example.com');
+  await form.getByLabel('Password').fill('not-the-password');
+  await form.getByLabel('Code from your authenticator app').fill('000000');
+  await form.getByRole('button', { name: 'Sign in' }).click();
+  await expect(form.getByRole('alert')).toHaveText(/The email, password or code is wrong/);
+
+  // Back returns focus to the link.
+  await form.getByRole('button', { name: 'Back to Microsoft sign-in' }).click();
+  await expect(page.getByRole('button', { name: 'Admin sign-in' })).toBeFocused();
+  await page.getByRole('button', { name: 'Admin sign-in' }).click();
+
+  await form.getByLabel('Email').fill('emergency.admin@adasglobuspro.example.com');
+  await form.getByLabel('Password').fill(password);
+  await form
+    .getByLabel('Code from your authenticator app')
+    .fill(totpCode(secret, totpStep(Date.now())));
+  await form.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByText('Open pipeline').first()).toBeVisible();
+
+  // Every admin is told; the emergency admin sees it in their own bell too.
+  await page.getByRole('button', { name: /^Notifications, \d+ unread$/ }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Notifications' }).getByText('Emergency admin sign-in used'),
+  ).toBeVisible();
 });
 
 test('signing out ends the session', async ({ page }) => {

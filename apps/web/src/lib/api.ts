@@ -513,9 +513,12 @@ export interface WidgetResult<T = Record<string, unknown>> {
 }
 
 export const api = {
-  authConfig: () => request<{ microsoftSignIn: boolean; devSignIn: boolean }>('/auth/config'),
+  authConfig: () =>
+    request<{ microsoftSignIn: boolean; devSignIn: boolean; adminSignIn: boolean }>('/auth/config'),
   me: () => request<CurrentUser>('/auth/me'),
   devLogin: (userId: string) => post<CurrentUser>('/auth/dev-login', { userId }),
+  adminSignIn: (input: { email: string; password: string; totpCode: string }) =>
+    post<CurrentUser>('/auth/local/login', input),
   logout: () => post<undefined>('/auth/logout', {}),
 
   listUsers: () => request<Items<UserRow>>('/users').then((r) => r.items),

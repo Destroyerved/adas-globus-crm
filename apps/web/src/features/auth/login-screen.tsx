@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
 import { canUseDevLogin, DEV_SIGN_IN_USERS } from '@/lib/api-client.js';
 import { api } from '@/lib/api.js';
 import { errorMessage } from '@/features/shared/live-kit.js';
+import { AdminSignInForm } from './admin-sign-in-form.js';
 
 /** Messages for the ?error= codes the sign-in callback can return (PRD 6.6). */
 const SIGN_IN_ERRORS: Record<string, string> = {
@@ -34,13 +35,24 @@ function useNow(intervalMs = 30_000): Date {
 export function LoginScreen({
   microsoftSignIn,
   devSignIn,
+  adminSignIn,
   onSignedIn,
 }: {
   microsoftSignIn: boolean;
   devSignIn: boolean;
+  adminSignIn: boolean;
   onSignedIn: () => void;
 }) {
   const [logoFailed, setLogoFailed] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const adminLink = useRef<HTMLButtonElement>(null);
+  const [returnFocus, setReturnFocus] = useState(false);
+  useEffect(() => {
+    if (returnFocus && !showAdmin) {
+      adminLink.current?.focus();
+      setReturnFocus(false);
+    }
+  }, [returnFocus, showAdmin]);
   const [devUserId, setDevUserId] = useState(DEV_SIGN_IN_USERS[0]?.id ?? '');
   const now = useNow();
   const errorCode = new URLSearchParams(window.location.search).get('error');
@@ -118,71 +130,102 @@ export function LoginScreen({
           className="w-full max-w-[420px] bg-surface border border-line rounded-[14px] p-[28px] md:p-[36px]"
           style={{ boxShadow: 'var(--shadow-dialog)' }}
         >
-          <div className="kicker mb-[8px]">Employee sign-in</div>
-          <h2 className="text-title-lg text-ink m-0">Sign in to ADAS CRM</h2>
-          <p className="text-body text-ink-2 mt-[6px] mb-[24px]">
-            Use your <span className="font-semibold text-ink">@adasglobuspro.com</span> Microsoft
-            365 account. Access is restricted to invited employees.
-          </p>
-
-          {signInError && (
-            <p role="alert" className="mb-[16px] mt-0 text-[13.5px] text-danger">
-              {signInError}
-            </p>
-          )}
-
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={!microsoftSignIn}
-            onClick={() => window.location.assign('/api/v1/auth/sso/start')}
-            data-testid="microsoft-signin-btn"
-          >
-            <ShieldCheck size={18} strokeWidth={1.6} aria-hidden="true" />
-            <span>Sign in with Microsoft</span>
-          </Button>
-          {!microsoftSignIn && (
-            <p className="mt-[8px] mb-0 text-[13px] text-ink-3">
-              Not available yet: Microsoft sign-in needs the company’s Entra app registration.
-            </p>
-          )}
-
-          {devSignIn && canUseDevLogin() && (
-            <form
-              className="mt-[20px] pt-[16px] border-t border-line grid gap-[8px]"
-              onSubmit={(e) => {
-                e.preventDefault();
-                devLogin.mutate(devUserId);
+          {showAdmin ? (
+            <AdminSignInForm
+              onSignedIn={onSignedIn}
+              onCancel={() => {
+                setShowAdmin(false);
+                setReturnFocus(true);
               }}
-            >
-              <label htmlFor="dev-user-select" className="text-label text-ink-3">
-                Development sign-in (this computer only)
-              </label>
-              <select
-                id="dev-user-select"
-                value={devUserId}
-                onChange={(e) => setDevUserId(e.target.value)}
-                className="h-[36px] w-full rounded-[8px] bg-surface border border-line-field px-[12px] text-[14px] text-ink"
-              >
-                {DEV_SIGN_IN_USERS.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.displayName} · {user.role}
-                  </option>
-                ))}
-              </select>
-              {devLogin.isError && (
-                <p role="alert" className="m-0 text-[13px] text-danger">
-                  {errorMessage(devLogin.error)}
-                </p>
-              )}
-              <Button type="submit" variant="outline" disabled={devLogin.isPending}>
-                {devLogin.isPending ? 'Signing in…' : 'Sign in as this user'}
-              </Button>
-            </form>
+            />
+          ) : (
+            employeeSignIn()
           )}
         </div>
       </main>
     </div>
   );
+
+  // A plain function, not a component, so the clock ticks don't remount the form.
+  function employeeSignIn() {
+    return (
+      <>
+        <div className="kicker mb-[8px]">Employee sign-in</div>
+        <h2 className="text-title-lg text-ink m-0">Sign in to ADAS CRM</h2>
+        <p className="text-body text-ink-2 mt-[6px] mb-[24px]">
+          Use your <span className="font-semibold text-ink">@adasglobuspro.com</span> Microsoft 365
+          account. Access is restricted to invited employees.
+        </p>
+
+        {signInError && (
+          <p role="alert" className="mb-[16px] mt-0 text-[13.5px] text-danger">
+            {signInError}
+          </p>
+        )}
+
+        <Button
+          variant="primary"
+          size="lg"
+          className="w-full"
+          disabled={!microsoftSignIn}
+          onClick={() => window.location.assign('/api/v1/auth/sso/start')}
+          data-testid="microsoft-signin-btn"
+        >
+          <ShieldCheck size={18} strokeWidth={1.6} aria-hidden="true" />
+          <span>Sign in with Microsoft</span>
+        </Button>
+        {!microsoftSignIn && (
+          <p className="mt-[8px] mb-0 text-[13px] text-ink-3">
+            Not available yet: Microsoft sign-in needs the company’s Entra app registration.
+          </p>
+        )}
+        {adminSignIn && (
+          <p className="mt-[16px] mb-0 text-center">
+            <button
+              ref={adminLink}
+              type="button"
+              onClick={() => setShowAdmin(true)}
+              className="text-[13px] text-ink-2 underline underline-offset-4 decoration-line-field hover:text-ink hover:decoration-ink-3"
+            >
+              Admin sign-in
+            </button>
+          </p>
+        )}
+
+        {devSignIn && canUseDevLogin() && (
+          <form
+            className="mt-[20px] pt-[16px] border-t border-line grid gap-[8px]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              devLogin.mutate(devUserId);
+            }}
+          >
+            <label htmlFor="dev-user-select" className="text-label text-ink-3">
+              Development sign-in (this computer only)
+            </label>
+            <select
+              id="dev-user-select"
+              value={devUserId}
+              onChange={(e) => setDevUserId(e.target.value)}
+              className="h-[36px] w-full rounded-[8px] bg-surface border border-line-field px-[12px] text-[14px] text-ink"
+            >
+              {DEV_SIGN_IN_USERS.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.displayName} · {user.role}
+                </option>
+              ))}
+            </select>
+            {devLogin.isError && (
+              <p role="alert" className="m-0 text-[13px] text-danger">
+                {errorMessage(devLogin.error)}
+              </p>
+            )}
+            <Button type="submit" variant="outline" disabled={devLogin.isPending}>
+              {devLogin.isPending ? 'Signing in…' : 'Sign in as this user'}
+            </Button>
+          </form>
+        )}
+      </>
+    );
+  }
 }

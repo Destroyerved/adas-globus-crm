@@ -1,4 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
+import { generateTotpSecret } from './apps/api/src/platform/crypto/totp.js';
+
+// Throw-away credentials for the synthetic emergency admin on the e2e test database. New on
+// every run; the test workers and the e2e API inherit them through the environment.
+process.env['E2E_ADMIN_PASSWORD'] ??= `e2e-${randomBytes(12).toString('base64url')}`;
+process.env['E2E_ADMIN_TOTP_SECRET'] ??= generateTotpSecret();
 
 export default defineConfig({
   testDir: './e2e',

@@ -17,11 +17,14 @@ async function startServer(nodeEnv: 'test' | 'production') {
   const dir = mkdtempSync(path.join(tmpdir(), 'adas-auth-'));
   const secretFile = path.join(dir, 'session_secret.txt');
   writeFileSync(secretFile, 'x'.repeat(64));
+  const keyFile = path.join(dir, 'token_encryption_key.txt');
+  writeFileSync(keyFile, 'k'.repeat(64));
   const env = validateEnv({
     NODE_ENV: nodeEnv,
     LOG_LEVEL: 'error',
     PUBLIC_WEB_URL: WEB_ORIGIN,
     SESSION_SECRET_FILE: secretFile,
+    TOKEN_ENCRYPTION_KEY_FILE: keyFile,
     ENTRA_CLIENT_SECRET_FILE: path.join(dir, 'missing-entra-secret.txt'),
   });
   const db = DatabaseService.forTests();
@@ -50,7 +53,11 @@ describe('sessions and sign-in (development and test mode)', () => {
 
   it('reports which sign-in methods are available', async () => {
     const res = await fetch(`${ctx.base}/api/v1/auth/config`);
-    expect(await res.json()).toEqual({ microsoftSignIn: false, devSignIn: true });
+    expect(await res.json()).toEqual({
+      microsoftSignIn: false,
+      devSignIn: true,
+      adminSignIn: true,
+    });
   });
 
   it('refuses API calls without a session, and ignores the old dev header', async () => {

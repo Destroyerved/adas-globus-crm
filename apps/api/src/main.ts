@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AuthAndUsersService,
+  BreakGlassService,
   CookieSigner,
   EntraSignIn,
   SessionService,
@@ -30,9 +31,11 @@ import { OutreachService } from './modules/outreach/index.js';
 import {
   isDevLoginEnabled,
   loadDotEnv,
+  resolveConfigPath,
   validateEnv,
   type AppEnv,
 } from './platform/config/index.js';
+import { loadSecretBox, type SecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
 import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
@@ -161,7 +164,14 @@ function sendHtml(res: ServerResponse, status: number, html: string): void {
   res.end(html);
 }
 
-export function createAppServer(env: AppEnv = validateEnv(), existingDb?: DatabaseService) {
+export function createAppServer(
+  env: AppEnv = validateEnv(),
+  existingDb?: DatabaseService,
+  options: {
+    /** Tests and the e2e server pass a throw-away key; otherwise TOKEN_ENCRYPTION_KEY_FILE. */
+    secretBox?: SecretBox | null;
+  } = {},
+) {
   const logger = createLogger(env.LOG_LEVEL);
   const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
   const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV);
@@ -205,10 +215,23 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
   const entra = new EntraSignIn({
     tenantId: env.ENTRA_TENANT_ID,
     clientId: env.ENTRA_CLIENT_ID,
-    clientSecretFile: env.ENTRA_CLIENT_SECRET_FILE,
+    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
     redirectUri: env.ENTRA_REDIRECT_URI,
   });
-  const signer = new CookieSigner(loadSessionSecret(env.SESSION_SECRET_FILE, production));
+  const signer = new CookieSigner(
+    loadSessionSecret(resolveConfigPath(env.SESSION_SECRET_FILE), production),
+  );
+  const breakGlass = new BreakGlassService(
+    db,
+    options.secretBox !== undefined
+      ? options.secretBox
+      : loadSecretBox(
+          resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
+          env.TOKEN_ENCRYPTION_KEY_VERSION,
+          production,
+        ),
+    logger,
+  );
   const OIDC_COOKIE = production ? '__Host-adas_oidc' : 'adas_oidc';
   const sessionCookie = (token: string) =>
     serializeCookie(sessionCookieName(production), token, {
@@ -360,7 +383,11 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
       };
 
       if (method === 'GET' && pathname === '/api/v1/auth/config') {
-        sendJson(200, { microsoftSignIn: entra.isConfigured(), devSignIn: devLoginEnabled });
+        sendJson(200, {
+          microsoftSignIn: entra.isConfigured(),
+          devSignIn: devLoginEnabled,
+          adminSignIn: breakGlass.isAvailable(),
+        });
         return;
       }
 
@@ -421,13 +448,24 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
-      if (pathname === '/api/v1/auth/break-glass') {
-        throw new DomainError({
-          status: 501,
-          code: 'BREAK_GLASS_NOT_BUILT',
-          title: 'Not available yet',
-          detail: 'Break-glass admin sign-in (password plus authenticator code) is not built yet.',
+      if (method === 'POST' && pathname === '/api/v1/auth/local/login') {
+        // Emergency admin sign-in (PRD 6.6). Sign-in requests must come from the CRM web app
+        // too, so another site can't sign a browser in to an account it controls.
+        if (req.headers.origin !== webOrigin) {
+          throw new DomainError({
+            status: 403,
+            code: 'CSRF_ORIGIN_REJECTED',
+            title: 'Request blocked',
+            detail: 'Sign-in requests must come from the CRM web app.',
+          });
+        }
+        const body = await readJsonBody(req);
+        const userId = await breakGlass.signIn(body, clientIpOf(req) ?? 'unknown');
+        const token = await sessions.create(userId, req, 'break_glass');
+        sendJson(200, await auth.resolveSessionUser(userId), {
+          'Set-Cookie': [sessionCookie(token)],
         });
+        return;
       }
 
       if (method === 'POST' && pathname === '/api/v1/auth/logout') {
@@ -872,6 +910,7 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
     transport,
     services: {
       auth,
+      breakGlass,
       compliance,
       crm,
       intake,
@@ -895,8 +934,8 @@ if (isMainModule) {
   loadDotEnv();
   const { server, logger, env, db } = createAppServer();
   // Fail closed until the remaining production blockers in docs/PROGRESS.md are done:
-  // the connectors, break-glass sign-in, and verification on real PostgreSQL (API and
-  // worker) and Microsoft Entra. Remove this guard in R8 (production deploy).
+  // the connectors, and verification on real PostgreSQL (API and worker), Microsoft Entra
+  // and emergency admin sign-in. Remove this guard in R8 (production deploy).
   if (env.NODE_ENV === 'production') {
     logger.fatal(
       'Refusing to start with NODE_ENV=production: the CRM is not production-ready yet (connectors and verification outstanding). See docs/PROGRESS.md, "Not production-ready".',

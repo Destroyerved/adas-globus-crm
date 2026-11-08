@@ -100,10 +100,11 @@ function SignedInGate() {
         <LoginScreen
           microsoftSignIn={config.data?.microsoftSignIn ?? false}
           devSignIn={config.data?.devSignIn ?? false}
+          adminSignIn={config.data?.adminSignIn ?? false}
           onSignedIn={() => {
-            queryClient.clear();
-            window.history.replaceState({}, '', '/?screen=dashboard');
-            void queryClient.invalidateQueries({ queryKey: ['me'] });
+            // A fresh load: nothing cached from before sign-in survives. (Clearing the cache
+            // and then invalidating `me` refetched nothing, so the sign-in page stayed.)
+            window.location.replace('/?screen=dashboard');
           }}
         />
       );

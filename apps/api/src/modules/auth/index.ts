@@ -210,3 +210,10 @@ export {
   clientIp,
 } from './sessions.js';
 export { EntraSignIn, type EntraIdentity, type PendingSignIn } from './entra.js';
+export {
+  BreakGlassService,
+  BREAK_GLASS_LOCK_MINUTES,
+  BREAK_GLASS_MAX_ACCOUNTS,
+  BREAK_GLASS_MAX_FAILURES,
+  type BreakGlassSetup,
+} from './break-glass.js';

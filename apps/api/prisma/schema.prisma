@@ -8,6 +8,10 @@
 //   prisma/migrations/0004_admin_dashboard/migration.sql (versions on users, teams, settings
 //   and stages; pipeline_stages.is_trial; stage IDs on deal_stage_history; audit-log,
 //   SLA, activity and dashboard indexes)
+//   prisma/migrations/0005_worker/migration.sql (tasks.sla_warned_at,
+//   outbox_events.available_at, partial indexes for the worker's sweeps; the pgboss schema
+//   is installed by `pnpm db:migrate`, ADR 0006)
+//   prisma/migrations/0006_break_glass/migration.sql (local_credentials and its grant)
 
 generator client {
   provider = "prisma-client-js"
@@ -48,6 +52,7 @@ model User {
   marketFocus   String   @default("US") @map("market_focus")
   status        String   @default("active")
   isBreakGlass  Boolean  @default(false) @map("is_break_glass")
+  // Deprecated (cleared in 0006, to be dropped): credentials live in local_credentials.
   passwordHash  String?  @map("password_hash")
   totpSecret    String?  @map("totp_secret")
   dailySendCap  Int      @default(50) @map("daily_send_cap")
@@ -59,6 +64,22 @@ model User {
   @@index([teamId])
   @@index([roleId])
   @@map("users")
+}
+
+// Emergency admin credentials (PRD 6.6, 7.2): at most two accounts. Migration 0006.
+model LocalCredential {
+  userId               String    @id @map("user_id")
+  passwordHash         String    @map("password_hash") // Argon2id
+  totpSecretCiphertext String    @map("totp_secret_ciphertext") // AES-256-GCM, never plain
+  totpLastStep         BigInt?   @map("totp_last_step")
+  failedAttempts       Int       @default(0) @map("failed_attempts")
+  lockedUntil          DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastFailedAt         DateTime? @map("last_failed_at") @db.Timestamptz(6)
+  lastUsedAt           DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("local_credentials")
 }
 
 // Append-only table protected by REVOKE UPDATE, DELETE and trg_audit_logs_immutable

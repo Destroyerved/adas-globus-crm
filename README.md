@@ -22,6 +22,16 @@ Employees sign in with their Microsoft 365 account. Until it's configured, the b
 
 Only users invited in the CRM can sign in. The first sign-in links their Microsoft account to their CRM user.
 
+## Emergency admin sign-in
+
+If Microsoft sign-in is down, up to two Admins can sign in with a password and a code from an authenticator app ("Admin sign-in" on the sign-in page). Set it up for an existing Admin on the server:
+
+```bash
+pnpm break-glass set emergency.admin@adasglobuspro.com
+```
+
+It prints a generated password and an authenticator secret once; keep them in the company password manager. `pnpm break-glass remove <email>` takes it away again. Every use alerts all admins. It needs `TOKEN_ENCRYPTION_KEY_FILE` (in development, `secrets/token_encryption_key.txt` with at least 32 random characters).
+
 ## Set up a development machine
 
 You need Node.js 22 or newer, pnpm, and PostgreSQL 17 (a local install or Docker).
