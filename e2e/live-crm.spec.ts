@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -38,7 +38,19 @@ const SCREENS = [
   { name: '08-lead-profile', query: '?screen=lead&id=lead_elena', ready: 'Timeline' },
   { name: '09-contact-profile', query: '?screen=contact&id=cnt_jane', ready: 'Timeline' },
   { name: '10-deal-profile', query: '?screen=deal&id=deal_acme_tax', ready: 'Deal terms' },
+  { name: '11-dashboard', query: '?screen=dashboard', ready: 'Open pipeline' },
+  {
+    name: '12-settings',
+    query: '?screen=settings&tab=people',
+    ready: 'Invite person',
+    user: 'usr_admin_1',
+  },
 ];
+
+async function signInAs(page: Page, userId: string) {
+  const res = await page.request.post('/api/v1/auth/dev-login', { data: { userId } });
+  expect(res.ok()).toBe(true);
+}
 
 test.beforeAll(() => mkdirSync(SCREENS_DIR, { recursive: true }));
 
@@ -52,6 +64,7 @@ for (const screen of SCREENS) {
     for (const width of [1440, 375]) {
       await page.setViewportSize({ width, height: 900 });
       if (screen.name === '01-login') await page.context().clearCookies();
+      if ('user' in screen && screen.user) await signInAs(page, screen.user);
       await page.goto(`/${screen.query}`);
       await expect(page.getByText(screen.ready, { exact: false }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
@@ -202,6 +215,7 @@ test('the command palette finds a real company', async ({ page }) => {
   await page.goto('/?screen=leads&palette=1');
   const palette = page.getByTestId('command-palette');
   await expect(palette).toBeVisible();
+  await expect(palette.getByLabel('Search records or commands')).toBeFocused();
   await page.keyboard.type('Ridgeway');
   await expect(palette.getByText('Ridgeway CPA Group', { exact: true })).toBeVisible();
   await page.keyboard.press('Enter');
@@ -241,4 +255,117 @@ test('signing out ends the session', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Sign in to ADAS CRM' })).toBeVisible();
   const res = await page.request.get('/api/v1/auth/me');
   expect(res.status()).toBe(401);
+});
+
+test('the dashboard shows live numbers, and a number opens the list behind it', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByTestId('dashboard-screen')).toBeVisible();
+  const pipeline = page.getByTestId('dashboard-widget').filter({ hasText: 'Open pipeline' });
+  // The number on screen is the API's count of the team's open deals (an earlier test adds one).
+  const kpi = pipeline.getByRole('button', { name: /Open deals/ });
+  const api = await page.request.get('/api/v1/dashboard/widgets/pipeline_by_stage');
+  const count = ((await api.json()) as { data: { count: number } }).data.count;
+  expect(count).toBeGreaterThanOrEqual(2);
+  await expect(kpi).toHaveAccessibleName(new RegExp(`^${count} Open deals`));
+  await kpi.click();
+  await expect(page).toHaveURL(/screen=deals/);
+  await expect(page.getByText('Acme Tax & Advisory LLP').first()).toBeVisible();
+  await expect(page.getByText('Ridgeway').first()).toBeVisible();
+
+  await page.goto('/?screen=dashboard');
+  await page.getByLabel('Period').selectOption('last_30_days');
+  await expect(page).toHaveURL(/period=last_30_days/);
+  await page.reload();
+  await expect(page.getByLabel('Period')).toHaveValue('last_30_days');
+  await expect(page.getByText('Open pipeline')).toBeVisible();
+});
+
+test('an admin invites a person and edits a reference list, and both survive a reload', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+  await page.goto('/?screen=settings&tab=people');
+  await page.getByRole('button', { name: 'Invite person' }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Invite a person' });
+  await drawer.getByLabel('Work email').fill('e2e.invitee@example.com');
+  await drawer.getByLabel('Full name').fill('Esha Invitee');
+  await drawer.getByLabel('Role').selectOption({ label: 'Account Executive' });
+  await drawer.getByRole('button', { name: 'Invite person' }).click();
+  await expect(drawer).toBeHidden();
+  await page.reload();
+  const row = page.getByRole('row', { name: /Esha Invitee/ });
+  await expect(row).toBeVisible();
+  await expect(row.getByText('Invited')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Lists' }).click();
+  const sources = page.getByLabel('Add to lead sources');
+  await sources.fill('Trade show');
+  await sources.press('Enter');
+  await page.getByRole('button', { name: 'Save lead sources' }).click();
+  await expect(page.getByText('Saved lead sources.')).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('list', { name: 'Lead sources values' }).getByText('Trade show'),
+  ).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Audit log' }).click();
+  const audit = page.getByRole('table', { name: 'Audit log, newest first' });
+  await expect(audit.getByRole('row', { name: /User invited/ }).first()).toBeVisible();
+  await expect(audit.getByRole('row', { name: /Settings changed/ }).first()).toBeVisible();
+});
+
+test('people without admin rights see only their own preferences in settings', async ({ page }) => {
+  await signInAs(page, 'usr_bdr_2');
+  await page.goto('/?screen=settings&tab=people');
+  await expect(page.getByRole('tab', { name: 'Your preferences' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'People' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Invite person' })).toHaveCount(0);
+  const res = await page.request.get('/api/v1/admin/users');
+  expect(res.status()).toBe(403);
+});
+
+test('every settings tab passes axe and fits 1440px and 375px', async ({ page }) => {
+  // Twelve full axe scans (six tabs at two widths) need more than the default 30 seconds.
+  test.setTimeout(120_000);
+  await signInAs(page, 'usr_admin_1');
+  const tabs: [string, (p: Page) => Locator][] = [
+    ['teams', (p) => p.getByRole('button', { name: 'New team' })],
+    ['roles', (p) => p.getByRole('columnheader', { name: 'Which records' })],
+    ['pipelines', (p) => p.getByText('Free Trial (3-Day)').first()],
+    ['lists', (p) => p.getByRole('heading', { name: 'Lead sources' })],
+    ['audit', (p) => p.getByRole('table', { name: 'Audit log, newest first' })],
+    ['preferences', (p) => p.getByLabel('Time zone')],
+  ];
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const [tab, ready] of tabs) {
+      await page.goto(`/?screen=settings&tab=${tab}`);
+      await expect(ready(page)).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+      await expectNoAxeViolations(page);
+    }
+  }
+});
+
+test('an admin adds a pipeline stage and removes it again', async ({ page }) => {
+  await signInAs(page, 'usr_admin_1');
+  await page.goto('/?screen=settings&tab=pipelines');
+  await page.getByRole('button', { name: 'Add stage' }).click();
+  const drawer = page.getByRole('dialog', { name: /Add a stage to/ });
+  await drawer.getByLabel('Stage name').fill('Reference check');
+  await drawer.getByLabel('Probability (%)').fill('60');
+  await drawer.getByRole('button', { name: 'Add stage' }).click();
+  await expect(drawer).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('row', { name: /Reference check/ })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit Reference check' }).click();
+  await page.getByRole('button', { name: 'Remove this stage' }).click();
+  const confirm = page.getByRole('alertdialog');
+  await confirm.getByRole('button', { name: 'Remove stage' }).click();
+  await expect(confirm).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('row', { name: /Reference check/ })).toHaveCount(0);
 });

@@ -25,17 +25,21 @@ import {
   useUserNames,
 } from '@/features/shared/live-kit.js';
 import {
+  FilterChips,
   ListFooter,
   OwnerFilter,
   SortHeader,
   Toolbar,
   allOf,
   can,
+  rangeLabel,
+  rangeParam,
   useMe,
   usePagedList,
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import { viewerTimeZone } from '@/features/records/timeline.js';
 
 export type ScreenDataState = 'loaded' | 'empty' | 'loading' | 'error';
 
@@ -49,7 +53,15 @@ export const LEAD_STATUS_TONE: Record<string, StatusTone> = {
   Converted: 'success',
 };
 
-const DEFAULTS = { q: '', sort: '-updatedAt', market: '', status: 'open', owner: '' };
+const DEFAULTS = {
+  q: '',
+  sort: '-updatedAt',
+  market: '',
+  status: 'open',
+  owner: '',
+  source: '',
+  created: '',
+};
 
 export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
   const queryClient = useQueryClient();
@@ -59,6 +71,7 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
   const [state, setState] = useUrlState(DEFAULTS);
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
   const [formOpen, setFormOpen] = useState(false);
+  const created = rangeParam(state.created);
 
   const filter = allOf([
     state.market !== '' && { field: 'market', op: 'eq', value: state.market },
@@ -66,6 +79,8 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
     state.status !== 'open' &&
       state.status !== 'all' && { field: 'status', op: 'eq', value: state.status },
     state.owner !== '' && { field: 'ownerId', op: 'eq', value: state.owner },
+    state.source !== '' && { field: 'source', op: 'eq', value: state.source },
+    created !== null && { field: 'createdAt', op: 'between', value: created },
   ]);
   const { query, items, total } = usePagedList(
     ['leads', { q: state.q, sort: state.sort, filter }],
@@ -98,10 +113,15 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
   });
 
   const filtered =
-    state.q !== '' || state.market !== '' || state.status !== 'open' || state.owner !== '';
+    state.q !== '' ||
+    state.market !== '' ||
+    state.status !== 'open' ||
+    state.owner !== '' ||
+    state.source !== '' ||
+    created !== null;
   const clearFilters = () => {
     setSearch('');
-    setState({ q: '', market: '', status: 'open', owner: '' });
+    setState({ q: '', market: '', status: 'open', owner: '', source: '', created: '' });
   };
   const canCreate = can(me, 'leads.write');
 
@@ -196,6 +216,28 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
           )}
         </div>
       </Toolbar>
+      <FilterChips
+        chips={[
+          ...(state.source
+            ? [
+                {
+                  key: 'source',
+                  label: `Source: ${state.source}`,
+                  onRemove: () => setState({ source: '' }),
+                },
+              ]
+            : []),
+          ...(created
+            ? [
+                {
+                  key: 'created',
+                  label: `Added ${rangeLabel(created, viewerTimeZone())}`,
+                  onRemove: () => setState({ created: '' }),
+                },
+              ]
+            : []),
+        ]}
+      />
 
       <DataPanel
         query={{ ...query, isFetching: query.isFetching && !query.isFetchingNextPage }}

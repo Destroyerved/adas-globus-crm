@@ -25,6 +25,7 @@ export interface CurrentUser {
   role: string;
   teamId: string | null;
   capabilities?: Record<string, string>;
+  timezone?: string;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -236,6 +237,7 @@ export interface DealRow {
   probability_override?: boolean;
   expected_close_date: string | null;
   trial_candidate_role?: string | null;
+  contract_start_date?: string | null;
   trial_ends_at?: string | null;
   closed_at?: string | null;
   lost_reason?: string | null;
@@ -333,6 +335,7 @@ export interface StageRow {
   stage_order: number;
   required_fields: string[];
   idle_days?: number;
+  is_trial?: boolean;
 }
 
 export interface DealProfile {
@@ -391,6 +394,123 @@ type Patch = Record<string, unknown> & { version: number };
 
 const plural = (entityType: EntityType) =>
   entityType === 'company' ? 'companies' : `${entityType}s`;
+
+// ---------------------------------------------------------------------------
+// Administration (PRD 2.1, 2.2, 3.3, 3.4, 4.17)
+// ---------------------------------------------------------------------------
+
+export type ScopeValue = 'own' | 'team' | 'all' | 'none';
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  name: string;
+  role_id: string;
+  role_name: string;
+  team_id: string | null;
+  team_name: string | null;
+  market_focus: Market;
+  status: 'invited' | 'active' | 'disabled';
+  timezone: string;
+  daily_send_cap: number;
+  is_break_glass: boolean;
+  version: number;
+  created_at: string;
+  last_sign_in_at?: string | null;
+}
+
+export interface TeamRow {
+  id: string;
+  name: string;
+  market: Market;
+  version: number;
+  member_count: number;
+}
+
+export interface RoleRow {
+  id: string;
+  name: string;
+  description: string;
+  user_count: number;
+  grants: Record<string, ScopeValue>;
+  changed: string[];
+  locked: string[];
+}
+
+export interface AdminStageRow extends StageRow {
+  pipeline_id: string;
+  idle_days: number;
+  is_trial: boolean;
+  version: number;
+  deal_count: number;
+}
+
+export interface AdminPipelineRow {
+  id: string;
+  name: string;
+  is_default: boolean;
+  stages: AdminStageRow[];
+}
+
+export interface SettingRow {
+  key: string;
+  value: unknown;
+  version: number;
+  updated_at: string;
+  updated_by_name: string | null;
+}
+
+export interface AuditRow {
+  id: string;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  actor_name: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard (PRD 4.2, 14)
+// ---------------------------------------------------------------------------
+
+export type WidgetId =
+  | 'followups_today'
+  | 'overdue_tasks'
+  | 'sla_inquiries'
+  | 'leads_by_status'
+  | 'pipeline_by_stage'
+  | 'won_lost'
+  | 'sla_breaches'
+  | 'overdue_by_person'
+  | 'leads_by_source_market'
+  | 'trial_to_win'
+  | 'activity_summary'
+  | 'outreach_performance';
+
+export interface DashboardLayout {
+  widgets: WidgetId[];
+  timezone: string;
+  reportingCurrency: Currency;
+  defaultRange: { from: string; to: string };
+}
+
+export interface DashboardPeriod {
+  from: string;
+  to: string;
+  market?: string;
+}
+
+export interface WidgetResult<T = Record<string, unknown>> {
+  id: WidgetId;
+  /** start and end are the period's UTC instants (end exclusive). */
+  period: { from: string; to: string; market: string | null; start: string; end: string };
+  generatedAt: string;
+  data: T;
+}
 
 export const api = {
   authConfig: () => request<{ microsoftSignIn: boolean; devSignIn: boolean }>('/auth/config'),
@@ -511,6 +631,60 @@ export const api = {
     put<{ tags: string[] }>(`/tags/${entityType}/${enc(entityId)}`, { tags }),
   deleteRecord: (entityType: EntityType, entityId: string) =>
     del<{ id: string }>(`/${plural(entityType)}/${enc(entityId)}`),
+
+  // Preferences, administration and dashboard
+  updatePreferences: (input: { timezone: string }) =>
+    patch<{ timezone: string }>('/me/preferences', input),
+  adminUsers: () => request<Items<AdminUserRow>>('/admin/users').then((r) => r.items),
+  inviteUser: (input: {
+    email: string;
+    name: string;
+    roleId: string;
+    teamId: string | null;
+    marketFocus: Market;
+    timezone: string;
+  }) => createWithKey<AdminUserRow>('/admin/users', input),
+  updateUser: (userId: string, input: Patch) =>
+    patch<AdminUserRow>(`/admin/users/${enc(userId)}`, input),
+  adminTeams: () => request<Items<TeamRow>>('/admin/teams').then((r) => r.items),
+  createTeam: (input: { name: string; market: Market }) =>
+    createWithKey<TeamRow>('/admin/teams', input),
+  updateTeam: (teamId: string, input: Patch) =>
+    patch<TeamRow>(`/admin/teams/${enc(teamId)}`, input),
+  adminRoles: () => request<{ items: RoleRow[]; capabilities: string[] }>('/admin/roles'),
+  updateRoleCapabilities: (roleId: string, grants: Record<string, ScopeValue>) =>
+    put<RoleRow>(`/admin/roles/${enc(roleId)}/capabilities`, { grants }),
+  adminPipelines: () => request<Items<AdminPipelineRow>>('/admin/pipelines').then((r) => r.items),
+  createStage: (
+    pipelineId: string,
+    input: { name: string; probability: number; idleDays: number },
+  ) => createWithKey<AdminStageRow>(`/admin/pipelines/${enc(pipelineId)}/stages`, input),
+  updateStage: (stageId: string, input: Patch) =>
+    patch<AdminStageRow>(`/admin/stages/${enc(stageId)}`, input),
+  moveStage: (stageId: string, version: number, direction: 'up' | 'down') =>
+    post<{ id: string; moved: boolean }>(`/admin/stages/${enc(stageId)}/move`, {
+      version,
+      direction,
+    }),
+  deleteStage: (stageId: string) => del<{ id: string }>(`/admin/stages/${enc(stageId)}`),
+  adminSettings: () => request<Items<SettingRow>>('/admin/settings').then((r) => r.items),
+  updateSetting: (key: string, version: number, value: unknown) =>
+    put<SettingRow>(`/admin/settings/${enc(key)}`, { version, value }),
+  auditLogs: (params: Record<string, string | null | undefined>) => {
+    const search = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);
+    const qs = search.toString();
+    return request<{ items: AuditRow[]; nextCursor: string | null }>(
+      `/audit-logs${qs ? `?${qs}` : ''}`,
+    );
+  },
+  auditActions: () => request<Items<string>>('/audit-logs/actions').then((r) => r.items),
+  dashboard: () => request<DashboardLayout>('/dashboard'),
+  dashboardWidget: <T>(id: WidgetId, period: DashboardPeriod) => {
+    const search = new URLSearchParams({ from: period.from, to: period.to });
+    if (period.market) search.set('market', period.market);
+    return request<WidgetResult<T>>(`/dashboard/widgets/${id}?${search.toString()}`);
+  },
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

@@ -3,12 +3,14 @@ import {
   Building2,
   CheckSquare,
   Handshake,
+  LayoutDashboard,
   LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
+  Settings,
   UserPlus,
   Users,
   X,
@@ -45,6 +47,11 @@ interface NavItem {
 // Only modules that work end to end appear here (AGENTS.md section 3). Inbox, Outreach,
 // Imports and Reports return when their real connectors and data exist.
 const WORK_ITEMS: NavItem[] = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+  },
   {
     id: 'tasks',
     label: 'Tasks',
@@ -145,14 +152,14 @@ export function AppShell({
 
       if (gChordRef.current) {
         gChordRef.current = false;
-        // DESIGN 9.3 keyboard map: G then L, C, O, D, T
+        // DESIGN 9.3 keyboard map: G then H (home), L, C, O, D, T
         const targets: Record<string, AppScreenId> = {
+          h: 'dashboard',
           l: 'leads',
           c: 'contacts',
           o: 'companies',
           d: 'deals',
           t: 'tasks',
-          h: 'leads',
         };
         const target = targets[event.key.toLowerCase()];
         if (target) {
@@ -173,7 +180,7 @@ export function AppShell({
         <div className="flex items-center justify-between gap-[8px] px-[6px] pt-[4px]">
           <button
             type="button"
-            onClick={() => onNavigate('leads')}
+            onClick={() => onNavigate('dashboard')}
             className="inline-flex items-center gap-[10px] bg-transparent border-0 p-0 cursor-pointer text-left"
             aria-label={isCollapsedView ? 'ADAS CRM home' : undefined}
           >
@@ -306,8 +313,25 @@ export function AppShell({
         </div>
       </div>
 
-      {/* Bottom utilities: Settings returns when the Settings screen exists (PRD 4.17) */}
+      {/* Bottom utilities (DESIGN.md §5.1) */}
       <div className="pt-[12px] border-t border-navy-line space-y-[2px]">
+        <button
+          type="button"
+          title={isCollapsedView ? 'Settings' : undefined}
+          onClick={() => {
+            onNavigate('settings');
+            setMobileDrawerOpen(false);
+          }}
+          aria-current={activeScreen === 'settings' ? 'page' : undefined}
+          className={`w-full h-[36px] px-[10px] rounded-[8px] flex items-center gap-[10px] cursor-pointer border-0 transition-colors duration-120 ${
+            activeScreen === 'settings'
+              ? 'bg-navy-2 text-primary-foreground font-semibold shadow-[inset_2px_0_0_0_var(--cyan)]'
+              : 'bg-transparent text-sidebar-foreground font-medium hover:bg-navy-2 hover:text-primary-foreground'
+          }`}
+        >
+          <Settings size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
+          {!isCollapsedView && <span className="text-[14px]">Settings</span>}
+        </button>
         <button
           type="button"
           title={isCollapsedView ? 'Sign out' : undefined}

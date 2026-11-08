@@ -5,6 +5,9 @@
 //   prisma/migrations/0003_lists_editing_reference/migration.sql (keyset, trigram and
 //   partial indexes for lists and reminders; tasks, notes, notifications and
 //   pipeline_stages columns; system roles, pipelines and reference lists)
+//   prisma/migrations/0004_admin_dashboard/migration.sql (versions on users, teams, settings
+//   and stages; pipeline_stages.is_trial; stage IDs on deal_stage_history; audit-log,
+//   SLA, activity and dashboard indexes)
 
 generator client {
   provider = "prisma-client-js"
@@ -19,7 +22,9 @@ model Team {
   id        String   @id
   name      String   @unique
   market    String   @default("US")
+  version   Int      @default(1) // migration 0004
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6) // migration 0004
 
   @@map("teams")
 }
@@ -47,6 +52,7 @@ model User {
   totpSecret    String?  @map("totp_secret")
   dailySendCap  Int      @default(50) @map("daily_send_cap")
   timezone      String   @default("Asia/Kolkata") // migration 0003
+  version       Int      @default(1) // migration 0004
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

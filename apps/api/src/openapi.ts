@@ -387,8 +387,107 @@ const listsAndEditingPaths: Record<string, Record<string, unknown>> = {
   },
 };
 
+// Administration and the role dashboard (PRD 2.1, 2.2, 3.3, 3.4, 4.2, 4.17, 14).
+const created = { '201': { description: 'Created' }, '409': { description: 'Already exists' } };
+const adminAndDashboardPaths: Record<string, Record<string, unknown>> = {
+  '/me/preferences': {
+    patch: { operationId: 'updateMyPreferences', responses: ok('{ timezone }') },
+  },
+  '/admin/users': {
+    get: { operationId: 'adminListUsers', responses: ok('Users with role, team and last sign-in') },
+    post: { operationId: 'inviteUser', responses: created },
+  },
+  '/admin/users/{id}': {
+    patch: { operationId: 'adminUpdateUser', parameters: idParam, responses: edit },
+  },
+  '/admin/teams': {
+    get: { operationId: 'adminListTeams', responses: ok('Teams with member counts') },
+    post: { operationId: 'createTeam', responses: created },
+  },
+  '/admin/teams/{id}': {
+    patch: { operationId: 'updateTeam', parameters: idParam, responses: edit },
+  },
+  '/admin/roles': {
+    get: { operationId: 'adminListRoles', responses: ok('Roles with capability scopes') },
+  },
+  '/admin/roles/{id}/capabilities': {
+    put: { operationId: 'updateRoleCapabilities', parameters: idParam, responses: edit },
+  },
+  '/admin/pipelines': {
+    get: {
+      operationId: 'adminListPipelines',
+      responses: ok('Pipelines with stages and deal counts'),
+    },
+  },
+  '/admin/pipelines/{id}/stages': {
+    post: { operationId: 'createStage', parameters: idParam, responses: created },
+  },
+  '/admin/stages/{id}': {
+    patch: { operationId: 'updateStage', parameters: idParam, responses: edit },
+    delete: {
+      operationId: 'deleteStage',
+      parameters: idParam,
+      responses: { ...ok('Deleted'), '409': { description: 'The stage still has deals' } },
+    },
+  },
+  '/admin/stages/{id}/move': {
+    post: { operationId: 'moveStage', parameters: idParam, responses: ok('{ id, moved }') },
+  },
+  '/admin/settings': {
+    get: { operationId: 'adminListSettings', responses: ok('Reference lists and defaults') },
+  },
+  '/admin/settings/{key}': {
+    put: {
+      operationId: 'updateSetting',
+      parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: edit,
+    },
+  },
+  '/audit-logs': {
+    get: {
+      operationId: 'listAuditLogs',
+      parameters: [
+        ...['cursor', 'action', 'actor', 'entityType', 'entityId', 'from', 'to'].map((name) => ({
+          name,
+          in: 'query',
+          schema: { type: 'string' },
+        })),
+        { name: 'limit', in: 'query', schema: { type: 'integer', maximum: 200 } },
+      ],
+      responses: ok('{ items, nextCursor }, newest first, scoped by audit.read'),
+    },
+  },
+  '/audit-logs/actions': {
+    get: { operationId: 'listAuditActions', responses: ok('Distinct audit actions') },
+  },
+  '/dashboard': {
+    get: {
+      operationId: 'getDashboard',
+      responses: ok('Widgets for the role and the default period'),
+    },
+  },
+  '/dashboard/widgets/{id}': {
+    get: {
+      operationId: 'getDashboardWidget',
+      parameters: [
+        ...idParam,
+        { name: 'from', in: 'query', schema: { type: 'string', format: 'date' } },
+        { name: 'to', in: 'query', schema: { type: 'string', format: 'date' } },
+        { name: 'market', in: 'query', schema: { enum: ['US', 'CA'] } },
+      ],
+      responses: {
+        ...ok('{ id, period, generatedAt, data }'),
+        '403': { description: 'Not allowed' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
-for (const [path, methods] of Object.entries(listsAndEditingPaths)) {
+for (const [path, methods] of Object.entries({
+  ...listsAndEditingPaths,
+  ...adminAndDashboardPaths,
+})) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }
 

@@ -12,6 +12,8 @@ import { TasksScreen } from '@/features/tasks/tasks-screen.js';
 import { LeadProfileScreen } from '@/features/leads/lead-profile-screen.js';
 import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen.js';
 import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
+import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
+import { SettingsScreen } from '@/features/settings/settings-screen.js';
 import { ToastProvider } from '@/components/ui/toast.js';
 import { ErrorState } from '@/components/ui/state-views.js';
 import { ApiError, api } from '@/lib/api.js';
@@ -38,6 +40,8 @@ const queryClient: QueryClient = new QueryClient({
 // Only screens that work on live data. Inbox, Outreach, Imports and Reports come back when
 // their real connectors and data exist (docs/PROGRESS.md, "Make it real").
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
+  'dashboard',
+  'settings',
   'leads',
   'lead',
   'contacts',
@@ -60,7 +64,7 @@ const PARENT_SCREEN: Partial<Record<AppScreenId, AppScreenId>> = {
 function readUrlState(): { screen: AppScreenId; palette: boolean; recordId: string | null } {
   const params = new URLSearchParams(window.location.search);
   const rawScreen = params.get('screen') as AppScreenId | null;
-  const screen: AppScreenId = rawScreen && VALID_SCREENS.has(rawScreen) ? rawScreen : 'leads';
+  const screen: AppScreenId = rawScreen && VALID_SCREENS.has(rawScreen) ? rawScreen : 'dashboard';
   return { screen, palette: params.get('palette') === '1', recordId: params.get('id') };
 }
 
@@ -98,7 +102,7 @@ function SignedInGate() {
           devSignIn={config.data?.devSignIn ?? false}
           onSignedIn={() => {
             queryClient.clear();
-            window.history.replaceState({}, '', '/?screen=leads');
+            window.history.replaceState({}, '', '/?screen=dashboard');
             void queryClient.invalidateQueries({ queryKey: ['me'] });
           }}
         />
@@ -130,14 +134,20 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
   const [recordId, setRecordId] = useState<string | null>(initial.recordId);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(initial.palette);
 
-  // Each screen starts with a clean URL; list screens add their own filters to it.
-  const navigateScreen = (nextScreen: AppScreenId, id: string | null = null) => {
-    setActiveScreen(nextScreen);
-    setRecordId(id);
+  // Each screen starts with a clean URL; list screens add their own filters to it. Filters
+  // passed here (from a dashboard number) are written first, so the list opens filtered.
+  const navigateScreen = (
+    nextScreen: AppScreenId,
+    id: string | null = null,
+    params: Record<string, string> = {},
+  ) => {
     const url = new URL(window.location.origin + window.location.pathname);
     url.searchParams.set('screen', nextScreen);
     if (id) url.searchParams.set('id', id);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
     window.history.pushState({}, '', url);
+    setActiveScreen(nextScreen);
+    setRecordId(id);
     window.scrollTo({ top: 0 });
   };
   const openCompany = (id: string) => navigateScreen('company', id);
@@ -172,6 +182,13 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
         currentUser={user}
         onSignOut={() => void signOut()}
       >
+        {activeScreen === 'dashboard' && (
+          <DashboardScreen
+            role={user.role}
+            go={(screen, { id, ...params } = {}) => navigateScreen(screen, id ?? null, params)}
+          />
+        )}
+        {activeScreen === 'settings' && <SettingsScreen />}
         {activeScreen === 'leads' && <LeadsScreen onOpenLead={openLead} />}
         {activeScreen === 'lead' && (
           <LeadProfileScreen

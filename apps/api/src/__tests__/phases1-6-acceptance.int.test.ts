@@ -99,7 +99,7 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
 
   it('Phase 1 & Database Rule: rejects UPDATE/DELETE on audit_logs and DELETE on suppressions in PostgreSQL (PRD §5.3, §7.4, §9)', async () => {
     const admin = await services.auth.resolveSessionUser('usr_admin_1');
-    await services.auth.changeUserRole(admin, 'usr_bdr_2', 'role_bdr');
+    await services.admin.updateUser(admin, 'usr_bdr_2', { version: 1, dailySendCap: 40 }, null);
 
     // Attempt to UPDATE audit_logs must fail at PostgreSQL level
     await expect(db.query(`UPDATE audit_logs SET action = 'tampered'`)).rejects.toThrow(

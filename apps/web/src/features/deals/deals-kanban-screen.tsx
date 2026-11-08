@@ -19,24 +19,41 @@ import {
   useUserNames,
 } from '@/features/shared/live-kit.js';
 import {
+  FilterChips,
   ListFooter,
   OwnerFilter,
   SortHeader,
   Toolbar,
   allOf,
   can,
+  rangeLabel,
+  rangeParam,
   useMe,
   usePagedList,
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import { viewerTimeZone } from '@/features/records/timeline.js';
 import { StageMover } from './stage-mover.js';
 
 function monthly(minor: string, currency: Currency, compact = false): string {
   return formatMoney({ amountMinor: BigInt(minor), currency }, { perMonth: true, compact });
 }
 
-const DEFAULTS = { q: '', owner: '', pipeline: '', view: 'board', sort: '-updatedAt', stage: '' };
+const DEFAULTS = {
+  q: '',
+  owner: '',
+  pipeline: '',
+  view: 'board',
+  sort: '-updatedAt',
+  stage: '',
+  outcome: '',
+  closed: '',
+  market: '',
+};
+
+const OUTCOME_LABEL: Record<string, string> = { open: 'Open', won: 'Won', lost: 'Lost' };
+const MARKET_NAME: Record<string, string> = { US: 'U.S.', CA: 'Canada' };
 
 export function DealsKanbanScreen({
   onOpenCompany,
@@ -61,8 +78,10 @@ export function DealsKanbanScreen({
   const filtered = state.q !== '' || state.owner !== '';
   const clearFilters = () => {
     setSearch('');
-    setState({ q: '', owner: '', stage: '' });
+    setState({ q: '', owner: '', stage: '', outcome: '', closed: '', market: '' });
   };
+  // "All pipelines" only makes sense as a list; the board always shows one pipeline.
+  const allPipelines = state.view === 'list' && state.pipeline === 'all';
 
   return (
     <div className="space-y-[16px]" data-testid="deals-kanban-screen">
@@ -73,10 +92,11 @@ export function DealsKanbanScreen({
           {(pipelines.data?.length ?? 0) > 1 && (
             <Select
               aria-label="Pipeline"
-              value={pipeline?.id ?? ''}
+              value={allPipelines ? 'all' : (pipeline?.id ?? '')}
               onChange={(e) => setState({ pipeline: e.target.value, stage: '' })}
               className="sm:w-[180px]"
             >
+              {state.view === 'list' && <option value="all">All pipelines</option>}
               {(pipelines.data ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -140,7 +160,7 @@ export function DealsKanbanScreen({
       )}
       {pipeline && state.view === 'list' && (
         <DealList
-          pipelineId={pipeline.id}
+          pipelineId={allPipelines ? null : pipeline.id}
           stages={pipeline.stages}
           state={state}
           setState={setState}
@@ -341,7 +361,7 @@ function DealList({
   onClear,
   onOpenDeal,
 }: {
-  pipelineId: string;
+  pipelineId: string | null;
   stages: StageRow[];
   state: typeof DEFAULTS;
   setState: (patch: Partial<typeof DEFAULTS>) => void;
@@ -350,32 +370,73 @@ function DealList({
   onOpenDeal: (id: string) => void;
 }) {
   const ownerName = useUserNames();
+  const closed = rangeParam(state.closed);
   const filter = allOf([
-    { field: 'pipelineId', op: 'eq', value: pipelineId },
+    pipelineId !== null && { field: 'pipelineId', op: 'eq', value: pipelineId },
     state.stage !== '' && { field: 'stage', op: 'eq', value: state.stage },
     state.owner !== '' && { field: 'ownerId', op: 'eq', value: state.owner },
+    state.outcome !== '' && { field: 'stageCategory', op: 'eq', value: state.outcome },
+    closed !== null && { field: 'closedAt', op: 'between', value: closed },
+    state.market !== '' && { field: 'market', op: 'eq', value: state.market },
   ]);
   const { query, items, total } = usePagedList(
     ['deals', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listDeals({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
-  const listFiltered = filtered || state.stage !== '';
+  const listFiltered =
+    filtered ||
+    state.stage !== '' ||
+    state.outcome !== '' ||
+    closed !== null ||
+    state.market !== '';
+  const chips = [
+    ...(state.outcome
+      ? [
+          {
+            key: 'outcome',
+            label: OUTCOME_LABEL[state.outcome] ?? state.outcome,
+            onRemove: () => setState({ outcome: '' }),
+          },
+        ]
+      : []),
+    ...(closed
+      ? [
+          {
+            key: 'closed',
+            label: `Closed ${rangeLabel(closed, viewerTimeZone())}`,
+            onRemove: () => setState({ closed: '' }),
+          },
+        ]
+      : []),
+    ...(state.market
+      ? [
+          {
+            key: 'market',
+            label: MARKET_NAME[state.market] ?? state.market,
+            onRemove: () => setState({ market: '' }),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-[8px]">
-      <Select
-        aria-label="Stage"
-        value={state.stage}
-        onChange={(e) => setState({ stage: e.target.value })}
-        className="sm:w-[220px]"
-      >
-        <option value="">All stages</option>
-        {stages.map((s) => (
-          <option key={s.id} value={s.name}>
-            {s.name}
-          </option>
-        ))}
-      </Select>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-[8px]">
+        <Select
+          aria-label="Stage"
+          value={state.stage}
+          onChange={(e) => setState({ stage: e.target.value })}
+          className="sm:w-[220px]"
+        >
+          <option value="">All stages</option>
+          {stages.map((s) => (
+            <option key={s.id} value={s.name}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+        <FilterChips chips={chips} />
+      </div>
       <DataPanel
         query={{ ...query, isFetching: query.isFetching && !query.isFetchingNextPage }}
         isEmpty={items.length === 0}

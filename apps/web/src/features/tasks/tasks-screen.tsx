@@ -25,6 +25,7 @@ import {
   str,
 } from '@/features/shared/live-kit.js';
 import {
+  FilterChips,
   ListFooter,
   OwnerFilter,
   Toolbar,
@@ -72,7 +73,7 @@ const VIEWS = [
   { id: 'done', label: 'Done' },
 ] as const;
 
-const DEFAULTS = { view: 'open', q: '', assignee: '@me' };
+const DEFAULTS = { view: 'open', q: '', assignee: '@me', type: '' };
 
 /** Local date-time text for a datetime-local input, in the browser's zone. */
 function toLocalInput(iso: string | null | undefined): string {
@@ -97,6 +98,7 @@ export function TasksScreen({
 
   const filter = allOf([
     state.assignee !== '' && { field: 'assigneeId', op: 'eq', value: state.assignee },
+    state.type !== '' && { field: 'taskType', op: 'eq', value: state.type },
   ]);
   const sort = state.view === 'done' ? '-completedAt' : 'dueAt';
   const { query, items, total } = usePagedList(
@@ -124,7 +126,7 @@ export function TasksScreen({
   });
 
   const canWrite = can(me, 'tasks.write');
-  const filtered = state.q !== '' || state.assignee !== '@me';
+  const filtered = state.q !== '' || state.assignee !== '@me' || state.type !== '';
   const now = Date.now();
   const timeZone = viewerTimeZone();
 
@@ -228,7 +230,7 @@ export function TasksScreen({
               variant="ghost"
               onClick={() => {
                 setSearch('');
-                setState({ q: '', assignee: '@me' });
+                setState({ q: '', assignee: '@me', type: '' });
               }}
             >
               Reset filters
@@ -236,6 +238,19 @@ export function TasksScreen({
           )}
         </div>
       </Toolbar>
+      <FilterChips
+        chips={
+          state.type
+            ? [
+                {
+                  key: 'type',
+                  label: `Type: ${TASK_TYPE_LABEL[state.type] ?? state.type}`,
+                  onRemove: () => setState({ type: '' }),
+                },
+              ]
+            : []
+        }
+      />
 
       <DataPanel
         query={{ ...query, isFetching: query.isFetching && !query.isFetchingNextPage }}

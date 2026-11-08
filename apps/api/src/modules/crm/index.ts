@@ -636,9 +636,18 @@ export class CrmService {
         dealId = `deal_${randomUUID()}`;
         const monthlyMinor = BigInt(input.monthlyValueMinor);
         const annualMinor = monthlyMinor * 12n;
-        const stageId = input.startFreeTrial ? 'stg_trial' : 'stg_disc';
-        const stageName = input.startFreeTrial ? 'Free Trial (3-Day)' : 'Discovery Scheduled';
-        const probability = input.startFreeTrial ? 50 : 25;
+        // Stages are admin-editable (PRD 3.3): find the trial stage by its flag and the
+        // discovery stage by ID, falling back to the first open stage.
+        const startStage = await tx.query<{ id: string; name: string; probability: number }>(
+          `SELECT id, name, probability FROM pipeline_stages
+           WHERE pipeline_id = 'pipeline_new_business' AND category = 'open'
+           ORDER BY (CASE WHEN $1 THEN is_trial ELSE id = 'stg_disc' END) DESC, stage_order
+           LIMIT 1`,
+          [Boolean(input.startFreeTrial)],
+        );
+        const stageId = startStage.rows[0]?.id ?? 'stg_disc';
+        const stageName = startStage.rows[0]?.name ?? 'Discovery Scheduled';
+        const probability = startStage.rows[0]?.probability ?? 25;
         const dealName =
           input.dealName ??
           `${lead.firm_name ?? lead.full_name} — ${input.services[0] ?? 'Staffing'} Pod (${input.fteCount} FTE)`;
@@ -835,11 +844,10 @@ export class CrmService {
   }
 
   /**
-   * PRD §4.5 (A8) — Stage transition with required-field gates:
-   * - Moving to `Lost` requires `lostReason` (throws 422 if missing)
-   * - Moving to `Free Trial (3-Day)` requires `trialCandidateRole` and creates 3-day check-in tasks
-   * - Moving to `Won` sets `won_at = NOW()`, stops active prospecting sequences on the deal's contact,
-   *   and emits `deal.won` outbox event.
+   * PRD 3.3, 4.6 (A8): stage transition with the stage's required-field gates, which admins
+   * set per stage (`pipeline_stages.required_fields`). Lost stages always need a reason.
+   * Entering the free trial stage (`is_trial`) creates the three daily check-in tasks;
+   * Won sets `won_at`, stops prospecting sequences on the deal's contact and emits `deal.won`.
    */
   async moveDealStage(
     user: SessionUser,
@@ -848,26 +856,7 @@ export class CrmService {
   ): Promise<Record<string, unknown>> {
     const scope = scopeWhere(user, 'deals.write', { startParamIndex: 2 });
     const input = MoveDealStageInputSchema.parse(rawInput);
-
-    if (input.stageName === 'Lost' && (!input.lostReason || !input.lostReason.trim())) {
-      throw new ValidationDomainError('Moving a deal to Lost requires a lostReason.', {
-        lostReason: ['Lost reason is required when marking a deal Lost.'],
-      });
-    }
-
-    if (
-      input.stageName === 'Free Trial (3-Day)' &&
-      (!input.trialCandidateRole || !input.trialCandidateRole.trim())
-    ) {
-      throw new ValidationDomainError(
-        'Moving a deal to Free Trial (3-Day) requires trialCandidateRole.',
-        {
-          trialCandidateRole: [
-            'Trial candidate role is required when starting a 3-day free trial.',
-          ],
-        },
-      );
-    }
+    const filled = (value: string | null | undefined) => Boolean(value && value.trim());
 
     return this.db.transaction(async (tx) => {
       const existingRes = await tx.query<{
@@ -880,8 +869,13 @@ export class CrmService {
         owner_user_id: string;
         team_id: string | null;
         version: number;
+        stage_id: string;
+        stage_category: string;
+        trial_candidate_role: string | null;
+        contract_start_date: string | null;
       }>(
-        `SELECT id, name, pipeline_id, stage_name, company_id, primary_contact_id, owner_user_id, team_id, version
+        `SELECT id, name, pipeline_id, stage_name, stage_id, stage_category, company_id, primary_contact_id,
+                owner_user_id, team_id, version, trial_candidate_role, contract_start_date
          FROM deals
          WHERE id = $1 AND deleted_at IS NULL AND ${scope.sql}
          LIMIT 1`,
@@ -898,8 +892,10 @@ export class CrmService {
         name: string;
         category: string;
         probability: number;
+        required_fields: unknown;
+        is_trial: boolean;
       }>(
-        `SELECT id, name, category, probability
+        `SELECT id, name, category, probability, required_fields, is_trial
          FROM pipeline_stages
          WHERE pipeline_id = $1 AND name = $2
          LIMIT 1`,
@@ -908,6 +904,38 @@ export class CrmService {
       const stage = stageRes.rows[0];
       if (!stage) {
         throw new ValidationDomainError(`Unknown stage '${input.stageName}'.`);
+      }
+      const required = new Set(
+        Array.isArray(stage.required_fields) ? (stage.required_fields as string[]) : [],
+      );
+      if (stage.category === 'lost') required.add('lost_reason');
+      const missing: Record<string, string[]> = {};
+      if (required.has('lost_reason') && !filled(input.lostReason)) {
+        missing['lostReason'] = [`Choose why the deal was lost before moving it to ${stage.name}.`];
+      }
+      if (
+        required.has('trial_candidate_role') &&
+        !filled(input.trialCandidateRole) &&
+        !filled(deal.trial_candidate_role)
+      ) {
+        missing['trialCandidateRole'] = [`Enter the trial role before moving it to ${stage.name}.`];
+      }
+      if (
+        required.has('contract_start_date') &&
+        !filled(input.contractStartDate) &&
+        !filled(deal.contract_start_date)
+      ) {
+        missing['contractStartDate'] = [
+          `Enter the contract start date before moving it to ${stage.name}.`,
+        ];
+      }
+      if (required.has('primary_contact_id') && !deal.primary_contact_id) {
+        missing['primaryContactId'] = [
+          `Add a primary contact to the deal before moving it to ${stage.name}.`,
+        ];
+      }
+      if (Object.keys(missing).length > 0) {
+        throw new ValidationDomainError(`${stage.name} needs more detail first.`, missing);
       }
       if (stage.category === 'lost') {
         // PRD 3.4: lost reasons come from the admin-editable list.
@@ -945,8 +973,8 @@ export class CrmService {
              probability_override = FALSE,
              last_activity_at = NOW(),
              idle_flagged_at = NULL,
-             trial_started_at = CASE WHEN $4 = 'Free Trial (3-Day)' THEN COALESCE(trial_started_at, NOW()) ELSE trial_started_at END,
-             trial_ends_at = CASE WHEN $4 = 'Free Trial (3-Day)' THEN COALESCE(trial_ends_at, NOW() + INTERVAL '3 days') ELSE trial_ends_at END,
+             trial_started_at = CASE WHEN $11 THEN COALESCE(trial_started_at, NOW()) ELSE trial_started_at END,
+             trial_ends_at = CASE WHEN $11 THEN COALESCE(trial_ends_at, NOW() + INTERVAL '3 days') ELSE trial_ends_at END,
              version = version + 1,
              updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
@@ -962,6 +990,7 @@ export class CrmService {
           input.lostNotes ?? null,
           input.trialCandidateRole ?? null,
           input.contractStartDate ?? null,
+          stage.is_trial,
         ],
       );
 
@@ -970,12 +999,21 @@ export class CrmService {
       }
 
       await tx.query(
-        `INSERT INTO deal_stage_history (id, deal_id, from_stage, to_stage, changed_by_user_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [`dsh_${randomUUID()}`, dealId, deal.stage_name, stage.name, user.id],
+        `INSERT INTO deal_stage_history
+           (id, deal_id, from_stage, to_stage, from_stage_id, to_stage_id, changed_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          `dsh_${randomUUID()}`,
+          dealId,
+          deal.stage_name,
+          stage.name,
+          deal.stage_id,
+          stage.id,
+          user.id,
+        ],
       );
 
-      if (stage.name === 'Free Trial (3-Day)' && deal.stage_name !== 'Free Trial (3-Day)') {
+      if (stage.is_trial && deal.stage_id !== stage.id) {
         for (const dayOffset of [1, 2, 3]) {
           await tx.query(
             `INSERT INTO tasks (
@@ -1000,10 +1038,7 @@ export class CrmService {
         }
       }
 
-      const reopened =
-        stage.category === 'open' &&
-        deal.stage_name !== stage.name &&
-        ['Won', 'Lost'].includes(deal.stage_name);
+      const reopened = stage.category === 'open' && deal.stage_category !== 'open';
       await this.db.addOutboxEvent(tx, {
         eventType: reopened
           ? 'deal.reopened'

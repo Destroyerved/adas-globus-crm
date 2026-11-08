@@ -157,6 +157,21 @@ export class CrmTimelineService {
         await tx.query(`UPDATE deals SET last_activity_at = NOW() WHERE id = $1`, [links.dealId]);
       }
 
+      // PRD 4.10, 14: the first logged call or email to the inquirer stops the first-response
+      // SLA clock. A response after the deadline still closes the task but counts as a breach.
+      if (input.activityType !== 'meeting' && (links.leadId || links.contactId)) {
+        await tx.query(
+          `UPDATE tasks
+           SET status = 'completed', completed_at = $3::timestamptz, completed_by_user_id = $4,
+               outcome = COALESCE(outcome, 'First response logged'),
+               sla_breached = sla_breached OR (sla_deadline_at IS NOT NULL AND $3::timestamptz > sla_deadline_at),
+               version = version + 1, updated_at = NOW()
+           WHERE task_type = 'sla_first_response' AND status = 'open' AND deleted_at IS NULL
+             AND (lead_id = $1 OR contact_id = $2)`,
+          [links.leadId ?? null, links.contactId ?? null, occurredAt, user.id],
+        );
+      }
+
       // PRD 3.2: the first outbound touch moves a lead to Contacted; a meeting to Engaged.
       if (links.leadId) {
         const lead = await tx.query<{ status: string }>(
@@ -499,7 +514,8 @@ export class CrmTimelineService {
     const [pipelines, stages] = await Promise.all([
       this.db.query(`SELECT id, name, is_default FROM pipelines ORDER BY is_default DESC, name`),
       this.db.query(
-        `SELECT id, pipeline_id, name, category, probability, stage_order, required_fields, idle_days
+        `SELECT id, pipeline_id, name, category, probability, stage_order, required_fields, idle_days,
+                is_trial
          FROM pipeline_stages ORDER BY pipeline_id, stage_order`,
       ),
     ]);

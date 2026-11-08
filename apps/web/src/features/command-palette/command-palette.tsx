@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowRight, Building2, Contact, Handshake, Search, UserPlus, X } from 'lucide-react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useDebounced } from '@/features/shared/list-kit.js';
@@ -16,6 +16,14 @@ interface CommandPaletteItem {
 }
 
 const NAVIGATION_ITEMS: CommandPaletteItem[] = [
+  {
+    id: 'nav_dashboard',
+    group: 'NAVIGATION',
+    label: 'Dashboard',
+    meta: 'Go to your dashboard',
+    shortcut: 'G H',
+    targetScreen: 'dashboard',
+  },
   {
     id: 'nav_leads',
     group: 'NAVIGATION',
@@ -56,9 +64,18 @@ const NAVIGATION_ITEMS: CommandPaletteItem[] = [
     shortcut: 'G T',
     targetScreen: 'tasks',
   },
+  {
+    id: 'nav_settings',
+    group: 'NAVIGATION',
+    label: 'Settings',
+    meta: 'People, roles, pipelines, lists and your time zone',
+    targetScreen: 'settings',
+  },
 ];
 
 export type AppScreenId =
+  | 'dashboard'
+  | 'settings'
   | 'leads'
   | 'lead'
   | 'companies'
@@ -148,16 +165,14 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
     return [...recordItems, ...nav];
   }, [query, recordItems]);
 
-  useEffect(() => {
+  // Reset and focus before the browser paints, so keys typed straight after opening land in
+  // the search box instead of the page (or being cleared by a later reset).
+  useLayoutEffect(() => {
     if (open) {
       setQuery('');
       setActiveIndex(0);
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 10);
-      return () => clearTimeout(timer);
+      inputRef.current?.focus();
     }
-    return undefined;
   }, [open]);
 
   if (!open) {

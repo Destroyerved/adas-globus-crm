@@ -32,7 +32,18 @@ export function StageMover({
   const [lostReason, setLostReason] = useState('');
   const [lostNotes, setLostNotes] = useState('');
   const stage = stages.find((s) => s.name === target);
-  const needs = new Set(stage?.required_fields ?? []);
+  // Details already on the deal don't need asking again; lost stages always need a reason.
+  const needs = new Set(
+    [
+      ...(stage?.required_fields ?? []),
+      ...(stage?.category === 'lost' ? ['lost_reason'] : []),
+    ].filter(
+      (field) =>
+        !(field === 'trial_candidate_role' && deal.trial_candidate_role) &&
+        !(field === 'contract_start_date' && deal.contract_start_date),
+    ),
+  );
+  const missingContact = needs.has('primary_contact_id') && !deal.primary_contact_id;
 
   const move = useMutation({
     mutationFn: () =>
@@ -63,6 +74,7 @@ export function StageMover({
 
   const ready =
     target !== '' &&
+    !missingContact &&
     (!needs.has('trial_candidate_role') || trialRole.trim() !== '') &&
     (!needs.has('contract_start_date') || startDate !== '') &&
     (!needs.has('lost_reason') || lostReason !== '');
@@ -93,6 +105,11 @@ export function StageMover({
             </option>
           ))}
       </Select>
+      {missingContact && (
+        <p className="m-0 text-[12.5px] text-ink-2">
+          Add a primary contact to this deal before moving it to {target}.
+        </p>
+      )}
       {needs.has('trial_candidate_role') && (
         <Input
           value={trialRole}

@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/migrate.ts",
-    "openapi:generate": "tsx src/openapi.ts",
+    "openapi:generate": "tsx src/openapi.ts && prettier --write openapi.json",
     "db:seed": "tsx scripts/seed.ts",
     "start:e2e": "tsx src/e2e-server.ts"
   },

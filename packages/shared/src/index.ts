@@ -3,3 +3,4 @@ export * from './capabilities.js';
 export * from './filter-language.js';
 export * from './format.js';
 export * from './schemas.js';
+export * from './admin.js';

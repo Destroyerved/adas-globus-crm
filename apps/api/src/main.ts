@@ -12,6 +12,7 @@ import {
   serializeCookie,
   sessionCookieName,
 } from './modules/auth/index.js';
+import { AdminService, registerAdminRoutes } from './modules/admin/index.js';
 import { ComplianceService, checkSendable } from './modules/compliance/index.js';
 import {
   CrmListService,
@@ -20,6 +21,7 @@ import {
   CrmTimelineService,
   registerCrmRoutes,
 } from './modules/crm/index.js';
+import { DashboardService, registerDashboardRoutes } from './modules/dashboard/index.js';
 import { NotificationService } from './modules/notifications/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
 import { WebsiteIntakeService } from './modules/intake/index.js';
@@ -176,6 +178,10 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
   const notifications = new NotificationService(db);
   const router = new Router();
   registerCrmRoutes(router, { crm, lists, records, timeline });
+  const admin = new AdminService(db);
+  registerAdminRoutes(router, admin);
+  const dashboard = new DashboardService(db);
+  registerDashboardRoutes(router, dashboard);
   router.get('/api/v1/notifications', async (ctx) => {
     ctx.json(
       200,
@@ -527,16 +533,14 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
-      // Users & Audit Logs
-      if (method === 'GET' && pathname === '/api/v1/users') {
-        const items = await auth.listUsers();
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
+      if (method === 'PATCH' && pathname === '/api/v1/me/preferences') {
+        sendJson(200, await auth.updatePreferences(user, await readJsonBody(req)));
         return;
       }
 
-      if (method === 'GET' && pathname === '/api/v1/audit-logs') {
-        const items = await auth.listAuditLogs(user);
+      // Users & Audit Logs
+      if (method === 'GET' && pathname === '/api/v1/users') {
+        const items = await auth.listUsers();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
         return;
@@ -878,6 +882,8 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
       records,
       timeline,
       notifications,
+      admin,
+      dashboard,
     },
   };
 }

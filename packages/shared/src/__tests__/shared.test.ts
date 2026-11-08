@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   BreakGlassLoginInputSchema,
+  calendarDateInZone,
+  dashboardPresetRange,
   CapabilityKeySchema,
   ConvertLeadInputSchema,
   FilterClauseSchema,
@@ -8,6 +10,8 @@ import {
   formatDate,
   formatMoney,
   formatNumber,
+  formatPercent,
+  formatMinutes,
   formatPersonWithCompany,
   formatRelative,
   formatTime,
@@ -118,5 +122,57 @@ describe('money typed in forms', () => {
     expect(moneyInputValue('450000')).toBe('4500');
     expect(moneyInputValue(450050n)).toBe('4500.50');
     expect(moneyInputValue('7')).toBe('0.07');
+  });
+});
+
+describe('dashboard number formats', () => {
+  it('shows shares as percentages and nothing-to-divide as a dash', () => {
+    expect(formatPercent(0.4235)).toBe('42%');
+    expect(formatPercent(0.4235, 1)).toBe('42.4%');
+    expect(formatPercent(null)).toBe('—');
+  });
+
+  it('shows durations in plain units', () => {
+    expect(formatMinutes(45)).toBe('45 min');
+    expect(formatMinutes(200)).toBe('3 h 20 min');
+    expect(formatMinutes(120)).toBe('2 h');
+    expect(formatMinutes(3 * 1440 + 720)).toBe('3.5 days');
+    expect(formatMinutes(null)).toBe('—');
+  });
+});
+
+describe('dashboard periods', () => {
+  it('reads today in the viewer time zone', () => {
+    const at = new Date('2026-03-01T03:30:00Z');
+    expect(calendarDateInZone(at, 'UTC')).toBe('2026-03-01');
+    expect(calendarDateInZone(at, 'America/Toronto')).toBe('2026-02-28');
+    expect(calendarDateInZone(at, 'Asia/Kolkata')).toBe('2026-03-01');
+  });
+
+  it('builds preset ranges from calendar dates', () => {
+    expect(dashboardPresetRange('this_month', '2026-03-14')).toEqual({
+      from: '2026-03-01',
+      to: '2026-03-14',
+    });
+    expect(dashboardPresetRange('last_month', '2026-03-14')).toEqual({
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+    expect(dashboardPresetRange('last_month', '2026-01-10')).toEqual({
+      from: '2025-12-01',
+      to: '2025-12-31',
+    });
+    expect(dashboardPresetRange('this_quarter', '2026-05-20')).toEqual({
+      from: '2026-04-01',
+      to: '2026-05-20',
+    });
+    expect(dashboardPresetRange('last_30_days', '2026-03-01')).toEqual({
+      from: '2026-01-31',
+      to: '2026-03-01',
+    });
+    expect(dashboardPresetRange('this_year', '2026-03-14')).toEqual({
+      from: '2026-01-01',
+      to: '2026-03-14',
+    });
   });
 });

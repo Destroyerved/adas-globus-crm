@@ -104,6 +104,8 @@ export const SessionUserSchema = z.object({
   teamMemberIds: z.array(z.string()).default([]),
   marketFocus: MarketSchema.default('US'),
   capabilities: z.record(z.string(), ScopeSchema.or(z.literal('none'))),
+  /** IANA time zone used for "today" and dashboard periods (PRD 4.7, 14). */
+  timezone: z.string().optional(),
 });
 export type SessionUser = z.infer<typeof SessionUserSchema>;
 

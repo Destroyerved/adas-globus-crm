@@ -22,6 +22,9 @@ export default defineConfig({
           exclude: ['**/node_modules/**', '**/dist/**'],
           environment: 'node',
           testTimeout: 30000,
+          // Each file starts its own migrated database; under parallel load that can take
+          // longer than the 10s default.
+          hookTimeout: 30000,
         },
       },
     ],

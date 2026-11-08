@@ -94,10 +94,68 @@
     "/audit-logs": {
       "get": {
         "operationId": "listAuditLogs",
-        "summary": "List immutable security & compliance audit logs (PRD §9)",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Audit logs"
+            "description": "{ items, nextCursor }, newest first, scoped by audit.read"
           }
         }
       }
@@ -1113,6 +1171,348 @@
         "responses": {
           "200": {
             "description": "{ updated }"
+          }
+        }
+      }
+    },
+    "/me/preferences": {
+      "patch": {
+        "operationId": "updateMyPreferences",
+        "responses": {
+          "200": {
+            "description": "{ timezone }"
+          }
+        }
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "operationId": "adminListUsers",
+        "responses": {
+          "200": {
+            "description": "Users with role, team and last sign-in"
+          }
+        }
+      },
+      "post": {
+        "operationId": "inviteUser",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "409": {
+            "description": "Already exists"
+          }
+        }
+      }
+    },
+    "/admin/users/{id}": {
+      "patch": {
+        "operationId": "adminUpdateUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/admin/teams": {
+      "get": {
+        "operationId": "adminListTeams",
+        "responses": {
+          "200": {
+            "description": "Teams with member counts"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTeam",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "409": {
+            "description": "Already exists"
+          }
+        }
+      }
+    },
+    "/admin/teams/{id}": {
+      "patch": {
+        "operationId": "updateTeam",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/admin/roles": {
+      "get": {
+        "operationId": "adminListRoles",
+        "responses": {
+          "200": {
+            "description": "Roles with capability scopes"
+          }
+        }
+      }
+    },
+    "/admin/roles/{id}/capabilities": {
+      "put": {
+        "operationId": "updateRoleCapabilities",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/admin/pipelines": {
+      "get": {
+        "operationId": "adminListPipelines",
+        "responses": {
+          "200": {
+            "description": "Pipelines with stages and deal counts"
+          }
+        }
+      }
+    },
+    "/admin/pipelines/{id}/stages": {
+      "post": {
+        "operationId": "createStage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "409": {
+            "description": "Already exists"
+          }
+        }
+      }
+    },
+    "/admin/stages/{id}": {
+      "patch": {
+        "operationId": "updateStage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteStage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "The stage still has deals"
+          }
+        }
+      }
+    },
+    "/admin/stages/{id}/move": {
+      "post": {
+        "operationId": "moveStage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ id, moved }"
+          }
+        }
+      }
+    },
+    "/admin/settings": {
+      "get": {
+        "operationId": "adminListSettings",
+        "responses": {
+          "200": {
+            "description": "Reference lists and defaults"
+          }
+        }
+      }
+    },
+    "/admin/settings/{key}": {
+      "put": {
+        "operationId": "updateSetting",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/audit-logs/actions": {
+      "get": {
+        "operationId": "listAuditActions",
+        "responses": {
+          "200": {
+            "description": "Distinct audit actions"
+          }
+        }
+      }
+    },
+    "/dashboard": {
+      "get": {
+        "operationId": "getDashboard",
+        "responses": {
+          "200": {
+            "description": "Widgets for the role and the default period"
+          }
+        }
+      }
+    },
+    "/dashboard/widgets/{id}": {
+      "get": {
+        "operationId": "getDashboardWidget",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "schema": {
+              "enum": ["US", "CA"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ id, period, generatedAt, data }"
+          },
+          "403": {
+            "description": "Not allowed"
           }
         }
       }

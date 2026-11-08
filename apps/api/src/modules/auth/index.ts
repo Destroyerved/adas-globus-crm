@@ -1,12 +1,12 @@
-import { randomUUID } from 'node:crypto';
-import { type Market, type SessionUser, type UserRoleName } from '@adas/shared';
-import { type DatabaseService } from '../../platform/db/index.js';
 import {
-  DomainError,
-  ForbiddenScopeError,
-  ValidationDomainError,
-} from '../../platform/errors/index.js';
-import { ROLE_CAPABILITY_MATRIX, requireCapability } from '../../platform/scope/index.js';
+  UpdateMyPreferencesInputSchema,
+  type Market,
+  type SessionUser,
+  type UserRoleName,
+} from '@adas/shared';
+import { type DatabaseService } from '../../platform/db/index.js';
+import { DomainError } from '../../platform/errors/index.js';
+import { ROLE_CAPABILITY_MATRIX, type CapabilityScopeValue } from '../../platform/scope/index.js';
 
 export class AuthAndUsersService {
   constructor(
@@ -64,8 +64,11 @@ export class AuthAndUsersService {
       team_id: string | null;
       market_focus: Market;
       status: string;
+      role_id: string;
+      timezone: string;
     }>(
-      `SELECT u.id, u.email, u.name, r.name AS role_name, u.team_id, u.market_focus, u.status
+      `SELECT u.id, u.email, u.name, r.name AS role_name, u.team_id, u.market_focus, u.status,
+              u.role_id, u.timezone
        FROM users u
        JOIN roles r ON r.id = u.role_id
        WHERE u.id = $1 LIMIT 1`,
@@ -82,14 +85,25 @@ export class AuthAndUsersService {
       });
     }
 
-    const teamMembers = row.team_id
-      ? await this.db.query<{ id: string }>(
-          `SELECT id FROM users WHERE team_id = $1 AND status = 'active'`,
-          [row.team_id],
-        )
-      : { rows: [] };
+    const [teamMembers, overrides] = await Promise.all([
+      row.team_id
+        ? this.db.query<{ id: string }>(
+            `SELECT id FROM users WHERE team_id = $1 AND status = 'active'`,
+            [row.team_id],
+          )
+        : Promise.resolve({ rows: [] as { id: string }[] }),
+      // PRD 2.1: roles are editable bundles. Admin changes are stored per role and win over
+      // the built-in defaults.
+      this.db.query<{ capability: string; scope: CapabilityScopeValue }>(
+        `SELECT capability, scope FROM role_capabilities WHERE role_id = $1`,
+        [row.role_id],
+      ),
+    ]);
 
-    const capabilities = ROLE_CAPABILITY_MATRIX[row.role_name];
+    const capabilities: Record<string, CapabilityScopeValue> = {
+      ...ROLE_CAPABILITY_MATRIX[row.role_name],
+    };
+    for (const grant of overrides.rows) capabilities[grant.capability] = grant.scope;
     return {
       id: row.id,
       name: row.name,
@@ -99,6 +113,7 @@ export class AuthAndUsersService {
       teamMemberIds: teamMembers.rows.map((m) => m.id),
       marketFocus: row.market_focus,
       capabilities,
+      timezone: row.timezone,
     };
   }
 
@@ -163,73 +178,14 @@ export class AuthAndUsersService {
     return user.id;
   }
 
-  async inviteUser(
-    actor: SessionUser,
-    input: {
-      email: string;
-      name: string;
-      roleId: string;
-      teamId: string | null;
-      marketFocus: Market;
-    },
-  ): Promise<{ id: string; email: string; status: string }> {
-    requireCapability(actor, 'users.manage');
-    const cleanEmail = input.email.trim().toLowerCase();
-    if (!cleanEmail.includes('@')) {
-      throw new ValidationDomainError('Valid employee email is required.');
-    }
-
-    const id = `usr_${randomUUID()}`;
-    await this.db.transaction(async (tx) => {
-      await tx.query(
-        `INSERT INTO users (id, email, name, role_id, team_id, market_focus, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'invited')`,
-        [id, cleanEmail, input.name.trim(), input.roleId, input.teamId, input.marketFocus],
-      );
-      await this.db.writeAuditLog(tx, {
-        actorUserId: actor.id,
-        actorEmail: actor.email,
-        action: 'user.invited',
-        entityType: 'user',
-        entityId: id,
-        metadata: { email: cleanEmail, roleId: input.roleId, teamId: input.teamId },
-      });
-    });
-
-    return { id, email: cleanEmail, status: 'invited' };
-  }
-
-  async changeUserRole(
-    actor: SessionUser,
-    targetUserId: string,
-    newRoleId: string,
-  ): Promise<{ userId: string; newRoleId: string }> {
-    if (actor.role !== 'Admin') {
-      throw new ForbiddenScopeError('users.manage');
-    }
-
-    await this.db.transaction(async (tx) => {
-      const prev = await tx.query<{ role_id: string }>(`SELECT role_id FROM users WHERE id = $1`, [
-        targetUserId,
-      ]);
-      const oldRoleId = prev.rows[0]?.role_id ?? null;
-
-      await tx.query(`UPDATE users SET role_id = $2, updated_at = NOW() WHERE id = $1`, [
-        targetUserId,
-        newRoleId,
-      ]);
-
-      await this.db.writeAuditLog(tx, {
-        actorUserId: actor.id,
-        actorEmail: actor.email,
-        action: 'user.role_changed',
-        entityType: 'user',
-        entityId: targetUserId,
-        metadata: { oldRoleId, newRoleId },
-      });
-    });
-
-    return { userId: targetUserId, newRoleId };
+  /** The signed-in user's own preferences (PRD 4.7: "today" is in their time zone). */
+  async updatePreferences(user: SessionUser, raw: unknown): Promise<{ timezone: string }> {
+    const input = UpdateMyPreferencesInputSchema.parse(raw);
+    await this.db.query(`UPDATE users SET timezone = $2, updated_at = NOW() WHERE id = $1`, [
+      user.id,
+      input.timezone,
+    ]);
+    return { timezone: input.timezone };
   }
 
   async listUsers(): Promise<Record<string, unknown>[]> {
@@ -240,22 +196,6 @@ export class AuthAndUsersService {
        JOIN roles r ON r.id = u.role_id
        LEFT JOIN teams t ON t.id = u.team_id
        ORDER BY u.name ASC`,
-    );
-    return res.rows;
-  }
-
-  async listAuditLogs(actor: SessionUser): Promise<Record<string, unknown>[]> {
-    requireCapability(actor, 'audit.read');
-    // Managers hold audit.read with "team" scope: they see their own team's actions only.
-    const scope = ROLE_CAPABILITY_MATRIX[actor.role]['audit.read'];
-    const teamOnly = scope !== 'all';
-    const res = await this.db.query(
-      `SELECT id, actor_user_id, actor_email, action, entity_type, entity_id, metadata, ip_address, created_at
-       FROM audit_logs
-       ${teamOnly ? 'WHERE actor_user_id = ANY($1::text[])' : ''}
-       ORDER BY created_at DESC
-       LIMIT 100`,
-      teamOnly ? [[actor.id, ...actor.teamMemberIds]] : [],
     );
     return res.rows;
   }

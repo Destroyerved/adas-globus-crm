@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp } from 'lucide-react';
-import { formatNumber } from '@adas/shared';
+import { ArrowDown, ArrowUp, X } from 'lucide-react';
+import { formatDate, formatNumber } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { Select } from '@/components/ui/select.js';
 import { api, type CurrentUser, type Filter, type FilterCondition, type Page } from '@/lib/api.js';
@@ -42,7 +42,9 @@ export function useUrlState<K extends string>(
     const next = { ...current, ...patch } as Record<K, string>;
     const url = new URL(window.location.href);
     for (const key of Object.keys(next) as K[]) {
-      if (next[key] === defaultsRef.current[key] || next[key] === '') url.searchParams.delete(key);
+      // An empty value differs from a non-empty default (for example "any assignee" versus
+      // "me"), so it stays in the URL as key= and survives a reload.
+      if (next[key] === defaultsRef.current[key]) url.searchParams.delete(key);
       else url.searchParams.set(key, next[key]);
     }
     window.history.replaceState(window.history.state, '', url);
@@ -254,4 +256,50 @@ export function UserSelect({
 /** A row of filter controls above a table; wraps on small screens. */
 export function Toolbar({ children }: { children: ReactNode }) {
   return <div className="flex flex-col lg:flex-row lg:items-center gap-[8px]">{children}</div>;
+}
+
+/**
+ * A time range kept in the URL as "startISO,endISO" (end exclusive), as the dashboard writes
+ * it. Returns null for anything else, so a hand-edited URL never reaches the API.
+ */
+export function rangeParam(value: string): [string, string] | null {
+  const [start, end, extra] = value.split(',');
+  if (!start || !end || extra !== undefined) return null;
+  if (Number.isNaN(Date.parse(start)) || Number.isNaN(Date.parse(end))) return null;
+  return [start, end];
+}
+
+/** "1 Mar 2026 to 31 Mar 2026" for a range param, in the viewer's time zone. */
+export function rangeLabel(range: [string, string], timeZone: string): string {
+  const lastMoment = new Date(Date.parse(range[1]) - 1);
+  return `${formatDate(range[0], timeZone)} to ${formatDate(lastMoment, timeZone)}`;
+}
+
+/** Filters that came from a link (for example a dashboard number), each removable. */
+export function FilterChips({
+  chips,
+}: {
+  chips: { key: string; label: string; onRemove: () => void }[];
+}) {
+  if (chips.length === 0) return null;
+  return (
+    <ul className="m-0 p-0 list-none flex flex-wrap gap-[6px]" aria-label="Active filters">
+      {chips.map((chip) => (
+        <li
+          key={chip.key}
+          className="inline-flex items-center gap-[4px] h-[28px] pl-[10px] pr-[4px] rounded-pill border border-line-strong bg-surface text-[13px] text-ink"
+        >
+          {chip.label}
+          <button
+            type="button"
+            aria-label={`Remove filter: ${chip.label}`}
+            onClick={chip.onRemove}
+            className="h-[22px] w-[22px] grid place-items-center rounded-pill bg-transparent border-0 text-ink-3 hover:bg-bg-alt hover:text-ink cursor-pointer"
+          >
+            <X size={13} aria-hidden="true" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }

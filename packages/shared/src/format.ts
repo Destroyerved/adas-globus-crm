@@ -24,6 +24,25 @@ export function formatNumber(value: number | bigint): string {
   return WESTERN_NUMBER_FORMAT.format(value);
 }
 
+/** A share as a percentage ("42%"); "—" when there is nothing to divide by. */
+export function formatPercent(ratio: number | null | undefined, digits = 0): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return '—';
+  return `${(ratio * 100).toFixed(digits)}%`;
+}
+
+/** A duration in minutes as "45 min", "3 h 20 min" or "2.5 days"; "—" when unknown. */
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) return '—';
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m} min`;
+  if (m < 48 * 60) {
+    const h = Math.floor(m / 60);
+    const rest = m % 60;
+    return rest ? `${h} h ${rest} min` : `${h} h`;
+  }
+  return `${formatNumber(Math.round((m / 1440) * 10) / 10)} days`;
+}
+
 /**
  * Format counts with singular/plural and "No <plural>" instead of "0 <plural>" (DESIGN.md §10).
  */
