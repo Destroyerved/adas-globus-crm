@@ -1155,3 +1155,4 @@ export { registerCrmRoutes } from './routes.js';
 export { CrmListService } from './lists.js';
 export { CrmRecordService } from './records.js';
 export { CrmTimelineService } from './timeline.js';
+export { CrmJobs } from './jobs.js';

@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { readMigrations } from '../src/platform/db/index.js';
 import { loadDotEnv, validateEnv } from '../src/platform/config/index.js';
+import { installJobs } from '../src/platform/jobs/index.js';
+import { JOB_QUEUES } from '../src/jobs.js';
 
 loadDotEnv();
 const env = validateEnv();
@@ -59,6 +61,17 @@ try {
   console.log(
     ran === 0 ? '[migrate] database is up to date' : `[migrate] ${ran} migration(s) applied`,
   );
+
+  // The job queue schema belongs to pg-boss, which installs and upgrades it itself. It runs
+  // here, as the admin role, so the app role never needs schema rights (PRD 6.9, ADR 0006).
+  await installJobs({ connectionString: env.DATABASE_ADMIN_URL }, [...JOB_QUEUES]);
+  await client.query(`GRANT USAGE ON SCHEMA pgboss TO adas_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgboss TO adas_app;
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA pgboss TO adas_app;
+    GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgboss TO adas_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO adas_app;`);
+  console.log(`[migrate] job queues ready: ${JOB_QUEUES.join(', ')}`);
 } catch (err) {
   console.error(`[migrate] failed: ${err instanceof Error ? err.message : String(err)}`);
   process.exitCode = 1;

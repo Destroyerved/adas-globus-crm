@@ -895,16 +895,26 @@ if (isMainModule) {
   loadDotEnv();
   const { server, logger, env, db } = createAppServer();
   // Fail closed until the remaining production blockers in docs/PROGRESS.md are done:
-  // the background worker, the connectors, break-glass sign-in, and verification on real
-  // PostgreSQL and Microsoft Entra. Remove this guard in R8 (production deploy).
+  // the connectors, break-glass sign-in, and verification on real PostgreSQL (API and
+  // worker) and Microsoft Entra. Remove this guard in R8 (production deploy).
   if (env.NODE_ENV === 'production') {
     logger.fatal(
-      'Refusing to start with NODE_ENV=production: the CRM is not production-ready yet (worker, connectors and verification outstanding). See docs/PROGRESS.md, "Not production-ready".',
+      'Refusing to start with NODE_ENV=production: the CRM is not production-ready yet (connectors and verification outstanding). See docs/PROGRESS.md, "Not production-ready".',
     );
     process.exit(1);
   }
   void (async () => {
-    await db.ensureInitialized();
+    try {
+      await db.ensureInitialized();
+    } catch (err) {
+      // Start-up only: no request data can be in this error.
+      const e = err as { name?: string; code?: string; message?: string };
+      logger.fatal(
+        { err: { name: e.name, code: e.code, message: e.message } },
+        'database unavailable',
+      );
+      process.exit(1);
+    }
     server.listen(env.PORT, () => {
       logger.info({ port: env.PORT, env: env.NODE_ENV }, 'ADAS CRM API listening');
     });

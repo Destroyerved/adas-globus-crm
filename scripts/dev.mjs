@@ -29,6 +29,7 @@ function startProcess(name, args) {
 }
 
 startProcess('api', ['--filter', '@adas/api', 'dev']);
+startProcess('worker', ['--filter', '@adas/api', 'dev:worker']);
 startProcess('web', ['--filter', '@adas/web', 'dev']);
 
 function shutdown() {
