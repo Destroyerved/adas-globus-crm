@@ -2,6 +2,9 @@
 // Partial unique indexes, trigram GIN indexes, check constraints, and
 // append-only triggers/grants live in:
 //   prisma/migrations/0001_initial_schema/migration.sql
+//   prisma/migrations/0003_lists_editing_reference/migration.sql (keyset, trigram and
+//   partial indexes for lists and reminders; tasks, notes, notifications and
+//   pipeline_stages columns; system roles, pipelines and reference lists)
 
 generator client {
   provider = "prisma-client-js"
@@ -43,6 +46,7 @@ model User {
   passwordHash  String?  @map("password_hash")
   totpSecret    String?  @map("totp_secret")
   dailySendCap  Int      @default(50) @map("daily_send_cap")
+  timezone      String   @default("Asia/Kolkata") // migration 0003
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -91,6 +95,7 @@ model Company {
   currency              String    @default("USD")
   customFields          Json      @default("{}") @map("custom_fields")
   version               Int       @default(1)
+  lastContactedAt DateTime? @map("last_contacted_at") @db.Timestamptz(6) // migration 0003
   deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -126,6 +131,7 @@ model Contact {
   leadScoreBreakdown      Json      @default("[]") @map("lead_score_breakdown")
   customFields            Json      @default("{}") @map("custom_fields")
   version                 Int       @default(1)
+  lastContactedAt DateTime? @map("last_contacted_at") @db.Timestamptz(6) // migration 0003
   deletedAt               DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -168,6 +174,7 @@ model Lead {
   utmMedium              String?   @map("utm_medium")
   utmCampaign            String?   @map("utm_campaign")
   version                Int       @default(1)
+  lastContactedAt DateTime? @map("last_contacted_at") @db.Timestamptz(6) // migration 0003
   deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -208,6 +215,14 @@ model Deal {
   ownerUserId        String    @map("owner_user_id")
   teamId             String?   @map("team_id")
   version            Int       @default(1)
+  // Added in migration 0003 (term_months and one_time_value_minor have CHECK constraints there)
+  termMonths           Int       @default(12) @map("term_months")
+  oneTimeValueMinor    BigInt    @default(0) @map("one_time_value_minor")
+  probabilityOverride  Boolean   @default(false) @map("probability_override")
+  closedAt             DateTime? @map("closed_at") @db.Timestamptz(6)
+  fxRateScaledAtClose  BigInt?   @map("fx_rate_scaled_at_close")
+  lastActivityAt       DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+  idleFlaggedAt        DateTime? @map("idle_flagged_at") @db.Timestamptz(6)
   deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

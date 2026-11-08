@@ -235,11 +235,22 @@ export const MoveDealStageInputSchema = z.object({
 });
 export type MoveDealStageInput = z.infer<typeof MoveDealStageInputSchema>;
 
+export const TaskTypeSchema = z.enum([
+  'call',
+  'email',
+  'follow_up',
+  'meeting',
+  'research',
+  'trial_checkin',
+  'proposal',
+  'internal',
+  'sla_first_response',
+]);
+export type TaskType = z.infer<typeof TaskTypeSchema>;
+
 export const CreateTaskInputSchema = z.object({
   title: z.string().min(1).max(240),
-  taskType: z
-    .enum(['call', 'email', 'follow_up', 'trial_checkin', 'sla_first_response'])
-    .default('follow_up'),
+  taskType: TaskTypeSchema.default('follow_up'),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal'),
   dueAt: z.string().datetime(),
   assigneeUserId: z.string().optional(),
@@ -247,8 +258,140 @@ export const CreateTaskInputSchema = z.object({
   companyId: z.string().optional().nullable(),
   contactId: z.string().optional().nullable(),
   dealId: z.string().optional().nullable(),
+  reminderAt: z.string().datetime().optional().nullable(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Editing records, notes, tags and activities (PRD 3.1, 3.2, 4.3-4.7)
+// ---------------------------------------------------------------------------
+
+export const RecordEntityTypeSchema = z.enum(['lead', 'contact', 'company', 'deal']);
+export type RecordEntityType = z.infer<typeof RecordEntityTypeSchema>;
+
+const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
+
+export const UpdateLeadInputSchema = z.object({
+  version: z.number().int().positive(),
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().max(100).optional(),
+  email: z.string().email().optional(),
+  phone: optionalText(40),
+  firmName: optionalText(200),
+  website: optionalText(300),
+  title: z.string().trim().max(160).optional(),
+  market: MarketSchema.optional(),
+  stateProvince: optionalText(80),
+  staffBand: z.string().max(40).optional(),
+  source: z.string().trim().min(1).max(160).optional(),
+  status: LeadSystemStatusSchema.optional(),
+  disqualificationReason: optionalText(160),
+  statusNote: optionalText(2000),
+  ownerUserId: z.string().optional(),
+  servicesNeeded: z.array(z.string().max(120)).max(30).optional(),
+  softwareStack: z.array(z.string().max(120)).max(40).optional(),
+});
+export type UpdateLeadInput = z.infer<typeof UpdateLeadInputSchema>;
+
+export const UpdateContactInputSchema = z.object({
+  version: z.number().int().positive(),
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().min(1).max(100).optional(),
+  title: z.string().trim().max(160).optional(),
+  jobFunction: z.string().trim().max(120).optional(),
+  seniority: z.string().trim().max(80).optional(),
+  primaryEmail: z.string().email().optional(),
+  phone: optionalText(40),
+  market: MarketSchema.optional(),
+  timezone: z.string().max(64).optional(),
+  companyId: z.string().nullable().optional(),
+  ownerUserId: z.string().optional(),
+  doNotContact: z.boolean().optional(),
+});
+export type UpdateContactInput = z.infer<typeof UpdateContactInputSchema>;
+
+export const UpdateDealInputSchema = z.object({
+  version: z.number().int().positive(),
+  name: z.string().trim().min(1).max(200).optional(),
+  primaryContactId: z.string().nullable().optional(),
+  monthlyValueMinor: z.string().regex(/^\d+$/).optional(),
+  oneTimeValueMinor: z.string().regex(/^\d+$/).optional(),
+  termMonths: z.number().int().positive().max(120).optional(),
+  currency: CurrencySchema.optional(),
+  fteCount: z.number().positive().max(999).optional(),
+  engagementModel: z.string().max(80).optional(),
+  services: z.array(z.string().max(120)).max(30).optional(),
+  probability: z.number().int().min(0).max(100).nullable().optional(),
+  expectedCloseDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  ownerUserId: z.string().optional(),
+  trialCandidateRole: optionalText(160),
+});
+export type UpdateDealInput = z.infer<typeof UpdateDealInputSchema>;
+
+export const UpdateTaskInputSchema = z.object({
+  version: z.number().int().positive(),
+  title: z.string().trim().min(1).max(240).optional(),
+  taskType: TaskTypeSchema.optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  dueAt: z.string().datetime().optional(),
+  reminderAt: z.string().datetime().nullable().optional(),
+  assigneeUserId: z.string().optional(),
+  status: z.enum(['open', 'cancelled']).optional(),
+});
+export type UpdateTaskInput = z.infer<typeof UpdateTaskInputSchema>;
+
+export const CompleteTaskInputSchema = z.object({
+  outcome: z.string().trim().max(4000).optional().nullable(),
+});
+export type CompleteTaskInput = z.infer<typeof CompleteTaskInputSchema>;
+
+export const CreateNoteInputSchema = z.object({
+  entityType: RecordEntityTypeSchema,
+  entityId: z.string().min(1),
+  body: z.string().trim().min(1).max(20000),
+});
+export type CreateNoteInput = z.infer<typeof CreateNoteInputSchema>;
+
+export const UpdateNoteInputSchema = z.object({
+  version: z.number().int().positive(),
+  body: z.string().trim().min(1).max(20000),
+});
+export type UpdateNoteInput = z.infer<typeof UpdateNoteInputSchema>;
+
+export const ActivityTypeSchema = z.enum(['call', 'meeting', 'email_logged']);
+export type ActivityType = z.infer<typeof ActivityTypeSchema>;
+
+export const LogActivityInputSchema = z.object({
+  activityType: ActivityTypeSchema,
+  entityType: RecordEntityTypeSchema,
+  entityId: z.string().min(1),
+  title: z.string().trim().max(240).optional(),
+  detail: z.string().trim().max(20000).default(''),
+  outcome: z.string().trim().max(120).optional().nullable(),
+  occurredAt: z.string().datetime().optional(),
+});
+export type LogActivityInput = z.infer<typeof LogActivityInputSchema>;
+
+export const SetTagsInputSchema = z.object({
+  tags: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(40)
+        .regex(
+          /^[\p{L}\p{N} ._-]+$/u,
+          'Tags use letters, numbers, spaces, dots, dashes and underscores',
+        ),
+    )
+    .max(20),
+});
+export type SetTagsInput = z.infer<typeof SetTagsInputSchema>;
 
 // ---------------------------------------------------------------------------
 // PRD §4.10: Website Inquiry Intake Payload

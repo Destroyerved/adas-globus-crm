@@ -12,7 +12,9 @@ import {
   formatRelative,
   formatTime,
   MarketSchema,
+  moneyInputValue,
   MoneyWireSchema,
+  parseMoneyInput,
   SendableReasonCodeSchema,
   WebsiteInquiryPayloadSchema,
 } from '../index.js';
@@ -95,5 +97,26 @@ describe('@adas/shared schemas and formatting', () => {
         startFreeTrial: true,
       }).startFreeTrial,
     ).toBe(true);
+  });
+});
+
+describe('money typed in forms', () => {
+  it('parses amounts to minor units without floating point', () => {
+    expect(parseMoneyInput('4500')).toBe(450000n);
+    expect(parseMoneyInput('4,500.5')).toBe(450050n);
+    expect(parseMoneyInput(' 0.07 ')).toBe(7n);
+    expect(parseMoneyInput('19999999999.99')).toBe(1999999999999n);
+  });
+
+  it('refuses negative, malformed or over-precise amounts', () => {
+    for (const bad of ['', '-5', '4.555', 'abc', '1e5', '12.']) {
+      expect(parseMoneyInput(bad)).toBeNull();
+    }
+  });
+
+  it('turns minor units back into form text', () => {
+    expect(moneyInputValue('450000')).toBe('4500');
+    expect(moneyInputValue(450050n)).toBe('4500.50');
+    expect(moneyInputValue('7')).toBe('0.07');
   });
 });

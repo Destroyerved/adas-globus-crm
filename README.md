@@ -11,7 +11,7 @@ The internal CRM for ADAS Globus Pro: companies, contacts, leads, deals and task
 
 ## What works today
 
-Leads, Contacts, Companies (list and profile), Deals (pipeline board) and Tasks read and write real data through the API and PostgreSQL. Website inquiries from adasglobuspro.com are accepted at `POST /api/v1/public/inquiries`. Permissions are scoped per role (own, team, all) in every query. Every API call needs a signed-in session (an HttpOnly cookie); writes must come from the CRM web app.
+Leads, Contacts, Companies and Deals have server-paged lists with search, filters and sorting kept in the URL, record pages with a timeline (notes, calls, meetings, emails, status and stage changes), tags, tasks, and edit drawers. The deals board and list read from the server; Tasks has Today, Overdue, Upcoming and Done views. All of it reads and writes real data through the API and PostgreSQL. Website inquiries from adasglobuspro.com are accepted at `POST /api/v1/public/inquiries`. Permissions are scoped per role (own, team, all) in every query. Every API call needs a signed-in session (an HttpOnly cookie); writes must come from the CRM web app.
 
 ## Microsoft sign-in
 

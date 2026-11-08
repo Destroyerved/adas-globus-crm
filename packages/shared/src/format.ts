@@ -75,6 +75,29 @@ export function formatMoney(money: Money, options: FormatMoneyOptions = {}): str
 }
 
 /**
+ * Parse an amount typed in a form ("4,500" or "4500.50") into minor units without floats.
+ * Returns null when the text is not a plain non-negative amount with at most two decimals.
+ */
+export function parseMoneyInput(text: string): bigint | null {
+  const cleaned = text.trim().replace(/,/g, '');
+  const match = /^(\d{1,13})(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (!match) return null;
+  const whole = BigInt(match[1] ?? '0');
+  const cents = BigInt((match[2] ?? '').padEnd(2, '0') || '0');
+  return whole * 100n + cents;
+}
+
+/** Minor units back to the plain text a form field shows ("4500" or "4500.50"). */
+export function moneyInputValue(amountMinor: bigint | string): string {
+  const minor = typeof amountMinor === 'bigint' ? amountMinor : BigInt(amountMinor || '0');
+  const whole = minor / 100n;
+  const cents = minor % 100n;
+  return cents === 0n
+    ? whole.toString()
+    : `${whole.toString()}.${cents.toString().padStart(2, '0')}`;
+}
+
+/**
  * Format date as "4 Nov 2026" in the given IANA time zone (DESIGN.md §10).
  */
 export function formatDate(dateInput: Date | string, timeZone = 'UTC'): string {

@@ -3,7 +3,7 @@
 The build agent keeps this file current (see `AGENTS.md` section 2). Tick an item only when it is verified in the environment the item names. A production item can't be ticked from a dev machine, and an owner sign-off can't be ticked by the agent.
 
 **Current phase:** 0 (Groundwork), waiting for owner sign-off on the shell.
-**Overall state:** **not production-ready.** Leads, Contacts, Companies, Deals and Tasks now work on live data (R2). Real PostgreSQL storage is built (R1) and waits for the one-time local database setup. Sign-in, the worker and all connectors are still to do.
+**Overall state:** **not production-ready.** Leads, Contacts, Companies, Deals and Tasks work on live data with server-side paging, search, filters and editing (M1 slice 1). Real PostgreSQL storage is built (R1) and waits for the one-time local database setup. Microsoft sign-in is built but unverified (R3). The worker, settings, dashboard and all mail connectors are still to do.
 
 ## Not production-ready
 
@@ -18,7 +18,7 @@ The API refuses to start with `NODE_ENV=production` until every item here is fix
 | 5   | The worker (`apps/api/src/worker.ts`) logs "ready" and exits. No jobs run.                                                                                                                                                                                                                                                                                                                                                                                           | Nothing is scheduled: no sequence steps, reminders, SLA checks, outbox dispatch, retention or backups verification. |
 | 6   | No real connectors: Microsoft Graph sign-in, mailbox sync and sending, the email service provider, Apollo, Bookings and n8n are simulated. All mail goes to a local stub.                                                                                                                                                                                                                                                                                            | Nothing reaches Outlook, Apollo or a real inbox.                                                                    |
 | 7   | Production infrastructure (Ubuntu server, Docker, Cloudflare Tunnel and Access, off-site backups, restore drill) has not been set up or run. Docker isn't installed on the dev machine.                                                                                                                                                                                                                                                                              | Nothing has been deployed or restored.                                                                              |
-| 8   | Dashboard and Settings screens don't exist yet. Contacts and Companies lists now exist.                                                                                                                                                                                                                                                                                                                                                                              | No overview screen.                                                                                                 |
+| 8   | Dashboard and Settings screens don't exist yet. Lists, profiles and editing now exist.                                                                                                                                                                                                                                                                                                                                                                               | No overview screen.                                                                                                 |
 
 ## Make it real (next)
 
@@ -34,6 +34,22 @@ Order matters: each step builds on the one before. Items marked **Owner** need s
 | R6   | Email service provider for campaigns                                                                    | Campaigns send through the provider, with webhooks for bounces and complaints                                                                                    | **Owner:** choose the provider (PRD Q5), create the account and DNS records                                                                                         |
 | R7   | Apollo connector                                                                                        | Search, import and enrichment through the Apollo API with credit checks                                                                                          | **Owner:** an Apollo API key and plan confirmation (PRD Q11)                                                                                                        |
 | R8   | Production deploy                                                                                       | Running on the company server behind Cloudflare Access, with off-site backups and a passed restore drill                                                         | **Owner:** the server, a Cloudflare account and a backup storage bucket (PRD Q7)                                                                                    |
+
+## M1: daily CRM work (no owner input needed)
+
+| Item                                                                                                                                                                 | State                                                                            | Evidence                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast lists: keyset paging, server search, sort, filter language, state in the URL (PRD 6.7, 6.8)                                                                     | **Built and tested**                                                             | `m1-lists-editing.int.test.ts` (scope own/team/all on every list, cursor order, filters, bad input); e2e list search in the URL                                                                          |
+| Editing: lead status with disqualify reason, owner reassignment with notification, contact, company and deal edits, soft delete with audit (PRD 3.1-3.3, 4.3-4.6, 9) | **Built and tested**                                                             | Integration tests (version conflicts, history, team-only assignment, free-mail and do-not-contact domain rules, lost reasons, reopen); e2e edit drawer, reload persistence and reassignment notification |
+| Lead, contact and deal pages; timeline with notes, calls, meetings and emails; tags; tasks on records (PRD 3.4, 4.4, 4.7)                                            | **Built and tested**                                                             | Integration tests (call moves lead to Contacted, timeline paging without gaps, note history, tags); e2e log a call and tag a lead, screenshots 08-10                                                     |
+| Deals board on the server (stage totals, idle flag, 50 cards per stage, list view) and stage moves with required details (PRD 4.6)                                   | **Built and tested**                                                             | Integration board test; e2e move to Free Trial                                                                                                                                                           |
+| Command palette on server search; notification bell (PRD 4.1, 4.7)                                                                                                   | **Built and tested**                                                             | e2e palette and notification tests                                                                                                                                                                       |
+| Admin settings: users and invites, roles, teams, pipelines and stages, reference lists, user time zone                                                               | Not started                                                                      |                                                                                                                                                                                                          |
+| Role dashboard with PRD 14 metrics                                                                                                                                   | Not started                                                                      |                                                                                                                                                                                                          |
+| Background worker: outbox dispatch, reminders, overdue alerts, SLA warnings, idle deals                                                                              | Not started (the notification table, dedupe keys and reminder columns are ready) |                                                                                                                                                                                                          |
+| Emergency admin sign-in (Argon2id and TOTP)                                                                                                                          | Not started                                                                      |                                                                                                                                                                                                          |
+
+**Not verified anywhere yet:** all of the above against a real PostgreSQL server (tests use PGlite until the local database is set up), and query plans on the large seed.
 
 ## Open questions (PRD 15)
 
@@ -89,11 +105,11 @@ Demo logic for these phases exists in `apps/api/src/modules/*` and runs against 
 
 ### Phase 2: Core records and intake
 
-- [ ] Companies, contacts, leads and status history (prototype API works; UI not wired)
-- [ ] Reference lists seeded (PRD 3.4)
-- [ ] Notes, tags, custom fields, record history, basic timeline
-- [ ] Filter language, field registry, saved views
-- [ ] Global search (trigram + full-text) (prototype API works)
+- [ ] Companies, contacts, leads and status history (built with edit screens and tests on PGlite; not run on real PostgreSQL)
+- [ ] Reference lists seeded (PRD 3.4) (in migration 0003; admin editing not built)
+- [ ] Notes, tags, custom fields, record history, basic timeline (all but custom fields built and tested on PGlite)
+- [ ] Filter language, field registry, saved views (filter language and registry built; saved views not built)
+- [ ] Global search (trigram + full-text) (trigram search works in the palette; full-text not built)
 - [ ] Imports: upload, mapping, dry run, background run, error CSV, rollback (prototype: JSON rows only, no file upload)
 - [ ] Duplicate rules, review queue, merge with undo (prototype API works)
 - [ ] Exports (permissioned, audited)
@@ -105,8 +121,8 @@ Demo logic for these phases exists in `apps/api/src/modules/*` and runs against 
 
 ### Phase 3: Sales and cutover
 
-- [ ] Pipelines and stages with required fields, deals (prototype API works; Kanban shows demo data)
-- [ ] Kanban (keyboard accessible) and deal table
+- [ ] Pipelines and stages with required fields, deals (built and tested on PGlite; admin editing of stages not built)
+- [ ] Kanban (keyboard accessible) and deal table (built: stage moves by select, no drag and drop yet)
 - [ ] Lead conversion (prototype API works)
 - [ ] Tasks (list and calendar), reminders, SLA warnings
 - [ ] Email notifications and digest via Graph shared mailbox
@@ -149,6 +165,8 @@ Demo logic for these phases exists in `apps/api/src/modules/*` and runs against 
 - [ ] **Exit:** Apollo import deduplicates with Apollo IDs; n8n reacts to `deal.won`; scoring is configurable and explained
 
 ## Review log
+
+- **8 Nov 2026, M1 slice 1: lists and editing.** API: keyset lists with the filter language for leads, contacts, companies, deals and tasks (`platform/list`, `modules/crm/lists.ts`); PATCH and DELETE for every record (`records.ts`); timeline, notes, logged calls, meetings and emails, tags, lead/contact/deal pages (`timeline.ts`); pipeline board; notifications (`modules/notifications`); `Idempotency-Key` replay; a typed router; `/auth/me` returns effective capabilities. Migration `0003_lists_editing_reference` adds list and search indexes, the new columns and the system reference data. Web: list kit (URL state, paging, sort headers), drawer, select, toast and confirm dialog primitives, edit drawers, lead, contact and deal pages, the shared timeline and tag editor, the deals board on the server with a list view, the palette on `/search`, and a real notification bell. Bug found and fixed while testing: the timeline's "older" cursor could skip rows that share a timestamp (now `<timestamp>|<id>`). `pnpm check` (34 unit, 42 integration) and `pnpm test:e2e` (17) pass; screenshots 01-10 at 1440px and 375px. **Not verified:** real PostgreSQL, query plans on the large seed. **Deviation:** edit forms validate with the shared zod schemas but don't use react-hook-form (ADR 0004).
 
 - **5 Nov 2026, R3 sign-in.** Sessions: `modules/auth/sessions.ts`; Microsoft Entra: `modules/auth/entra.ts` with `openid-client` 6 (calls Microsoft's real endpoints; reports "not configured" until `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` and `ENTRA_CLIENT_SECRET_FILE` are set). Migration `0002_sessions_entra` adds `sessions.last_seen_at` and `users.entra_object_id`. Removed: the `X-Dev-User-Id` header, the email-only "Entra" endpoint, the fake break-glass login (any password plus `123456`) and the login form that signed anyone in as admin. The web app checks `/auth/me` on load and shows sign-in when there's no session; the sign-in page clocks are live. Tests: 7 new HTTP tests (session lifecycle, hashed storage, CSRF, deactivation, unconfigured Microsoft sign-in, no dev sign-in in production) and 2 new browser tests; `pnpm check` (31 unit, 25 integration) and `pnpm test:e2e` (12) pass. **Not verified:** a real Microsoft sign-in (needs the app registration) and the API on real PostgreSQL (needs the local DB setup).
 

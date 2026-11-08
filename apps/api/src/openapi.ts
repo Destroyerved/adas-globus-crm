@@ -251,6 +251,147 @@ const openApiSpec = {
   },
 };
 
+// Routes added with the lists-and-editing slice (PRD 3.1-3.4, 4.3-4.7, 6.7, 6.8).
+const listParameters = [
+  { name: 'q', in: 'query', schema: { type: 'string' }, description: 'Search text' },
+  {
+    name: 'sort',
+    in: 'query',
+    schema: { type: 'string' },
+    description: 'Field, "-" for descending',
+  },
+  {
+    name: 'filter',
+    in: 'query',
+    schema: { type: 'string' },
+    description: 'Filter language as JSON',
+  },
+  { name: 'cursor', in: 'query', schema: { type: 'string' } },
+  { name: 'limit', in: 'query', schema: { type: 'integer', maximum: 200 } },
+];
+const idParam = [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }];
+const ok = (description: string) => ({ '200': { description } });
+const edit = {
+  '200': { description: 'Updated' },
+  '409': { description: 'Version conflict' },
+  '422': { description: 'Validation failed' },
+};
+const page = (entity: string) => ({
+  parameters: listParameters,
+  responses: ok(`A page of ${entity}: { items, nextCursor, total }`),
+});
+const recordPaths = (entity: string, op: string) => ({
+  get: {
+    operationId: `get${op}`,
+    parameters: idParam,
+    responses: ok(`${entity} with related records`),
+  },
+  patch: { operationId: `update${op}`, parameters: idParam, responses: edit },
+  delete: {
+    operationId: `delete${op}`,
+    parameters: idParam,
+    responses: ok('Soft-deleted and audited'),
+  },
+});
+
+const listsAndEditingPaths: Record<string, Record<string, unknown>> = {
+  '/leads': { get: { operationId: 'listLeads', ...page('leads') } },
+  '/contacts': { get: { operationId: 'listContacts', ...page('contacts') } },
+  '/companies': { get: { operationId: 'listCompanies', ...page('companies') } },
+  '/deals': { get: { operationId: 'listDeals', ...page('deals') } },
+  '/tasks': {
+    get: {
+      operationId: 'listTasks',
+      parameters: [
+        ...listParameters,
+        {
+          name: 'view',
+          in: 'query',
+          schema: { enum: ['open', 'today', 'overdue', 'upcoming', 'done', 'all'] },
+        },
+      ],
+      responses: ok('A page of tasks'),
+    },
+  },
+  '/leads/{id}': recordPaths('Lead', 'Lead'),
+  '/leads/{id}/convert': {
+    post: { operationId: 'convertLeadById', parameters: idParam, responses: ok('Converted') },
+  },
+  '/contacts/{id}': recordPaths('Contact', 'Contact'),
+  '/companies/{id}': recordPaths('Company', 'Company'),
+  '/deals/{id}': recordPaths('Deal', 'Deal'),
+  '/deals/{id}/move': { post: { operationId: 'moveDeal', parameters: idParam, responses: edit } },
+  '/pipelines': { get: { operationId: 'listPipelines', responses: ok('Pipelines with stages') } },
+  '/pipelines/{id}/board': {
+    get: {
+      operationId: 'getPipelineBoard',
+      parameters: [
+        ...idParam,
+        { name: 'owner', in: 'query', schema: { type: 'string' } },
+        { name: 'q', in: 'query', schema: { type: 'string' } },
+      ],
+      responses: ok('Stages with counts, totals and up to 50 deals each'),
+    },
+  },
+  '/tasks/{id}': { patch: { operationId: 'updateTask', parameters: idParam, responses: edit } },
+  '/tasks/{id}/complete': {
+    post: { operationId: 'completeTask', parameters: idParam, responses: ok('Completed') },
+  },
+  '/timeline': {
+    get: {
+      operationId: 'getTimeline',
+      parameters: [
+        {
+          name: 'entityType',
+          in: 'query',
+          required: true,
+          schema: { enum: ['lead', 'contact', 'company', 'deal'] },
+        },
+        { name: 'entityId', in: 'query', required: true, schema: { type: 'string' } },
+        { name: 'before', in: 'query', schema: { type: 'string' } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', maximum: 200 } },
+      ],
+      responses: ok('{ items, nextBefore }'),
+    },
+  },
+  '/activities': {
+    post: { operationId: 'logActivity', responses: { '201': { description: 'Logged' } } },
+  },
+  '/notes': {
+    post: { operationId: 'createNote', responses: { '201': { description: 'Created' } } },
+  },
+  '/notes/{id}': { patch: { operationId: 'updateNote', parameters: idParam, responses: edit } },
+  '/tags': { get: { operationId: 'listTags', responses: ok('Tags with usage counts') } },
+  '/tags/{entityType}/{entityId}': {
+    put: {
+      operationId: 'setTags',
+      parameters: [
+        { name: 'entityType', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'entityId', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      responses: ok('Tags on the record'),
+    },
+  },
+  '/reference-lists': {
+    get: { operationId: 'getReferenceLists', responses: ok('Reference lists') },
+  },
+  '/notifications': {
+    get: {
+      operationId: 'listNotifications',
+      parameters: [{ name: 'unread', in: 'query', schema: { enum: ['1'] } }],
+      responses: ok('{ items, unreadCount }'),
+    },
+  },
+  '/notifications/read': {
+    post: { operationId: 'markNotificationsRead', responses: ok('{ updated }') },
+  },
+};
+
+const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
+for (const [path, methods] of Object.entries(listsAndEditingPaths)) {
+  allPaths[path] = { ...allPaths[path], ...methods };
+}
+
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, `${JSON.stringify(openApiSpec, null, 2)}\n`, 'utf8');
 console.log(`[openapi] Wrote OpenAPI snapshot to ${outPath}`);

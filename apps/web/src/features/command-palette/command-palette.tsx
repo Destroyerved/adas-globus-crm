@@ -1,20 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import {
-  ArrowRight,
-  Building2,
-  Handshake,
-  Phone,
-  Search,
-  Sparkles,
-  UserPlus,
-  X,
-} from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { ArrowRight, Building2, Contact, Handshake, Search, UserPlus, X } from 'lucide-react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useDebounced } from '@/features/shared/list-kit.js';
 import { api } from '@/lib/api.js';
 
 interface CommandPaletteItem {
   id: string;
   group: 'RECORDS' | 'ACTIONS' | 'NAVIGATION';
+  kind?: 'company' | 'contact' | 'lead' | 'deal';
   label: string;
   meta: string;
   shortcut?: string;
@@ -67,9 +60,12 @@ const NAVIGATION_ITEMS: CommandPaletteItem[] = [
 
 export type AppScreenId =
   | 'leads'
+  | 'lead'
   | 'companies'
   | 'contacts'
+  | 'contact'
   | 'company'
+  | 'deal'
   | 'deals'
   | 'tasks'
   | 'inbox'
@@ -91,49 +87,66 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const companies = useQuery({
-    queryKey: ['companies'],
-    queryFn: api.listCompanies,
-    enabled: open,
+  const debounced = useDebounced(query.trim(), 200);
+  const search = useQuery({
+    queryKey: ['search', debounced],
+    queryFn: () => api.search(debounced),
+    enabled: open && debounced.length >= 2,
+    placeholderData: keepPreviousData,
   });
-  const leads = useQuery({ queryKey: ['leads'], queryFn: api.listLeads, enabled: open });
 
-  const allItems = useMemo<CommandPaletteItem[]>(
-    () => [
-      ...(companies.data ?? []).map((c) => ({
+  const recordItems = useMemo<CommandPaletteItem[]>(() => {
+    const r = search.data;
+    if (!r || debounced.length < 2) return [];
+    return [
+      ...r.companies.map((c) => ({
         id: `cmp_${c.id}`,
         group: 'RECORDS' as const,
+        kind: 'company' as const,
         label: c.name,
-        meta: `Company · ${c.market}${c.city ? ` · ${c.city}` : ''}`,
+        meta: `Company · ${c.market}${c.domain ? ` · ${c.domain}` : ''}`,
         targetScreen: 'company' as const,
         targetId: c.id,
       })),
-      ...(leads.data ?? []).map((l) => ({
+      ...r.contacts.map((c) => ({
+        id: `cnt_${c.id}`,
+        group: 'RECORDS' as const,
+        kind: 'contact' as const,
+        label: c.full_name,
+        meta: `Contact · ${[c.title, c.primary_email].filter(Boolean).join(' · ')}`,
+        targetScreen: 'contact' as const,
+        targetId: c.id,
+      })),
+      ...r.leads.map((l) => ({
         id: `lead_${l.id}`,
         group: 'RECORDS' as const,
+        kind: 'lead' as const,
         label: l.firm_name ? `${l.full_name} · ${l.firm_name}` : l.full_name,
-        meta: `Lead · ${l.status} · ${l.market}`,
-        targetScreen: (l.company_id ? 'company' : 'leads') as AppScreenId,
-        targetId: l.company_id ?? undefined,
+        meta: `Lead · ${l.status}`,
+        targetScreen: 'lead' as const,
+        targetId: l.id,
       })),
-      ...NAVIGATION_ITEMS,
-    ],
-    [companies.data, leads.data],
-  );
+      ...r.deals.map((d) => ({
+        id: `deal_${d.id}`,
+        group: 'RECORDS' as const,
+        kind: 'deal' as const,
+        label: d.name,
+        meta: `Deal · ${d.stage_name}`,
+        targetScreen: 'deal' as const,
+        targetId: d.id,
+      })),
+    ];
+  }, [search.data, debounced]);
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) {
-      // With no query, show navigation plus a few recent records.
-      return [...allItems.filter((i) => i.group === 'RECORDS').slice(0, 5), ...NAVIGATION_ITEMS];
-    }
-    return allItems.filter(
-      (item) =>
-        item.label.toLowerCase().includes(q) ||
-        item.meta.toLowerCase().includes(q) ||
-        item.group.toLowerCase().includes(q),
-    );
-  }, [query, allItems]);
+    const nav = q
+      ? NAVIGATION_ITEMS.filter(
+          (item) => item.label.toLowerCase().includes(q) || item.meta.toLowerCase().includes(q),
+        )
+      : NAVIGATION_ITEMS;
+    return [...recordItems, ...nav];
+  }, [query, recordItems]);
 
   useEffect(() => {
     if (open) {
@@ -192,23 +205,12 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
   };
 
   const getItemIcon = (item: CommandPaletteItem) => {
-    if (
-      item.id.includes('comp') ||
-      item.label.includes('LLP') ||
-      item.label.includes('Accountants')
-    ) {
+    if (item.kind === 'company')
       return <Building2 size={16} strokeWidth={1.6} aria-hidden="true" />;
-    }
-    if (item.label.toLowerCase().includes('deal')) {
-      return <Handshake size={16} strokeWidth={1.6} aria-hidden="true" />;
-    }
-    if (item.label.toLowerCase().includes('call')) {
-      return <Phone size={16} strokeWidth={1.6} aria-hidden="true" />;
-    }
-    if (item.group === 'ACTIONS') {
-      return <Sparkles size={16} strokeWidth={1.6} aria-hidden="true" />;
-    }
-    return <UserPlus size={16} strokeWidth={1.6} aria-hidden="true" />;
+    if (item.kind === 'deal') return <Handshake size={16} strokeWidth={1.6} aria-hidden="true" />;
+    if (item.kind === 'contact') return <Contact size={16} strokeWidth={1.6} aria-hidden="true" />;
+    if (item.kind === 'lead') return <UserPlus size={16} strokeWidth={1.6} aria-hidden="true" />;
+    return <ArrowRight size={16} strokeWidth={1.6} aria-hidden="true" />;
   };
 
   let runningIndex = -1;
@@ -263,8 +265,13 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
         >
           {filteredItems.length === 0 ? (
             <div className="py-[32px] px-[16px] text-center text-ink-2 text-[14px]">
-              No matching records or commands. Try searching for &ldquo;Acme&rdquo; or &ldquo;New
-              deal&rdquo;.
+              {query.trim().length < 2
+                ? 'Type at least two letters to search records.'
+                : search.isFetching
+                  ? 'Searching…'
+                  : search.isError
+                    ? "Search isn't available right now. Try again."
+                    : 'No matching records. Try a firm name, a person or an email.'}
             </div>
           ) : (
             GROUP_ORDER.map((group) => {

@@ -13,6 +13,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'all',
     'leads.write': 'all',
     'leads.convert': 'all',
+    'leads.assign': 'all',
+    'records.delete': 'all',
     'companies.read': 'all',
     'companies.write': 'all',
     'contacts.read': 'all',
@@ -43,6 +45,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'team',
     'leads.write': 'team',
     'leads.convert': 'team',
+    'leads.assign': 'team',
+    'records.delete': 'team',
     'companies.read': 'team',
     'companies.write': 'team',
     'contacts.read': 'team',
@@ -73,6 +77,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'own',
     'leads.write': 'own',
     'leads.convert': 'own',
+    'leads.assign': 'none',
+    'records.delete': 'none',
     'companies.read': 'own',
     'companies.write': 'own',
     'contacts.read': 'own',
@@ -103,6 +109,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'own',
     'leads.write': 'own',
     'leads.convert': 'own',
+    'leads.assign': 'none',
+    'records.delete': 'none',
     'companies.read': 'own',
     'companies.write': 'own',
     'contacts.read': 'own',
@@ -133,6 +141,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'all',
     'leads.write': 'all',
     'leads.convert': 'none',
+    'leads.assign': 'all',
+    'records.delete': 'none',
     'companies.read': 'all',
     'companies.write': 'all',
     'contacts.read': 'all',
@@ -163,6 +173,8 @@ export const ROLE_CAPABILITY_MATRIX: Record<UserRoleName, Record<string, Capabil
     'leads.read': 'all',
     'leads.write': 'none',
     'leads.convert': 'none',
+    'leads.assign': 'none',
+    'records.delete': 'none',
     'companies.read': 'all',
     'companies.write': 'none',
     'contacts.read': 'all',
@@ -198,6 +210,15 @@ export function getCapabilityScope(user: SessionUser, capability: string): Capab
   }
   const roleDefaults = ROLE_CAPABILITY_MATRIX[user.role];
   return roleDefaults[capability] ?? 'none';
+}
+
+/** Every capability with the scope this user has, for the UI to hide controls it can't use. */
+export function effectiveCapabilities(user: SessionUser): Record<string, CapabilityScopeValue> {
+  const result: Record<string, CapabilityScopeValue> = { ...ROLE_CAPABILITY_MATRIX[user.role] };
+  for (const [capability, scope] of Object.entries(user.capabilities)) {
+    if (scope) result[capability] = scope;
+  }
+  return result;
 }
 
 export function requireCapability(user: SessionUser, capability: string): Scope {

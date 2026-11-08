@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { type Market } from '@adas/shared';
+import { formatRelative, type Market } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
 import { Input } from '@/components/ui/input.js';
+import { Select } from '@/components/ui/select.js';
+import { useToast } from '@/components/ui/toast.js';
 import { api } from '@/lib/api.js';
 import {
   CreateForm,
@@ -13,7 +15,6 @@ import {
   PageHeader,
   SearchBox,
   fieldError,
-  matches,
   rowClass,
   str,
   tableClass,
@@ -22,49 +23,81 @@ import {
   theadRowClass,
   useUserNames,
 } from '@/features/shared/live-kit.js';
+import {
+  ListFooter,
+  OwnerFilter,
+  SortHeader,
+  Toolbar,
+  allOf,
+  can,
+  useMe,
+  usePagedList,
+  useSearchText,
+  useUrlState,
+} from '@/features/shared/list-kit.js';
+import { CompanyPicker, type PickedCompany } from '@/features/shared/company-picker.js';
 
-const VERIFICATION_TONE = { valid: 'success', risky: 'warning', invalid: 'danger' } as const;
+export const VERIFICATION_TONE = { valid: 'success', risky: 'warning', invalid: 'danger' } as const;
 
-export function ContactsScreen({ onOpenCompany }: { onOpenCompany: (id: string) => void }) {
+const DEFAULTS = { q: '', sort: '-updatedAt', market: '', owner: '', dnc: '' };
+
+export function ContactsScreen({
+  onOpenContact,
+  onOpenCompany,
+}: {
+  onOpenContact: (id: string) => void;
+  onOpenCompany: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const me = useMe();
   const ownerName = useUserNames();
-  const contacts = useQuery({ queryKey: ['contacts'], queryFn: api.listContacts });
-  const companies = useQuery({ queryKey: ['companies'], queryFn: api.listCompanies });
-  const [search, setSearch] = useState('');
+  const [state, setState] = useUrlState(DEFAULTS);
+  const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
   const [formOpen, setFormOpen] = useState(false);
+  const [company, setCompany] = useState<PickedCompany | null>(null);
 
-  const companyName = useMemo(() => {
-    const byId = new Map((companies.data ?? []).map((c) => [c.id, c.name]));
-    return (id: string | null) => (id ? (byId.get(id) ?? null) : null);
-  }, [companies.data]);
-
-  const visible = useMemo(
-    () =>
-      (contacts.data ?? []).filter((c) =>
-        matches(search, c.full_name, c.primary_email, c.title, companyName(c.company_id)),
-      ),
-    [contacts.data, search, companyName],
+  const filter = allOf([
+    state.market !== '' && { field: 'market', op: 'eq', value: state.market },
+    state.owner !== '' && { field: 'ownerId', op: 'eq', value: state.owner },
+    state.dnc === 'yes' && { field: 'doNotContact', op: 'eq', value: true },
+    state.dnc === 'no' && { field: 'doNotContact', op: 'eq', value: false },
+  ]);
+  const { query, items, total } = usePagedList(
+    ['contacts', { q: state.q, sort: state.sort, filter }],
+    (cursor) => api.listContacts({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
 
   const createContact = useMutation({
     mutationFn: api.createContact,
-    onSuccess: async () => {
+    onSuccess: async (contact) => {
       setFormOpen(false);
+      setCompany(null);
+      toast(`Added ${contact.full_name}.`);
       await queryClient.invalidateQueries({ queryKey: ['contacts'] });
     },
   });
+
+  const filtered = state.q !== '' || state.market !== '' || state.owner !== '' || state.dnc !== '';
+  const clearFilters = () => {
+    setSearch('');
+    setState({ q: '', market: '', owner: '', dnc: '' });
+  };
+  const canCreate = can(me, 'contacts.write');
 
   return (
     <div className="space-y-[16px]" data-testid="contacts-screen">
       <PageHeader
         kicker="People"
         title="Contacts"
-        count={contacts.data ? visible.length : undefined}
+        count={total}
         actions={
-          <Button variant="primary" onClick={() => setFormOpen(true)}>
-            <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
-            <span>New contact</span>
-          </Button>
+          canCreate ? (
+            <Button variant="primary" onClick={() => setFormOpen(true)}>
+              <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
+              <span>New contact</span>
+            </Button>
+          ) : undefined
         }
       />
 
@@ -81,7 +114,7 @@ export function ContactsScreen({ onOpenCompany }: { onOpenCompany: (id: string) 
               lastName: str(data, 'lastName'),
               primaryEmail: str(data, 'email'),
               title: str(data, 'title') || undefined,
-              companyId: str(data, 'companyId') || null,
+              companyId: company?.id ?? null,
               market: str(data, 'market') as Market,
             })
           }
@@ -98,56 +131,91 @@ export function ContactsScreen({ onOpenCompany }: { onOpenCompany: (id: string) 
           <Field label="Job title" optional>
             <Input name="title" autoComplete="off" />
           </Field>
-          <Field label="Company" optional>
-            <select
-              name="companyId"
-              defaultValue=""
-              className="h-[36px] rounded-[8px] border border-input bg-surface px-[12px] text-[14px]"
-            >
-              <option value="">No company</option>
-              {(companies.data ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="grid gap-[6px] text-label text-ink">
+            <span>
+              Company <em className="not-italic font-normal text-ink-3">(optional)</em>
+            </span>
+            <CompanyPicker value={company} onChange={setCompany} />
+          </div>
           <Field label="Market">
-            <select
-              name="market"
-              defaultValue="US"
-              className="h-[36px] rounded-[8px] border border-input bg-surface px-[12px] text-[14px]"
-            >
+            <Select name="market" defaultValue="US">
               <option value="US">United States</option>
               <option value="CA">Canada</option>
-            </select>
+            </Select>
           </Field>
         </CreateForm>
       )}
 
-      <SearchBox value={search} onChange={setSearch} label="Search name, email, title or company" />
+      <Toolbar>
+        <SearchBox value={search} onChange={setSearch} label="Search name, email or company" />
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-[8px]">
+          <Select
+            aria-label="Market"
+            value={state.market}
+            onChange={(e) => setState({ market: e.target.value })}
+            className="sm:w-[160px]"
+          >
+            <option value="">All markets</option>
+            <option value="US">United States</option>
+            <option value="CA">Canada</option>
+          </Select>
+          <Select
+            aria-label="Do not contact"
+            value={state.dnc}
+            onChange={(e) => setState({ dnc: e.target.value })}
+            className="sm:w-[180px]"
+          >
+            <option value="">Anyone</option>
+            <option value="no">Contactable</option>
+            <option value="yes">Do not contact</option>
+          </Select>
+          <OwnerFilter value={state.owner} onChange={(owner) => setState({ owner })} />
+          {filtered && (
+            <Button variant="ghost" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+      </Toolbar>
 
       <DataPanel
-        query={contacts}
-        isEmpty={visible.length === 0}
-        emptyTitle={search ? 'No contacts match this search' : 'No contacts yet'}
+        query={{ ...query, isFetching: query.isFetching && !query.isFetchingNextPage }}
+        isEmpty={items.length === 0}
+        emptyTitle={filtered ? 'No contacts match these filters' : 'No contacts yet'}
         emptyDescription={
-          search
-            ? 'Clear the search to see everyone.'
+          filtered
+            ? 'Clear the search or filters to see everyone.'
             : 'Contacts are created from website inquiries, converted leads, or by hand.'
         }
-        emptyActionLabel={search ? 'Clear search' : 'New contact'}
-        onEmptyAction={() => (search ? setSearch('') : setFormOpen(true))}
+        emptyActionLabel={filtered ? 'Clear filters' : canCreate ? 'New contact' : undefined}
+        onEmptyAction={filtered ? clearFilters : () => setFormOpen(true)}
+        footer={
+          <ListFooter
+            noun="contacts"
+            shown={items.length}
+            total={total}
+            hasMore={query.hasNextPage}
+            loading={query.isFetchingNextPage}
+            onMore={() => void query.fetchNextPage()}
+          />
+        }
       >
         <table className={tableClass}>
           <thead>
             <tr className={theadRowClass}>
-              <th scope="col" className={`${thClass} pl-[16px]`}>
-                Name
-              </th>
-              <th scope="col" className={thClass}>
-                Company
-              </th>
+              <SortHeader
+                label="Name"
+                field="name"
+                sort={state.sort}
+                onSort={(sort) => setState({ sort })}
+                className="pl-[16px]"
+              />
+              <SortHeader
+                label="Company"
+                field="company"
+                sort={state.sort}
+                onSort={(sort) => setState({ sort })}
+              />
               <th scope="col" className={thClass}>
                 Market
               </th>
@@ -157,51 +225,70 @@ export function ContactsScreen({ onOpenCompany }: { onOpenCompany: (id: string) 
               <th scope="col" className={thClass}>
                 Owner
               </th>
+              <SortHeader
+                label="Last contacted"
+                field="lastContactedAt"
+                sort={state.sort}
+                onSort={(sort) => setState({ sort })}
+                descFirst
+              />
             </tr>
           </thead>
           <tbody>
-            {visible.map((c) => {
-              const company = companyName(c.company_id);
-              const tone =
-                VERIFICATION_TONE[c.email_verification_status as keyof typeof VERIFICATION_TONE];
-              return (
-                <tr key={c.id} className={rowClass}>
-                  <td className={`${tdClass} pl-[16px] min-w-[200px]`}>
-                    <div className="font-semibold text-ink">{c.full_name}</div>
-                    <div className="text-[13px] text-ink-3">{c.title ?? ''}</div>
-                  </td>
-                  <td className={tdClass}>
-                    {company && c.company_id ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenCompany(c.company_id as string)}
-                        className="bg-transparent border-0 p-0 text-left text-ink hover:underline cursor-pointer"
+            {items.map((c) => (
+              <tr key={c.id} className={rowClass}>
+                <td className={`${tdClass} pl-[16px] min-w-[220px]`}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenContact(c.id)}
+                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
+                  >
+                    {c.full_name}
+                  </button>
+                  <div className="text-[13px] text-ink-3">{c.title ?? ''}</div>
+                </td>
+                <td className={`${tdClass} text-ink-2`}>
+                  {c.company_id && c.company_name ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCompany(c.company_id as string)}
+                      className="bg-transparent border-0 p-0 text-left text-ink-2 hover:underline cursor-pointer"
+                    >
+                      {c.company_name}
+                    </button>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className={tdClass}>
+                  <MarketBadge market={c.market} />
+                </td>
+                <td className={tdClass}>
+                  <div className="flex flex-wrap items-center gap-[6px]">
+                    <span className="text-ink-2">{c.primary_email}</span>
+                    {c.do_not_contact ? (
+                      <StatusBadge tone="danger">Do not contact</StatusBadge>
+                    ) : c.email_verification_status in VERIFICATION_TONE ? (
+                      <StatusBadge
+                        tone={
+                          VERIFICATION_TONE[
+                            c.email_verification_status as keyof typeof VERIFICATION_TONE
+                          ]
+                        }
                       >
-                        {company}
-                      </button>
-                    ) : (
-                      <span className="text-ink-3">—</span>
-                    )}
-                  </td>
-                  <td className={tdClass}>
-                    <MarketBadge market={c.market} />
-                  </td>
-                  <td className={tdClass}>
-                    <div className="flex flex-wrap items-center gap-[6px]">
-                      <span className="text-ink-2">{c.primary_email}</span>
-                      {c.do_not_contact ? (
-                        <StatusBadge tone="danger">Do not contact</StatusBadge>
-                      ) : tone ? (
-                        <StatusBadge tone={tone}>{c.email_verification_status}</StatusBadge>
-                      ) : (
-                        <StatusBadge tone="neutral">Unverified</StatusBadge>
-                      )}
-                    </div>
-                  </td>
-                  <td className={`${tdClass} text-ink-2`}>{ownerName(c.owner_user_id)}</td>
-                </tr>
-              );
-            })}
+                        {c.email_verification_status}
+                      </StatusBadge>
+                    ) : null}
+                  </div>
+                </td>
+                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
+                  {ownerName(c.owner_user_id)}
+                </td>
+                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
+                  {c.last_contacted_at ? formatRelative(c.last_contacted_at) : 'Never'}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </DataPanel>

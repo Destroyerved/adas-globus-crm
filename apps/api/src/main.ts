@@ -13,7 +13,14 @@ import {
   sessionCookieName,
 } from './modules/auth/index.js';
 import { ComplianceService, checkSendable } from './modules/compliance/index.js';
-import { CrmService } from './modules/crm/index.js';
+import {
+  CrmListService,
+  CrmRecordService,
+  CrmService,
+  CrmTimelineService,
+  registerCrmRoutes,
+} from './modules/crm/index.js';
+import { NotificationService } from './modules/notifications/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
 import { WebsiteIntakeService } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
@@ -27,7 +34,9 @@ import {
 import { DatabaseService } from './platform/db/index.js';
 import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
+import { Router, type RouteContext } from './platform/http/router.js';
 import { MailpitTransport } from './platform/mail-transport/index.js';
+import { effectiveCapabilities } from './platform/scope/index.js';
 
 function serializeJson(data: unknown): string {
   return JSON.stringify(data, (_key, value) =>
@@ -75,6 +84,31 @@ async function readJsonBody(
       detail: 'The request body must be a JSON object.',
     });
   }
+}
+
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new DomainError({
+        status: 413,
+        code: 'PAYLOAD_TOO_LARGE',
+        title: 'File too large',
+        detail: `Uploads are limited to ${Math.round(maxBytes / 1_048_576)} MB.`,
+      });
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
+
+function clientIpOf(req: IncomingMessage): string | null {
+  const forwarded = req.headers['cf-connecting-ip'];
+  if (typeof forwarded === 'string' && forwarded) return forwarded;
+  return req.socket.remoteAddress ?? null;
 }
 
 /** Secret for signing short-lived cookies. Production must provide the file. */
@@ -136,6 +170,25 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
   const dataQuality = new DataQualityService(db);
   const outreach = new OutreachService(db, compliance, transport);
   const intelligence = new IntelligenceService(db);
+  const lists = new CrmListService(db);
+  const records = new CrmRecordService(db);
+  const timeline = new CrmTimelineService(db);
+  const notifications = new NotificationService(db);
+  const router = new Router();
+  registerCrmRoutes(router, { crm, lists, records, timeline });
+  router.get('/api/v1/notifications', async (ctx) => {
+    ctx.json(
+      200,
+      await notifications.list(ctx.user, { unreadOnly: ctx.query.get('unread') === '1' }),
+    );
+  });
+  router.post('/api/v1/notifications/read', async (ctx) => {
+    const body = await ctx.body();
+    ctx.json(
+      200,
+      await notifications.markRead(ctx.user, typeof body['id'] === 'string' ? body['id'] : null),
+    );
+  });
   const devLoginEnabled = isDevLoginEnabled(env);
   const production = env.NODE_ENV === 'production';
   const sessions = new SessionService(
@@ -404,8 +457,73 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
       }
       const user = await auth.resolveSessionUser(userId);
 
+      const matched = router.match(method, pathname);
+      if (matched) {
+        const ctx: RouteContext = {
+          req,
+          res,
+          user,
+          params: matched.params,
+          query: parsedUrl.searchParams,
+          body: () => readJsonBody(req),
+          raw: (maxBytes) => readRawBody(req, maxBytes),
+          json: sendJson,
+          send: (status, contentType, payload, headers = {}) => {
+            res.writeHead(status, { 'Content-Type': contentType, ...headers });
+            res.end(payload);
+          },
+          ip: clientIpOf(req),
+        };
+        // PRD 6.7: POSTs that create records accept Idempotency-Key; a retry gets the stored
+        // response instead of creating a second record.
+        const idemKey = req.headers['idempotency-key'];
+        if (method === 'POST' && typeof idemKey === 'string' && idemKey.length > 0) {
+          const key = idemKey.slice(0, 200);
+          const stored = await db.query<{
+            status_code: number;
+            response_json: unknown;
+            path: string;
+          }>(
+            `SELECT status_code, response_json, path FROM idempotency_keys
+             WHERE key = $1 AND actor_id = $2 AND created_at > NOW() - INTERVAL '24 hours'`,
+            [key, user.id],
+          );
+          const hit = stored.rows[0];
+          if (hit) {
+            if (hit.path !== pathname) {
+              throw new DomainError({
+                status: 422,
+                code: 'IDEMPOTENCY_KEY_REUSED',
+                title: 'Idempotency key reused',
+                detail: 'This Idempotency-Key was already used for a different request.',
+              });
+            }
+            sendJson(hit.status_code, hit.response_json, { 'Idempotent-Replayed': 'true' });
+            return;
+          }
+          ctx.json = (status, data, headers) => {
+            const body = JSON.parse(serializeJson(data)) as unknown;
+            void db
+              .query(
+                `INSERT INTO idempotency_keys (key, actor_id, method, path, status_code, response_json)
+                 VALUES ($1, $2, $3, $4, $5, $6::jsonb) ON CONFLICT (key) DO NOTHING`,
+                [key, user.id, method, pathname, status, JSON.stringify(body)],
+              )
+              .catch((err: unknown) =>
+                logger.warn(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  'idempotency store failed',
+                ),
+              );
+            sendJson(status, data, headers);
+          };
+        }
+        await matched.handler(ctx);
+        return;
+      }
+
       if (method === 'GET' && pathname === '/api/v1/auth/me') {
-        sendJson(200, user);
+        sendJson(200, { ...user, capabilities: effectiveCapabilities(user) });
         return;
       }
 
@@ -424,141 +542,12 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
         return;
       }
 
-      // Companies
-      if (method === 'GET' && pathname === '/api/v1/companies') {
-        const items = await crm.listCompanies(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/companies') {
-        const body = await readJsonBody(req);
-        const result = await crm.createOrFindCompany(user, body as never);
-        res.writeHead(result.created ? 201 : 200, {
-          'Content-Type': 'application/json; charset=utf-8',
-        });
-        res.end(serializeJson(result));
-        return;
-      }
-
-      if (method === 'GET' && /^\/api\/v1\/companies\/[^/]+$/.test(pathname)) {
-        const companyId = decodeURIComponent(pathname.slice('/api/v1/companies/'.length));
-        const profile = await crm.getCompanyProfile(user, companyId);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(profile));
-        return;
-      }
-
-      if (method === 'PATCH' && pathname.startsWith('/api/v1/companies/')) {
-        const companyId = pathname.slice('/api/v1/companies/'.length);
-        const body = await readJsonBody(req);
-        const updated = await crm.updateCompany(user, companyId, body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(updated));
-        return;
-      }
-
-      // Contacts
-      if (method === 'GET' && pathname === '/api/v1/contacts') {
-        const items = await crm.listContacts(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/contacts') {
-        const body = await readJsonBody(req);
-        const created = await crm.createContact(user, body as never);
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
-        return;
-      }
-
+      // Duplicate merge (PRD 4.9)
       if (method === 'POST' && pathname === '/api/v1/contacts/merge') {
         const body = await readJsonBody(req);
         const merged = await dataQuality.mergeContacts(user, body as never);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson(merged));
-        return;
-      }
-
-      // Leads
-      if (method === 'GET' && pathname === '/api/v1/leads') {
-        const items = await crm.listLeads(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/leads') {
-        const body = await readJsonBody(req);
-        const created = await crm.createLead(user, body as never);
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/leads/convert') {
-        const body = await readJsonBody(req);
-        const converted = await crm.convertLead(user, body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(converted));
-        return;
-      }
-
-      // Deals
-      if (method === 'GET' && pathname === '/api/v1/deals') {
-        const items = await crm.listDeals(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/deals') {
-        const body = await readJsonBody(req);
-        const created = await crm.createDeal(user, body as never);
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
-        return;
-      }
-
-      if (
-        method === 'PATCH' &&
-        pathname.startsWith('/api/v1/deals/') &&
-        pathname.endsWith('/stage')
-      ) {
-        const dealId = pathname.slice('/api/v1/deals/'.length, -'/stage'.length);
-        const body = await readJsonBody(req);
-        const updated = await crm.moveDealStage(user, dealId, body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(updated));
-        return;
-      }
-
-      // Tasks
-      if (method === 'GET' && pathname === '/api/v1/tasks') {
-        const items = await crm.listTasks(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && /^\/api\/v1\/tasks\/[^/]+\/complete$/.test(pathname)) {
-        const taskId = decodeURIComponent(
-          pathname.slice('/api/v1/tasks/'.length, -'/complete'.length),
-        );
-        const done = await crm.completeTask(user, taskId);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(done));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/tasks') {
-        const body = await readJsonBody(req);
-        const created = await crm.createTask(user, body as never);
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
         return;
       }
 
@@ -851,6 +840,19 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
       );
     } catch (err) {
       const problem = toProblemDetails(err, pathname);
+      if (problem.status >= 500) {
+        // Log the cause; never echo database or internal messages to the client (AGENTS.md 5).
+        logger.error(
+          { path: pathname, method, err: err instanceof Error ? err.message : String(err) },
+          'request failed',
+        );
+        problem.detail =
+          'Something went wrong on the server. Try again, and tell an admin if it keeps happening.';
+      }
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
       res.writeHead(problem.status, {
         'Content-Type': 'application/problem+json; charset=utf-8',
       });
@@ -872,6 +874,10 @@ export function createAppServer(env: AppEnv = validateEnv(), existingDb?: Databa
       dataQuality,
       outreach,
       intelligence,
+      lists,
+      records,
+      timeline,
+      notifications,
     },
   };
 }

@@ -1,5 +1,5 @@
 import { useMemo, type FormEvent, type ReactNode } from 'react';
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { formatNumber } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
@@ -83,8 +83,18 @@ export function SearchBox({
   );
 }
 
+/** The parts of a query result a panel needs; fits plain and paged queries. */
+export interface QueryState {
+  isPending: boolean;
+  isError: boolean;
+  isSuccess: boolean;
+  isFetching?: boolean;
+  error: unknown;
+  refetch: () => unknown;
+}
+
 /** A white panel that shows loading, error and empty states before its table. */
-export function DataPanel<T>({
+export function DataPanel({
   query,
   isEmpty,
   emptyTitle,
@@ -92,14 +102,16 @@ export function DataPanel<T>({
   emptyActionLabel,
   onEmptyAction,
   children,
+  footer,
 }: {
-  query: UseQueryResult<T>;
+  query: QueryState;
   isEmpty: boolean;
   emptyTitle: string;
   emptyDescription: string;
   emptyActionLabel?: string;
   onEmptyAction?: () => void;
   children: ReactNode;
+  footer?: ReactNode;
 }) {
   return (
     <div className="bg-surface border border-line rounded-[10px] overflow-hidden">
@@ -116,7 +128,15 @@ export function DataPanel<T>({
           onAction={onEmptyAction}
         />
       )}
-      {query.isSuccess && !isEmpty && <div className="relative overflow-x-auto">{children}</div>}
+      {query.isSuccess && !isEmpty && (
+        <div
+          aria-busy={query.isFetching || undefined}
+          className={`relative overflow-x-auto ${query.isFetching ? 'opacity-70' : ''}`}
+        >
+          {children}
+        </div>
+      )}
+      {query.isSuccess && !isEmpty && footer}
     </div>
   );
 }

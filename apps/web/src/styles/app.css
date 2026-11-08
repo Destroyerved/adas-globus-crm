@@ -346,6 +346,32 @@ body {
   animation: adas-shimmer 1.8s ease-in-out infinite;
 }
 
+/* Drawer and toast motion (DESIGN.md §6.11, §11) */
+@keyframes adas-drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes adas-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.drawer-panel {
+  animation: adas-drawer-in 280ms var(--ease-out);
+}
+.fade-in {
+  animation: adas-fade-in 200ms var(--ease-out);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

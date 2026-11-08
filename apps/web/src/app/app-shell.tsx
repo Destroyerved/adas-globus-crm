@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Bell,
   Building2,
   CheckSquare,
   Handshake,
@@ -17,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { StatusBadge } from '@/components/ui/badge.js';
 import { type AppScreenId } from '@/features/command-palette/command-palette.js';
+import { NotificationBell, type RecordScreen } from '@/features/notifications/notification-bell.js';
 /** The signed-in user, as the shell shows it. */
 export interface ShellUser {
   displayName: string;
@@ -30,6 +30,8 @@ export interface AppShellProps {
   onOpenCommandPalette: () => void;
   currentUser: ShellUser;
   onSignOut: () => void;
+  /** Opens a record or the tasks list from a notification. */
+  onOpenRecord: (screen: RecordScreen, id: string | null) => void;
   children: ReactNode;
 }
 
@@ -79,6 +81,7 @@ export function AppShell({
   onOpenCommandPalette,
   currentUser,
   onSignOut,
+  onOpenRecord,
   children,
 }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -90,8 +93,6 @@ export function AppShell({
   });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [newMenuOpen, setNewMenuOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
   const [scrolled, setScrolled] = useState(false);
   const gChordRef = useRef<boolean>(false);
 
@@ -456,49 +457,7 @@ export function AppShell({
               )}
             </div>
 
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setNotificationsOpen((prev) => !prev)}
-                aria-expanded={notificationsOpen}
-                aria-label={`Notifications (${unreadNotifications} unread)`}
-                className="relative inline-flex items-center justify-center h-[32px] w-[32px] rounded-pill bg-transparent hover:bg-bg-alt text-ink-2 hover:text-ink cursor-pointer border-0"
-              >
-                <Bell size={18} strokeWidth={1.6} aria-hidden="true" />
-                {unreadNotifications > 0 && (
-                  <span
-                    className="absolute top-[5px] right-[5px] h-[7px] w-[7px] rounded-pill bg-primary"
-                    aria-hidden="true"
-                  />
-                )}
-              </button>
-
-              {notificationsOpen && (
-                <div
-                  role="dialog"
-                  aria-label="Notifications"
-                  style={{ boxShadow: 'var(--shadow-pop)' }}
-                  className="absolute right-0 mt-[6px] w-[320px] rounded-[10px] bg-surface border border-line p-[12px] z-40 space-y-[10px]"
-                >
-                  <div className="flex items-center justify-between border-b border-line pb-[8px]">
-                    <span className="text-[13px] font-semibold text-ink">
-                      Notifications ({unreadNotifications} unread)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setUnreadNotifications(0)}
-                      className="text-[12px] font-semibold text-primary-ink hover:underline bg-transparent border-0 p-0 cursor-pointer"
-                    >
-                      Mark all read
-                    </button>
-                  </div>
-                  <p className="text-[13px] text-ink-2 m-0">
-                    No notifications yet. Assignments and reminders will appear here once the
-                    background worker is running.
-                  </p>
-                </div>
-              )}
-            </div>
+            <NotificationBell onOpen={onOpenRecord} />
 
             <span
               title={`${currentUser.displayName} · ${currentUser.role}`}

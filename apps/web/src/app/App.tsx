@@ -9,6 +9,10 @@ import { CompanyProfileScreen } from '@/features/companies/company-profile-scree
 import { ContactsScreen } from '@/features/contacts/contacts-screen.js';
 import { DealsKanbanScreen } from '@/features/deals/deals-kanban-screen.js';
 import { TasksScreen } from '@/features/tasks/tasks-screen.js';
+import { LeadProfileScreen } from '@/features/leads/lead-profile-screen.js';
+import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen.js';
+import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
+import { ToastProvider } from '@/components/ui/toast.js';
 import { ErrorState } from '@/components/ui/state-views.js';
 import { ApiError, api } from '@/lib/api.js';
 import { errorMessage } from '@/features/shared/live-kit.js';
@@ -35,18 +39,29 @@ const queryClient: QueryClient = new QueryClient({
 // their real connectors and data exist (docs/PROGRESS.md, "Make it real").
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'leads',
+  'lead',
   'contacts',
+  'contact',
   'companies',
   'company',
   'deals',
+  'deal',
   'tasks',
 ]);
 
-function readUrlState(): { screen: AppScreenId; palette: boolean; companyId: string | null } {
+/** Which sidebar item is highlighted for a record page. */
+const PARENT_SCREEN: Partial<Record<AppScreenId, AppScreenId>> = {
+  lead: 'leads',
+  contact: 'contacts',
+  company: 'companies',
+  deal: 'deals',
+};
+
+function readUrlState(): { screen: AppScreenId; palette: boolean; recordId: string | null } {
   const params = new URLSearchParams(window.location.search);
   const rawScreen = params.get('screen') as AppScreenId | null;
   const screen: AppScreenId = rawScreen && VALID_SCREENS.has(rawScreen) ? rawScreen : 'leads';
-  return { screen, palette: params.get('palette') === '1', companyId: params.get('id') };
+  return { screen, palette: params.get('palette') === '1', recordId: params.get('id') };
 }
 
 function initialsOf(name: string): string {
@@ -61,7 +76,9 @@ function initialsOf(name: string): string {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <SignedInGate />
+      <ToastProvider>
+        <SignedInGate />
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -110,21 +127,23 @@ function SignedInGate() {
 function Workspace({ user }: { user: { displayName: string; initials: string; role: string } }) {
   const initial = readUrlState();
   const [activeScreen, setActiveScreen] = useState<AppScreenId>(initial.screen);
-  const [companyId, setCompanyId] = useState<string | null>(initial.companyId);
+  const [recordId, setRecordId] = useState<string | null>(initial.recordId);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(initial.palette);
 
+  // Each screen starts with a clean URL; list screens add their own filters to it.
   const navigateScreen = (nextScreen: AppScreenId, id: string | null = null) => {
     setActiveScreen(nextScreen);
-    setCompanyId(id);
-    const url = new URL(window.location.href);
+    setRecordId(id);
+    const url = new URL(window.location.origin + window.location.pathname);
     url.searchParams.set('screen', nextScreen);
     if (id) url.searchParams.set('id', id);
-    else url.searchParams.delete('id');
-    url.searchParams.delete('palette');
-    url.searchParams.delete('error');
     window.history.pushState({}, '', url);
+    window.scrollTo({ top: 0 });
   };
   const openCompany = (id: string) => navigateScreen('company', id);
+  const openContact = (id: string) => navigateScreen('contact', id);
+  const openLead = (id: string) => navigateScreen('lead', id);
+  const openDeal = (id: string) => navigateScreen('deal', id);
 
   const signOut = async () => {
     await api.logout().catch(() => undefined);
@@ -136,7 +155,7 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
     const onPopState = () => {
       const state = readUrlState();
       setActiveScreen(state.screen);
-      setCompanyId(state.companyId);
+      setRecordId(state.recordId);
       setPaletteOpen(state.palette);
     };
     window.addEventListener('popstate', onPopState);
@@ -146,24 +165,63 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
   return (
     <>
       <AppShell
-        activeScreen={activeScreen === 'company' ? 'companies' : activeScreen}
+        activeScreen={PARENT_SCREEN[activeScreen] ?? activeScreen}
         onNavigate={(screen) => navigateScreen(screen)}
         onOpenCommandPalette={() => setPaletteOpen(true)}
+        onOpenRecord={(screen, id) => navigateScreen(screen, id)}
         currentUser={user}
         onSignOut={() => void signOut()}
       >
-        {activeScreen === 'leads' && <LeadsScreen onOpenCompany={openCompany} />}
-        {activeScreen === 'contacts' && <ContactsScreen onOpenCompany={openCompany} />}
+        {activeScreen === 'leads' && <LeadsScreen onOpenLead={openLead} />}
+        {activeScreen === 'lead' && (
+          <LeadProfileScreen
+            key={recordId}
+            leadId={recordId}
+            onBack={() => navigateScreen('leads')}
+            onOpenCompany={openCompany}
+            onOpenContact={openContact}
+            onOpenDeal={openDeal}
+          />
+        )}
+        {activeScreen === 'contacts' && (
+          <ContactsScreen onOpenContact={openContact} onOpenCompany={openCompany} />
+        )}
+        {activeScreen === 'contact' && (
+          <ContactProfileScreen
+            key={recordId}
+            contactId={recordId}
+            onBack={() => navigateScreen('contacts')}
+            onOpenCompany={openCompany}
+            onOpenDeal={openDeal}
+            onOpenLead={openLead}
+          />
+        )}
         {activeScreen === 'companies' && <CompaniesScreen onOpenCompany={openCompany} />}
         {activeScreen === 'company' && (
           <CompanyProfileScreen
-            companyId={companyId}
+            key={recordId}
+            companyId={recordId}
             onBack={() => navigateScreen('companies')}
             onOpenDeals={() => navigateScreen('deals')}
+            onOpenContact={openContact}
+            onOpenDeal={openDeal}
           />
         )}
-        {activeScreen === 'deals' && <DealsKanbanScreen onOpenCompany={openCompany} />}
-        {activeScreen === 'tasks' && <TasksScreen />}
+        {activeScreen === 'deals' && (
+          <DealsKanbanScreen onOpenCompany={openCompany} onOpenDeal={openDeal} />
+        )}
+        {activeScreen === 'deal' && (
+          <DealProfileScreen
+            key={recordId}
+            dealId={recordId}
+            onBack={() => navigateScreen('deals')}
+            onOpenCompany={openCompany}
+            onOpenContact={openContact}
+          />
+        )}
+        {activeScreen === 'tasks' && (
+          <TasksScreen onOpenRecord={(screen, id) => navigateScreen(screen, id)} />
+        )}
       </AppShell>
 
       <CommandPalette

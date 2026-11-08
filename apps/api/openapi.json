@@ -22,27 +22,60 @@
         }
       }
     },
-    "/auth/entra-oidc": {
-      "post": {
-        "operationId": "signInEntraOidc",
-        "summary": "Invite-only Microsoft Entra OIDC sign-in (PRD §3.1)",
+    "/auth/config": {
+      "get": {
+        "operationId": "getAuthConfig",
+        "summary": "Which sign-in methods are available (PRD 6.6)",
         "responses": {
           "200": {
-            "description": "Authenticated"
-          },
-          "403": {
-            "description": "Not invited"
+            "description": "Sign-in options"
           }
         }
       }
     },
-    "/auth/break-glass": {
-      "post": {
-        "operationId": "signInBreakGlass",
-        "summary": "Break-glass local admin sign-in (Argon2id + TOTP, PRD §3.1)",
+    "/auth/sso/start": {
+      "get": {
+        "operationId": "startMicrosoftSignIn",
+        "summary": "Redirects to Microsoft Entra sign-in (authorization code flow with PKCE)",
+        "responses": {
+          "302": {
+            "description": "Redirect to Microsoft, or to the login page if not configured"
+          }
+        }
+      }
+    },
+    "/auth/sso/callback": {
+      "get": {
+        "operationId": "finishMicrosoftSignIn",
+        "summary": "Microsoft redirects here; validates the ID token and starts a session",
+        "responses": {
+          "302": {
+            "description": "Redirect to the app, or to the login page with an error"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "summary": "The signed-in user",
         "responses": {
           "200": {
-            "description": "Authenticated"
+            "description": "Current user"
+          },
+          "401": {
+            "description": "Not signed in"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "signOut",
+        "summary": "Ends the current session",
+        "responses": {
+          "204": {
+            "description": "Signed out"
           }
         }
       }
@@ -72,10 +105,50 @@
     "/companies": {
       "get": {
         "operationId": "listCompanies",
-        "summary": "List scoped companies (PRD §4.3)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Field, \"-\" for descending"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter language as JSON"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Companies"
+            "description": "A page of companies: { items, nextCursor, total }"
           }
         }
       },
@@ -92,13 +165,61 @@
     "/companies/{id}": {
       "patch": {
         "operationId": "updateCompany",
-        "summary": "Update company with optimistic concurrency version check (PRD §6.5)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated"
           },
           "409": {
             "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "get": {
+        "operationId": "getCompany",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Company with related records"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCompany",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Soft-deleted and audited"
           }
         }
       }
@@ -106,10 +227,50 @@
     "/contacts": {
       "get": {
         "operationId": "listContacts",
-        "summary": "List scoped contacts (PRD §4.4)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Field, \"-\" for descending"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter language as JSON"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Contacts"
+            "description": "A page of contacts: { items, nextCursor, total }"
           }
         }
       },
@@ -137,10 +298,50 @@
     "/leads": {
       "get": {
         "operationId": "listLeads",
-        "summary": "List scoped leads (PRD §4.1)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Field, \"-\" for descending"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter language as JSON"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Leads"
+            "description": "A page of leads: { items, nextCursor, total }"
           }
         }
       },
@@ -168,10 +369,50 @@
     "/deals": {
       "get": {
         "operationId": "listDeals",
-        "summary": "List scoped deals (PRD §4.5)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Field, \"-\" for descending"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter language as JSON"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Deals"
+            "description": "A page of deals: { items, nextCursor, total }"
           }
         }
       },
@@ -202,10 +443,57 @@
     "/tasks": {
       "get": {
         "operationId": "listTasks",
-        "summary": "List scoped tasks and SLA timers (PRD §4.6)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search text"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Field, \"-\" for descending"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter language as JSON"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "schema": {
+              "enum": ["open", "today", "overdue", "upcoming", "done", "all"]
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Tasks"
+            "description": "A page of tasks"
           }
         }
       },
@@ -337,6 +625,494 @@
         "responses": {
           "200": {
             "description": "Pipeline report"
+          }
+        }
+      }
+    },
+    "/leads/{id}": {
+      "get": {
+        "operationId": "getLead",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lead with related records"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateLead",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteLead",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Soft-deleted and audited"
+          }
+        }
+      }
+    },
+    "/leads/{id}/convert": {
+      "post": {
+        "operationId": "convertLeadById",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Converted"
+          }
+        }
+      }
+    },
+    "/contacts/{id}": {
+      "get": {
+        "operationId": "getContact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contact with related records"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateContact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteContact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Soft-deleted and audited"
+          }
+        }
+      }
+    },
+    "/deals/{id}": {
+      "get": {
+        "operationId": "getDeal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal with related records"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateDeal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDeal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Soft-deleted and audited"
+          }
+        }
+      }
+    },
+    "/deals/{id}/move": {
+      "post": {
+        "operationId": "moveDeal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/pipelines": {
+      "get": {
+        "operationId": "listPipelines",
+        "responses": {
+          "200": {
+            "description": "Pipelines with stages"
+          }
+        }
+      }
+    },
+    "/pipelines/{id}/board": {
+      "get": {
+        "operationId": "getPipelineBoard",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stages with counts, totals and up to 50 deals each"
+          }
+        }
+      }
+    },
+    "/tasks/{id}": {
+      "patch": {
+        "operationId": "updateTask",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/tasks/{id}/complete": {
+      "post": {
+        "operationId": "completeTask",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Completed"
+          }
+        }
+      }
+    },
+    "/timeline": {
+      "get": {
+        "operationId": "getTimeline",
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": ["lead", "contact", "company", "deal"]
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ items, nextBefore }"
+          }
+        }
+      }
+    },
+    "/activities": {
+      "post": {
+        "operationId": "logActivity",
+        "responses": {
+          "201": {
+            "description": "Logged"
+          }
+        }
+      }
+    },
+    "/notes": {
+      "post": {
+        "operationId": "createNote",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/notes/{id}": {
+      "patch": {
+        "operationId": "updateNote",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "409": {
+            "description": "Version conflict"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      }
+    },
+    "/tags": {
+      "get": {
+        "operationId": "listTags",
+        "responses": {
+          "200": {
+            "description": "Tags with usage counts"
+          }
+        }
+      }
+    },
+    "/tags/{entityType}/{entityId}": {
+      "put": {
+        "operationId": "setTags",
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tags on the record"
+          }
+        }
+      }
+    },
+    "/reference-lists": {
+      "get": {
+        "operationId": "getReferenceLists",
+        "responses": {
+          "200": {
+            "description": "Reference lists"
+          }
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "operationId": "listNotifications",
+        "parameters": [
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "enum": ["1"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ items, unreadCount }"
+          }
+        }
+      }
+    },
+    "/notifications/read": {
+      "post": {
+        "operationId": "markNotificationsRead",
+        "responses": {
+          "200": {
+            "description": "{ updated }"
           }
         }
       }

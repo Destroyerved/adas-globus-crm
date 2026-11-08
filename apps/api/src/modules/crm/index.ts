@@ -81,7 +81,7 @@ export class CrmService {
       ownerColumn: 'assignee_user_id',
       startParamIndex: 2,
     });
-    const [contacts, deals, tasks, activities] = await Promise.all([
+    const [contacts, deals, tasks, activities, tags] = await Promise.all([
       this.db.query(
         `SELECT id, full_name, title, primary_email, phone_e164, market, timezone,
                 owner_user_id, do_not_contact, email_verification_status, lead_score, updated_at
@@ -114,9 +114,14 @@ export class CrmService {
          LIMIT 50`,
         [companyId],
       ),
+      this.db.query<{ name: string }>(
+        `SELECT t.name FROM entity_tags et JOIN tags t ON t.id = et.tag_id
+         WHERE et.entity_type = 'company' AND et.entity_id = $1 ORDER BY t.name`,
+        [companyId],
+      ),
     ]);
     return {
-      company,
+      company: { ...company, tags: tags.rows.map((t) => t.name) },
       contacts: contacts.rows,
       deals: deals.rows,
       tasks: tasks.rows,
@@ -904,6 +909,18 @@ export class CrmService {
       if (!stage) {
         throw new ValidationDomainError(`Unknown stage '${input.stageName}'.`);
       }
+      if (stage.category === 'lost') {
+        // PRD 3.4: lost reasons come from the admin-editable list.
+        const reasons = await tx.query<{ value_json: unknown }>(
+          `SELECT value_json FROM settings WHERE key = 'reference.lost_reasons'`,
+        );
+        const list = reasons.rows[0]?.value_json;
+        if (Array.isArray(list) && list.length > 0 && !list.includes(input.lostReason?.trim())) {
+          throw new ValidationDomainError('Choose why the deal was lost.', {
+            lostReason: ['Choose a reason from the list.'],
+          });
+        }
+      }
 
       const updated = await tx.query(
         `UPDATE deals
@@ -915,8 +932,19 @@ export class CrmService {
              lost_notes = COALESCE($8, lost_notes),
              trial_candidate_role = COALESCE($9, trial_candidate_role),
              contract_start_date = COALESCE($10, contract_start_date),
-             won_at = CASE WHEN $5 = 'won' THEN NOW() ELSE won_at END,
-             lost_at = CASE WHEN $5 = 'lost' THEN NOW() ELSE lost_at END,
+             won_at = CASE WHEN $5 = 'won' THEN NOW() WHEN $5 = 'open' THEN NULL ELSE won_at END,
+             lost_at = CASE WHEN $5 = 'lost' THEN NOW() WHEN $5 = 'open' THEN NULL ELSE lost_at END,
+             -- PRD 4.6: closing sets closed_at and the FX rate to the reporting currency (USD,
+             -- PRD 15 Q8); reopening clears both.
+             closed_at = CASE WHEN $5 IN ('won', 'lost') THEN NOW() ELSE NULL END,
+             fx_rate_scaled_at_close = CASE WHEN $5 IN ('won', 'lost') THEN (
+               SELECT rate_scaled FROM fx_rates
+               WHERE from_currency = deals.currency AND to_currency = 'USD'
+               ORDER BY effective_date DESC LIMIT 1
+             ) ELSE NULL END,
+             probability_override = FALSE,
+             last_activity_at = NOW(),
+             idle_flagged_at = NULL,
              trial_started_at = CASE WHEN $4 = 'Free Trial (3-Day)' THEN COALESCE(trial_started_at, NOW()) ELSE trial_started_at END,
              trial_ends_at = CASE WHEN $4 = 'Free Trial (3-Day)' THEN COALESCE(trial_ends_at, NOW() + INTERVAL '3 days') ELSE trial_ends_at END,
              version = version + 1,
@@ -971,6 +999,21 @@ export class CrmService {
           );
         }
       }
+
+      const reopened =
+        stage.category === 'open' &&
+        deal.stage_name !== stage.name &&
+        ['Won', 'Lost'].includes(deal.stage_name);
+      await this.db.addOutboxEvent(tx, {
+        eventType: reopened
+          ? 'deal.reopened'
+          : stage.category === 'lost'
+            ? 'deal.lost'
+            : 'deal.stage_changed',
+        aggregateType: 'deal',
+        aggregateId: dealId,
+        payload: { dealId, from: deal.stage_name, to: stage.name },
+      });
 
       if (stage.category === 'won') {
         await tx.query(
@@ -1072,3 +1115,8 @@ export class CrmService {
     return res.rows[0];
   }
 }
+
+export { registerCrmRoutes } from './routes.js';
+export { CrmListService } from './lists.js';
+export { CrmRecordService } from './records.js';
+export { CrmTimelineService } from './timeline.js';
