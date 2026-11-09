@@ -320,97 +320,9 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
     expect(historyRes.rows.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('A5 & A13: CSV import dry-run previews counts, live run creates contacts, suppression always wins, and rollback soft-deletes created rows (PRD §4.9, §5.3)', async () => {
-    const admin = await services.auth.resolveSessionUser('usr_admin_1');
+  // CSV imports (A1-A3, A13) are covered end to end in m2-imports.int.test.ts.
 
-    // Add a suppressed address first (A13)
-    await services.compliance.addSuppression({
-      email: 'opted-out@cpa-import.example.com',
-      reason: 'unsubscribe',
-      source: 'test_a13',
-      actorUserId: admin.id,
-    });
-
-    const importRows = [
-      {
-        firstName: 'New',
-        lastName: 'PartnerOne',
-        email: 'partner1@newfirm1.example.com',
-        firmName: 'New Firm One CPA',
-        website: 'https://newfirm1.example.com',
-        market: 'US' as const,
-        source: 'CSV Import',
-        legacyNoConsent: false,
-      },
-      {
-        firstName: 'DuplicateInFile',
-        lastName: 'PartnerOne',
-        email: 'PARTNER1@newfirm1.example.com',
-        firmName: 'New Firm One CPA',
-        market: 'US' as const,
-        source: 'CSV Import',
-        legacyNoConsent: false,
-      },
-      {
-        firstName: 'Opted',
-        lastName: 'Out',
-        email: 'opted-out@cpa-import.example.com',
-        firmName: 'Suppressed CPA',
-        market: 'US' as const,
-        source: 'CSV Import',
-        legacyNoConsent: false,
-      },
-      {
-        firstName: 'Broken',
-        lastName: 'Email',
-        email: 'not-an-email',
-        market: 'US' as const,
-        source: 'CSV Import',
-        legacyNoConsent: false,
-      },
-    ];
-
-    // 1. Dry-run preview
-    const dryRun = await services.dataQuality.runCsvImport(admin, {
-      fileName: 'cpa-prospects.csv',
-      dryRun: true,
-      duplicatePolicy: 'update_blank',
-      rows: importRows,
-    });
-
-    expect(dryRun.dryRun).toBe(true);
-    expect(dryRun.createdCount).toBe(1);
-    expect(dryRun.skippedDuplicateCount).toBe(1);
-    expect(dryRun.skippedSuppressedCount).toBe(1);
-    expect(dryRun.errorCount).toBe(1);
-
-    // 2. Live execution
-    const liveRun = await services.dataQuality.runCsvImport(admin, {
-      fileName: 'cpa-prospects.csv',
-      dryRun: false,
-      duplicatePolicy: 'update_blank',
-      rows: importRows,
-    });
-
-    expect(liveRun.dryRun).toBe(false);
-    expect(liveRun.createdCount).toBe(1);
-    expect(liveRun.createdEntityIds.length).toBe(1);
-
-    // Verify suppressed email is STILL not sendable after import (A13)
-    const sendableAfterImport = await services.compliance.evaluateRecipientSendability({
-      email: 'opted-out@cpa-import.example.com',
-      channel: 'sequence',
-    });
-    expect(sendableAfterImport.sendable).toBe(false);
-    expect(sendableAfterImport.reasonCode).toBe('SUPPRESSED_EMAIL');
-
-    // 3. Rollback import job
-    const rollback = await services.dataQuality.rollbackImportJob(admin, liveRun.id);
-    expect(rollback.rolledBack).toBe(true);
-    expect(rollback.affectedCount).toBe(1);
-  });
-
-  it('A6: Contact merge moves secondary emails, deals, tasks, and sequence enrollments to survivor and supports undo (PRD §4.8)', async () => {
+  it('A6: Contact merge moves secondary emails, deals, tasks, and sequence enrollments to survivor and supports undo (PRD 4.9)', async () => {
     const admin = await services.auth.resolveSessionUser('usr_admin_1');
 
     const survivor = await services.crm.createContact(admin, {
@@ -444,18 +356,32 @@ describe('Phases 1–6 PostgreSQL 17 Integration & Acceptance Suite (PRD §12.1 
     const survivorId = String(survivor['id']);
     const duplicateId = String(duplicate['id']);
 
-    const merged = await services.dataQuality.mergeContacts(admin, {
-      survivorContactId: survivorId,
-      duplicateContactId: duplicateId,
-    });
+    const merged = await services.duplicates.merge(
+      admin,
+      'contact',
+      survivorId,
+      {
+        mergedId: duplicateId,
+        keptVersion: Number(survivor['version']),
+        mergedVersion: Number(duplicate['version']),
+      },
+      null,
+    );
+    expect(merged.kept.id).toBe(survivorId);
+    const emails = await db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM contact_emails WHERE contact_id = $1`,
+      [survivorId],
+    );
+    expect(emails.rows[0]?.n).toBeGreaterThanOrEqual(3);
 
-    expect(merged.survivorContactId).toBe(survivorId);
-    expect(merged.secondaryEmailsCount).toBeGreaterThanOrEqual(3);
-
-    // Undo the merge and verify duplicate contact is restored
-    const undone = await services.dataQuality.undoContactMerge(admin, merged.mergeLogId);
-    expect(undone.undone).toBe(true);
-    expect(undone.restoredContactId).toBe(duplicateId);
+    // Undo the merge and verify the duplicate contact is restored
+    const undone = await services.duplicates.undo(admin, merged.id, {}, null);
+    expect(undone.undoneAt).not.toBeNull();
+    const restored = await db.query<{ deleted_at: Date | null }>(
+      `SELECT deleted_at FROM contacts WHERE id = $1`,
+      [duplicateId],
+    );
+    expect(restored.rows[0]?.deleted_at).toBeNull();
   });
 
   // -------------------------------------------------------------------------

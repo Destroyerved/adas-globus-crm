@@ -1166,3 +1166,13 @@ export {
   type ProbableMatch,
 } from './import-records.js';
 export { referenceList, resolveAssignee } from './access.js';
+export {
+  MergeWriter,
+  MERGE_UNDO_DAYS,
+  describeMoved,
+  movedCounts,
+  queueDuplicatePair,
+  type MergeRequest,
+  type MergeResult,
+  type MergeSnapshot,
+} from './merge-records.js';

@@ -15,6 +15,7 @@ import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
 import { SettingsScreen } from '@/features/settings/settings-screen.js';
 import { ImportsScreen } from '@/features/imports/imports-screen.js';
+import { DuplicatesScreen } from '@/features/duplicates/duplicates-screen.js';
 import { ToastProvider } from '@/components/ui/toast.js';
 import { ErrorState } from '@/components/ui/state-views.js';
 import { ApiError, api } from '@/lib/api.js';
@@ -53,6 +54,7 @@ const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'deal',
   'tasks',
   'imports',
+  'duplicates',
 ]);
 
 /** Which sidebar item is highlighted for a record page. */
@@ -197,6 +199,16 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             importId={recordId}
             onOpen={(id) => navigateScreen('imports', id)}
             onBack={() => navigateScreen('imports')}
+          />
+        )}
+        {activeScreen === 'duplicates' && (
+          <DuplicatesScreen
+            pairId={recordId}
+            onOpenPair={(id) => navigateScreen('duplicates', id)}
+            onBack={() => navigateScreen('duplicates')}
+            onOpenRecord={(entity, id) =>
+              entity === 'contact' ? openContact(id) : openCompany(id)
+            }
           />
         )}
         {activeScreen === 'leads' && <LeadsScreen onOpenLead={openLead} />}

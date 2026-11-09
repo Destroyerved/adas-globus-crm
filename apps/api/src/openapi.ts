@@ -127,13 +127,6 @@ const openApiSpec = {
         responses: { '201': { description: 'Created' } },
       },
     },
-    '/contacts/merge': {
-      post: {
-        operationId: 'mergeContacts',
-        summary: 'Merge duplicate contact into survivor with undo snapshot (PRD §4.8)',
-        responses: { '200': { description: 'Merged' } },
-      },
-    },
     '/leads': {
       get: {
         operationId: 'listLeads',
@@ -571,10 +564,102 @@ const adminAndDashboardPaths: Record<string, Record<string, unknown>> = {
   },
 };
 
+const mergePaths = (plural: string, entity: string): Record<string, Record<string, unknown>> => ({
+  [`/${plural}/{id}/merge-preview`]: {
+    get: {
+      operationId: `preview${entity}Merge`,
+      summary: `Both ${plural} side by side before a merge: field values, suggested choices, what is linked and what will happen. {id} is the record to keep; ?with= is the one to merge into it (PRD 4.9)`,
+      parameters: [
+        ...idParam,
+        { name: 'with', in: 'query', required: true, schema: { type: 'string' } },
+      ],
+      responses: { '200': { description: 'Preview' }, '404': { description: 'Not found' } },
+    },
+  },
+  [`/${plural}/{id}/merge`]: {
+    post: {
+      operationId: `merge${entity}`,
+      summary: `Merge another ${entity.toLowerCase()} into {id}: chosen fields, every link re-pointed, a snapshot kept for undo, audited (PRD 4.9)`,
+      parameters: idParam,
+      responses: {
+        '200': { description: 'Merged' },
+        '404': { description: 'Not found or outside your scope' },
+        '409': { description: 'Version conflict' },
+        '422': { description: 'Invalid choice' },
+      },
+    },
+  },
+});
+
+const duplicatePaths: Record<string, Record<string, unknown>> = {
+  '/duplicates': {
+    get: {
+      operationId: 'listDuplicates',
+      summary:
+        'Open probable-duplicate pairs where both records are inside your scope, newest first (PRD 4.9)',
+      parameters: [
+        { name: 'entity', in: 'query', schema: { type: 'string', enum: ['contact', 'company'] } },
+        { name: 'cursor', in: 'query', schema: { type: 'string' } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+      ],
+      responses: ok('Pairs'),
+    },
+  },
+  '/duplicates/{id}': {
+    get: {
+      operationId: 'getDuplicate',
+      summary: 'One open pair',
+      parameters: idParam,
+      responses: { '200': { description: 'Pair' }, '404': { description: 'Not found' } },
+    },
+  },
+  '/duplicates/{id}/dismiss': {
+    post: {
+      operationId: 'dismissDuplicate',
+      summary: 'Mark a pair as not duplicates; it is never queued again (audited)',
+      parameters: idParam,
+      responses: ok('Dismissed'),
+    },
+  },
+  ...mergePaths('contacts', 'Contact'),
+  ...mergePaths('companies', 'Company'),
+  '/merges': {
+    get: {
+      operationId: 'listMerges',
+      summary: 'Recent merges of records inside your scope',
+      parameters: [
+        { name: 'entity', in: 'query', schema: { type: 'string', enum: ['contact', 'company'] } },
+      ],
+      responses: ok('Merges'),
+    },
+  },
+  '/merges/{id}': {
+    get: {
+      operationId: 'getMerge',
+      summary: 'One merge: what moved and whether it can still be undone',
+      parameters: idParam,
+      responses: { '200': { description: 'Merge' }, '404': { description: 'Not found' } },
+    },
+  },
+  '/merges/{id}/undo': {
+    post: {
+      operationId: 'undoMerge',
+      summary:
+        'Undo a merge within 30 days: the merged record comes back with its links; fields of the kept record edited since are left and listed; do not contact is never lifted (audited)',
+      parameters: idParam,
+      responses: {
+        '200': { description: 'Undone' },
+        '409': { description: 'Already undone, too late, or the records have changed' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
   ...adminAndDashboardPaths,
+  ...duplicatePaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

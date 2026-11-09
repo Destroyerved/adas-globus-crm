@@ -88,6 +88,7 @@ export type AppScreenId =
   | 'inbox'
   | 'outreach'
   | 'imports'
+  | 'duplicates'
   | 'reports'
   | 'empty'
   | 'login';

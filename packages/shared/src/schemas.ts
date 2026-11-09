@@ -434,40 +434,7 @@ export const WebsiteInquiryPayloadSchema = z.object({
 });
 export type WebsiteInquiryPayload = z.infer<typeof WebsiteInquiryPayloadSchema>;
 
-// ---------------------------------------------------------------------------
-// PRD §4.8 & §4.9: CSV Imports & Duplicate Merge
-// ---------------------------------------------------------------------------
-
-export const CsvImportRowInputSchema = z.object({
-  firstName: z.string().default(''),
-  lastName: z.string().default(''),
-  email: z.string(),
-  phone: z.string().optional().nullable(),
-  firmName: z.string().optional().nullable(),
-  website: z.string().optional().nullable(),
-  market: MarketSchema.default('US'),
-  stateProvince: z.string().optional().nullable(),
-  title: z.string().optional().nullable(),
-  source: z.string().default('CSV Import'),
-  consentBasis: ConsentBasisSchema.optional().nullable(),
-  legacyNoConsent: z.boolean().default(false),
-});
-export type CsvImportRowInput = z.infer<typeof CsvImportRowInputSchema>;
-
-export const CsvImportRequestSchema = z.object({
-  fileName: z.string().default('contacts.csv'),
-  dryRun: z.boolean().default(true),
-  duplicatePolicy: z.enum(['skip', 'update_blank', 'overwrite']).default('update_blank'),
-  rows: z.array(CsvImportRowInputSchema).min(1).max(10000),
-});
-export type CsvImportRequest = z.infer<typeof CsvImportRequestSchema>;
-
-export const MergeContactsInputSchema = z.object({
-  survivorContactId: z.string(),
-  duplicateContactId: z.string(),
-  fieldOverrides: z.record(z.string(), z.unknown()).optional(),
-});
-export type MergeContactsInput = z.infer<typeof MergeContactsInputSchema>;
+// Imports (PRD 4.9) live in imports.ts; duplicate review and merge in merges.ts.
 
 // ---------------------------------------------------------------------------
 // PRD §4.11–4.16 & §8: Inbox, Sequences, Campaigns, Integrations

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Building2,
   CheckSquare,
+  GitMerge,
   Handshake,
   LayoutDashboard,
   LogOut,
@@ -66,6 +67,12 @@ const WORK_ITEMS: NavItem[] = [
     label: 'Imports',
     icon: Upload,
     capability: 'imports.run',
+  },
+  {
+    id: 'duplicates',
+    label: 'Duplicates',
+    icon: GitMerge,
+    capability: 'duplicates.merge',
   },
 ];
 

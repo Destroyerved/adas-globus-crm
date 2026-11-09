@@ -1,10 +1,17 @@
 import {
   type Currency,
+  type DuplicateCandidateView,
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
   type Market,
+  type MergeEntity,
+  type MergeInput,
+  type MergePreviewView,
+  type MergeView,
 } from '@adas/shared';
+
+const MERGE_PATH: Record<MergeEntity, string> = { contact: 'contacts', company: 'companies' };
 
 /**
  * Typed client for the ADAS CRM API. Every failure throws an ApiError so screens can show
@@ -756,6 +763,27 @@ export const api = {
     entity: ImportEntity;
     mapping: Record<string, string>;
   }) => post<ImportTemplate>('/imports/templates', input),
+
+  // Duplicate review and merge (PRD 4.9)
+  listDuplicates: (entity: MergeEntity, cursor?: string | null) => {
+    const search = new URLSearchParams({ entity });
+    if (cursor) search.set('cursor', cursor);
+    return request<{ items: DuplicateCandidateView[]; nextCursor: string | null }>(
+      `/duplicates?${search.toString()}`,
+    );
+  },
+  getDuplicate: (pairId: string) => request<DuplicateCandidateView>(`/duplicates/${enc(pairId)}`),
+  dismissDuplicate: (pairId: string) =>
+    post<{ id: string; status: 'dismissed' }>(`/duplicates/${enc(pairId)}/dismiss`, {}),
+  mergePreview: (entity: MergeEntity, keptId: string, mergedId: string) =>
+    request<MergePreviewView>(
+      `/${MERGE_PATH[entity]}/${enc(keptId)}/merge-preview?with=${enc(mergedId)}`,
+    ),
+  mergeRecords: (entity: MergeEntity, keptId: string, input: MergeInput) =>
+    post<MergeView>(`/${MERGE_PATH[entity]}/${enc(keptId)}/merge`, input),
+  listMerges: (entity: MergeEntity) =>
+    request<Items<MergeView>>(`/merges?entity=${entity}`).then((r) => r.items),
+  undoMerge: (mergeId: string) => post<MergeView>(`/merges/${enc(mergeId)}/undo`, {}),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

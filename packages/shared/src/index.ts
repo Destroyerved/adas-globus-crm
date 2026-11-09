@@ -5,3 +5,4 @@ export * from './format.js';
 export * from './schemas.js';
 export * from './admin.js';
 export * from './imports.js';
+export * from './merges.js';

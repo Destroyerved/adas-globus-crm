@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type DatabaseService, type DbTx } from '../../platform/db/index.js';
 import { insertActivity } from './access.js';
+import { queueDuplicatePair } from './merge-records.js';
 
 /**
  * Record writes for imports (PRD 4.9). The imports module decides what each row should do;
@@ -155,12 +156,15 @@ export class ImportRecordWriter {
     match: ProbableMatch,
     batchId: string,
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO duplicate_candidates
-         (id, entity_type, left_entity_id, right_entity_id, match_reason, confidence, import_batch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT DO NOTHING`,
-      [`dup_${randomUUID()}`, entity, existingId, newId, match.reason, match.confidence, batchId],
+    // A pair someone dismissed or merged before is never queued again (ADR 0009).
+    await queueDuplicatePair(
+      tx,
+      entity,
+      existingId,
+      newId,
+      match.reason,
+      match.confidence,
+      batchId,
     );
   }
 

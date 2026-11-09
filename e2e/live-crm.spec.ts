@@ -495,3 +495,109 @@ test('a CSV of contacts is mapped, checked, imported, survives a reload and is u
   });
   await expect(page.getByText('Records removed')).toBeVisible();
 });
+
+test('two copies of a contact are found, reviewed, merged, survive a reload and are unmerged', async ({
+  page,
+}) => {
+  // Four steps, each checked with axe at two widths.
+  test.setTimeout(180_000);
+  const checkStep = async (name: string) => {
+    for (const width of [1440, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoHorizontalOverflow(page);
+      await expectNoAxeViolations(page);
+      await page.screenshot({
+        path: resolve(SCREENS_DIR, `${name}-${width}w.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
+
+  // Two synthetic copies of one person at the same firm, added through the API.
+  const ids: string[] = [];
+  for (const [email, title] of [
+    ['robin.ashford@acmetax.example.com', 'Partner'],
+    ['r.ashford@acmetax.example.com', 'Tax Manager'],
+  ]) {
+    const res = await page.request.post('/api/v1/contacts', {
+      // The API takes changes only from the CRM web app's origin.
+      headers: { Origin: 'http://localhost:5174' },
+      data: {
+        companyId: 'cmp_acme',
+        firstName: 'Robin',
+        lastName: 'Ashford',
+        primaryEmail: email,
+        title,
+      },
+    });
+    expect(res.status()).toBe(201);
+    ids.push(String(((await res.json()) as { id: string }).id));
+  }
+
+  // The regular check queues them as a pair.
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get('/api/v1/duplicates?entity=contact');
+        const body = (await res.json()) as { items: { a: { id: string }; b: { id: string } }[] };
+        return body.items.some((p) => ids.includes(p.a.id) && ids.includes(p.b.id));
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=duplicates');
+  await expect(page.getByRole('heading', { name: 'Duplicates' })).toBeVisible();
+  const review = page.getByRole('button', { name: 'Review Robin Ashford and Robin Ashford' });
+  await expect(review).toBeVisible();
+  await checkStep('17-duplicates');
+
+  // Compare: keep the newer title, then merge after confirming.
+  await review.click();
+  await expect(page.getByRole('heading', { name: 'Choose what to keep' })).toBeVisible();
+  await page
+    .getByRole('radiogroup', { name: 'Title' })
+    .getByRole('radio', { name: /Tax Manager/ })
+    .check();
+  await checkStep('18-merge-review');
+  await page.getByRole('button', { name: 'Merge contacts' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Merge contacts' }).click();
+  await expect(page.getByRole('heading', { name: 'Merged into Robin Ashford' })).toBeVisible();
+  await checkStep('19-merge-result');
+
+  // Saved: one record keeps the chosen title, the other is gone.
+  const merges = await page.request.get('/api/v1/merges?entity=contact');
+  const { items } = (await merges.json()) as {
+    items: { kept: { id: string }; merged: { id: string } }[];
+  };
+  const merge = items.find((m) => ids.includes(m.kept.id) && ids.includes(m.merged.id));
+  expect(merge).toBeDefined();
+  const kept = await page.request.get(`/api/v1/contacts/${merge?.kept.id}`);
+  expect(JSON.stringify(await kept.json())).toContain('Tax Manager');
+  expect((await page.request.get(`/api/v1/contacts/${merge?.merged.id}`)).status()).toBe(404);
+
+  // After a reload the pair no longer waits, and the merge is listed.
+  await page.reload();
+  await expect(page.getByText('This pair is no longer waiting for review')).toBeVisible();
+  await page.getByRole('button', { name: 'All duplicates' }).first().click();
+  await page.getByRole('tab', { name: 'Recent merges' }).click();
+  await page.reload();
+  const row = page.getByRole('row', { name: /Robin Ashford/ }).first();
+  await expect(row.getByRole('button', { name: 'Undo the merge of Robin Ashford' })).toBeVisible();
+
+  // Undo: confirmed in a dialog; both records exist again, also after a reload.
+  await row.getByRole('button', { name: 'Undo the merge of Robin Ashford' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Undo merge' }).click();
+  await expect(row.getByText('Undone')).toBeVisible();
+  await page.reload();
+  await expect(
+    page
+      .getByRole('row', { name: /Robin Ashford/ })
+      .first()
+      .getByText('Undone'),
+  ).toBeVisible();
+  expect((await page.request.get(`/api/v1/contacts/${merge?.merged.id}`)).status()).toBe(200);
+  await checkStep('20-recent-merges');
+});

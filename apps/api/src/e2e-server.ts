@@ -40,6 +40,20 @@ setInterval(() => {
     });
 }, 500).unref();
 
+// The duplicate scan, in-process and more often than the worker's once a minute so the
+// duplicates test need not wait. The worker runs the same DuplicateService.scan (jobs.ts).
+let scanBusy = false;
+setInterval(() => {
+  if (scanBusy) return;
+  scanBusy = true;
+  void services.duplicates
+    .scan({ budgetMs: 2_000 })
+    .catch((err: Error) => logger.error({ err: err.name }, 'e2e duplicate scan failed'))
+    .finally(() => {
+      scanBusy = false;
+    });
+}, 1_000).unref();
+
 // A synthetic emergency admin for the admin sign-in test. playwright.config.ts generates its
 // password and authenticator secret afresh on every run; nothing is stored in the repository.
 const password = process.env['E2E_ADMIN_PASSWORD'];

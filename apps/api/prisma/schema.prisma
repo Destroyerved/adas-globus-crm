@@ -15,6 +15,8 @@
 //   prisma/migrations/0007_imports/migration.sql (files, import tables and their check
 //   constraints, partial indexes and grants; source and import batch on companies and
 //   contacts; record_history.via; the open-pair unique index on duplicate_candidates; ADR 0008)
+//   prisma/migrations/0008_merges/migration.sql (merge_logs undo columns and indexes; the
+//   'stopped_merged' enrollment status; duplicate pair and foreign-key indexes; ADR 0009)
 
 generator client {
   provider = "prisma-client-js"

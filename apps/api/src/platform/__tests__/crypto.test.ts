@@ -87,7 +87,12 @@ describe('secrets at rest', () => {
     expect(() => new SecretBox('k'.repeat(40), 2).open(sealed, 'totp:usr_1')).toThrow(
       /key version 1/,
     );
-    const tampered = sealed.slice(0, -2) + (sealed.endsWith('A') ? 'BB' : 'AA');
+    // Flip one bit of the ciphertext itself. (Rewriting the last base64url characters is not
+    // enough: their unused low bits are ignored, so the bytes could come out unchanged.)
+    const parts = sealed.split('.');
+    const body = Buffer.from(parts[4] ?? '', 'base64url');
+    body[0] = (body[0] ?? 0) ^ 0x01;
+    const tampered = [...parts.slice(0, 4), body.toString('base64url')].join('.');
     expect(() => box.open(tampered, 'totp:usr_1')).toThrow();
     expect(() => new SecretBox('short', 1)).toThrow();
   });
