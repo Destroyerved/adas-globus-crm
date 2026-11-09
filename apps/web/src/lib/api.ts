@@ -1,6 +1,8 @@
 import {
   type Currency,
   type DuplicateCandidateView,
+  type ExportCreateInput,
+  type ExportView,
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
@@ -58,21 +60,38 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await response.text();
   const body: unknown = text ? safeJson(text) : null;
   if (response.status === 204) return undefined as T;
-  if (!response.ok) {
-    const problem = (body ?? {}) as {
-      code?: string;
-      detail?: string;
-      title?: string;
-      fieldErrors?: Record<string, string[]>;
-    };
-    throw new ApiError(
-      response.status,
-      problem.code ?? 'HTTP_ERROR',
-      problem.detail ?? problem.title ?? `Request failed (${response.status}).`,
-      problem.fieldErrors ?? {},
-    );
-  }
+  if (!response.ok) throw problemError(response.status, body);
   return body as T;
+}
+
+/** An RFC 9457 problem response as an ApiError. */
+function problemError(status: number, body: unknown): ApiError {
+  const problem = (body ?? {}) as {
+    code?: string;
+    detail?: string;
+    title?: string;
+    fieldErrors?: Record<string, string[]>;
+  };
+  return new ApiError(
+    status,
+    problem.code ?? 'HTTP_ERROR',
+    problem.detail ?? problem.title ?? `Request failed (${status}).`,
+    problem.fieldErrors ?? {},
+  );
+}
+
+/** A file from the API, with the name the server gave it; errors throw like any request. */
+async function download(path: string): Promise<{ blob: Blob; filename: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1${path}`, { credentials: 'same-origin' });
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', "Can't reach the CRM server. Check that it's running.");
+  }
+  if (!response.ok) throw problemError(response.status, safeJson(await response.text()));
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'download';
+  return { blob: await response.blob(), filename };
 }
 
 function safeJson(text: string): unknown {
@@ -784,6 +803,11 @@ export const api = {
   listMerges: (entity: MergeEntity) =>
     request<Items<MergeView>>(`/merges?entity=${entity}`).then((r) => r.items),
   undoMerge: (mergeId: string) => post<MergeView>(`/merges/${enc(mergeId)}/undo`, {}),
+
+  // Exports (PRD 4.9)
+  createExport: (input: ExportCreateInput) => createWithKey<ExportView>('/exports', input),
+  getExport: (exportId: string) => request<ExportView>(`/exports/${enc(exportId)}`),
+  downloadExport: (exportId: string) => download(`/exports/${enc(exportId)}/download`),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

@@ -287,6 +287,7 @@ describe('the worker on pg-boss', () => {
       expect(queues.rows.map((q) => q.name)).toEqual([
         'deals.idle',
         'duplicates.scan',
+        'export.build',
         'housekeeping.purge',
         'import.process',
         'outbox.dispatch',

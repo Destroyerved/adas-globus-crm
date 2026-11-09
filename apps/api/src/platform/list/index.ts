@@ -293,6 +293,8 @@ interface Queryable {
 /**
  * Runs a scoped, filtered, sorted, keyset-paginated list query.
  * `scopeSql` is built by the caller (scopeWhere) against the same `params` object.
+ * With `withTotal: false` (exports paging through every row) the count query is skipped and
+ * `total` is -1.
  */
 export async function runList<T extends Record<string, unknown>>(
   db: Queryable,
@@ -301,6 +303,7 @@ export async function runList<T extends Record<string, unknown>>(
   params: SqlParams,
   scopeSql: string,
   userId: string,
+  options: { withTotal?: boolean } = {},
 ): Promise<Page<T>> {
   const desc = req.sort.startsWith('-');
   const sortKey = desc ? req.sort.slice(1) : req.sort;
@@ -340,7 +343,9 @@ export async function runList<T extends Record<string, unknown>>(
 
   const [rows, count] = await Promise.all([
     db.query<T & { __cursor_value: string | null; id: string }>(sql, params.values),
-    db.query<{ n: number }>(countSql, countParams),
+    options.withTotal === false
+      ? Promise.resolve({ rows: [{ n: -1 }] })
+      : db.query<{ n: number }>(countSql, countParams),
   ]);
 
   const hasMore = rows.rows.length > req.limit;

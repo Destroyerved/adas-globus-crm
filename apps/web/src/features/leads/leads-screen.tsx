@@ -40,6 +40,7 @@ import {
   useUrlState,
 } from '@/features/shared/list-kit.js';
 import { viewerTimeZone } from '@/features/records/timeline.js';
+import { ExportButton } from '@/features/exports/export-button.js';
 
 export type ScreenDataState = 'loaded' | 'empty' | 'loading' | 'error';
 
@@ -132,12 +133,21 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
         title="Leads"
         count={total}
         actions={
-          canCreate ? (
-            <Button variant="primary" onClick={() => setFormOpen(true)}>
-              <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
-              <span>New lead</span>
-            </Button>
-          ) : undefined
+          <>
+            <ExportButton
+              entity="lead"
+              q={state.q}
+              sort={state.sort}
+              filter={filter}
+              total={total}
+            />
+            {canCreate && (
+              <Button variant="primary" onClick={() => setFormOpen(true)}>
+                <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
+                <span>New lead</span>
+              </Button>
+            )}
+          </>
         }
       />
 

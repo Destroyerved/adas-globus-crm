@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell } from 'lucide-react';
 import { formatRelative } from '@adas/shared';
+import { useToast } from '@/components/ui/toast.js';
+import { saveExport } from '@/features/exports/export-kit.js';
 import { api, type NotificationRow } from '@/lib/api.js';
 import { errorMessage } from '@/features/shared/live-kit.js';
 
@@ -33,6 +35,7 @@ export function NotificationBell({
   onOpen: (screen: RecordScreen, id: string | null) => void;
 }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const list = useQuery({
@@ -128,7 +131,14 @@ export function NotificationBell({
                         type="button"
                         onClick={() => {
                           if (!n.read_at) markRead.mutate(n.id);
-                          if (target) onOpen(target.screen, target.id);
+                          // A ready export downloads; anything else opens its record.
+                          if (n.entity_type === 'export' && n.entity_id) {
+                            saveExport(n.entity_id).catch((err: unknown) =>
+                              toast(errorMessage(err), 'danger'),
+                            );
+                          } else if (target) {
+                            onOpen(target.screen, target.id);
+                          }
                           setOpen(false);
                         }}
                         className={`w-full text-left px-[12px] py-[10px] border-0 cursor-pointer hover:bg-bg-alt ${n.read_at ? 'bg-surface' : 'bg-tint'}`}

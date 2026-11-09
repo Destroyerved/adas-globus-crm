@@ -189,6 +189,26 @@ export function formatRelative(
 }
 
 /**
+ * Date and time as "2026-11-10 08:03" in the given IANA time zone, for CSV files: spreadsheet
+ * apps read it as a date in every locale, unlike "10 Nov 2026, 8:03 am".
+ */
+export function formatSpreadsheetDateTime(dateInput: Date | string, timeZone = 'UTC'): string {
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+}
+
+/**
  * Format record name with company middot: "Jane Patel · Acme CPA" (DESIGN.md §10).
  */
 export function formatPersonWithCompany(fullName: string, companyName?: string | null): string {

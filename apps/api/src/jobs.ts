@@ -4,8 +4,9 @@ import { type FileStorage } from './platform/files/index.js';
 import { JobRunner, type PeriodicJob } from './platform/jobs/index.js';
 import { OutboxDispatcher } from './platform/outbox/index.js';
 import { AuthAndUsersService } from './modules/auth/index.js';
-import { CrmJobs } from './modules/crm/index.js';
+import { CrmJobs, CrmListService } from './modules/crm/index.js';
 import { DuplicateService } from './modules/duplicates/index.js';
+import { ExportService } from './modules/exports/index.js';
 import { ImportProcessor } from './modules/imports/index.js';
 
 /**
@@ -22,6 +23,7 @@ export const JOB_QUEUES = [
   'housekeeping.purge',
   'import.process',
   'duplicates.scan',
+  'export.build',
 ] as const;
 
 /**
@@ -51,6 +53,7 @@ export function buildWorker(
   crm: CrmJobs;
   imports: ImportProcessor;
   duplicates: DuplicateService;
+  exports: ExportService;
   jobs: PeriodicJob[];
 } {
   const crm = new CrmJobs(db);
@@ -63,6 +66,14 @@ export function buildWorker(
     logger,
   );
   const duplicates = new DuplicateService(db);
+  // Large exports are built as the person who asked, with their current access.
+  const exportService = new ExportService(
+    db,
+    options.files,
+    new CrmListService(db),
+    (userId) => auth.resolveSessionUser(userId),
+    logger,
+  );
   // Handlers for outbound webhooks (n8n) and sequences attach here as those phases land.
   const outbox = new OutboxDispatcher(db, logger);
   const jobs: PeriodicJob[] = [
@@ -77,7 +88,14 @@ export function buildWorker(
     },
     { name: 'sla.check', cron: '*/5 * * * *', run: () => crm.checkInquirySla() },
     { name: 'deals.idle', cron: '7 * * * *', run: () => crm.flagIdleDeals() },
-    { name: 'housekeeping.purge', cron: '23 * * * *', run: () => purgeExpired(db) },
+    {
+      name: 'housekeeping.purge',
+      cron: '23 * * * *',
+      run: async () => ({
+        ...(await purgeExpired(db)),
+        exportFiles: await exportService.purgeExpired(),
+      }),
+    },
     { name: 'import.process', everySeconds: 2, run: () => imports.processNext() },
     // Probable duplicates among records added or changed by hand, the website or the API.
     {
@@ -85,6 +103,7 @@ export function buildWorker(
       cron: '* * * * *',
       run: () => duplicates.scan({ budgetMs: 20_000 }),
     },
+    { name: 'export.build', everySeconds: 2, run: () => exportService.processNext() },
   ];
   return {
     runner: new JobRunner(db, logger, jobs, { install: options.install }),
@@ -92,6 +111,7 @@ export function buildWorker(
     crm,
     imports,
     duplicates,
+    exports: exportService,
     jobs,
   };
 }

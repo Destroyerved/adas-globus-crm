@@ -34,6 +34,7 @@ import {
   useUrlState,
 } from '@/features/shared/list-kit.js';
 import { viewerTimeZone } from '@/features/records/timeline.js';
+import { ExportButton } from '@/features/exports/export-button.js';
 import { StageMover } from './stage-mover.js';
 
 function monthly(minor: string, currency: Currency, compact = false): string {
@@ -436,6 +437,9 @@ function DealList({
           ))}
         </Select>
         <FilterChips chips={chips} />
+        <div className="sm:ml-auto">
+          <ExportButton entity="deal" q={state.q} sort={state.sort} filter={filter} total={total} />
+        </div>
       </div>
       <DataPanel
         query={{ ...query, isFetching: query.isFetching && !query.isFetchingNextPage }}

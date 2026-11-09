@@ -36,6 +36,7 @@ import {
   useUrlState,
 } from '@/features/shared/list-kit.js';
 import { CompanyPicker, type PickedCompany } from '@/features/shared/company-picker.js';
+import { ExportButton } from '@/features/exports/export-button.js';
 
 export const VERIFICATION_TONE = { valid: 'success', risky: 'warning', invalid: 'danger' } as const;
 
@@ -92,12 +93,21 @@ export function ContactsScreen({
         title="Contacts"
         count={total}
         actions={
-          canCreate ? (
-            <Button variant="primary" onClick={() => setFormOpen(true)}>
-              <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
-              <span>New contact</span>
-            </Button>
-          ) : undefined
+          <>
+            <ExportButton
+              entity="contact"
+              q={state.q}
+              sort={state.sort}
+              filter={filter}
+              total={total}
+            />
+            {canCreate && (
+              <Button variant="primary" onClick={() => setFormOpen(true)}>
+                <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
+                <span>New contact</span>
+              </Button>
+            )}
+          </>
         }
       />
 

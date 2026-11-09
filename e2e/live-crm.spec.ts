@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { totpCode, totpStep } from '../apps/api/src/platform/crypto/totp.js';
 
@@ -600,4 +600,41 @@ test('two copies of a contact are found, reviewed, merged, survive a reload and 
   ).toBeVisible();
   expect((await page.request.get(`/api/v1/contacts/${merge?.merged.id}`)).status()).toBe(200);
   await checkStep('20-recent-merges');
+});
+
+test('the contacts in view are exported as a CSV file', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=contacts&q=Patel');
+  await expect(page.getByRole('heading', { name: /Contacts/ })).toBeVisible();
+  await expect(page.getByText('Jane Patel').first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Export' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Export 1 contact?' });
+  await expect(dialog).toBeVisible();
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `21-export-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The file downloads at once: the searched view only, with a header row.
+  const downloading = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Export CSV' }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toMatch(/^contacts-\d{4}-\d{2}-\d{2}\.csv$/);
+  const file = readFileSync(await download.path(), 'utf8');
+  expect(file.charCodeAt(0)).toBe(0xfeff);
+  const csv = file.slice(1);
+  const lines = csv.split('\r\n').filter(Boolean);
+  expect(lines[0]).toMatch(/^Name,First name,Last name,Email/);
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toContain('Jane Patel');
+  await expect(page.getByText('Exported 1 contact.')).toBeVisible();
+  await expect(dialog).toBeHidden();
 });

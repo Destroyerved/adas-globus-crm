@@ -1,8 +1,9 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
 /**
- * Confirm dialog for destructive actions (DESIGN 6.11): it names the object, and the Danger
- * button repeats the verb, for example "Delete lead".
+ * Confirm dialog (DESIGN 6.11): it names the object, and the confirm button repeats the verb,
+ * for example "Delete lead". Destructive actions keep the Danger fill; others pass
+ * `tone="primary"`.
  */
 export function ConfirmDialog({
   open,
@@ -11,6 +12,8 @@ export function ConfirmDialog({
   confirmLabel,
   pending,
   error,
+  tone = 'danger',
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -20,6 +23,9 @@ export function ConfirmDialog({
   confirmLabel: string;
   pending?: boolean;
   error?: string | null;
+  /** DESIGN 6.1: the danger fill is for destructive confirmations only. */
+  tone?: 'danger' | 'primary';
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -70,8 +76,8 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={pending}
-            className="inline-flex items-center h-[36px] px-[16px] rounded-pill bg-danger text-primary-foreground font-semibold text-[14px] border-0 cursor-pointer disabled:opacity-50"
+            disabled={pending || confirmDisabled}
+            className={`inline-flex items-center h-[36px] px-[16px] rounded-pill text-primary-foreground font-semibold text-[14px] border-0 cursor-pointer disabled:opacity-50 ${tone === 'danger' ? 'bg-danger' : 'bg-primary hover:bg-primary-ink'}`}
           >
             {pending ? 'Working…' : confirmLabel}
           </button>

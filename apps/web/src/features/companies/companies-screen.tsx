@@ -7,6 +7,7 @@ import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
 import { Input } from '@/components/ui/input.js';
 import { Select } from '@/components/ui/select.js';
 import { api } from '@/lib/api.js';
+import { ExportButton } from '@/features/exports/export-button.js';
 import {
   CreateForm,
   DataPanel,
@@ -91,12 +92,21 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
         title="Companies"
         count={total}
         actions={
-          canCreate ? (
-            <Button variant="primary" onClick={() => setFormOpen(true)}>
-              <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
-              <span>New company</span>
-            </Button>
-          ) : undefined
+          <>
+            <ExportButton
+              entity="company"
+              q={state.q}
+              sort={state.sort}
+              filter={filter}
+              total={total}
+            />
+            {canCreate && (
+              <Button variant="primary" onClick={() => setFormOpen(true)}>
+                <Plus size={16} strokeWidth={1.6} aria-hidden="true" />
+                <span>New company</span>
+              </Button>
+            )}
+          </>
         }
       />
 

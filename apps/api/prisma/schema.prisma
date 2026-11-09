@@ -17,6 +17,8 @@
 //   contacts; record_history.via; the open-pair unique index on duplicate_candidates; ADR 0008)
 //   prisma/migrations/0008_merges/migration.sql (merge_logs undo columns and indexes; the
 //   'stopped_merged' enrollment status; duplicate pair and foreign-key indexes; ADR 0009)
+//   prisma/migrations/0009_exports/migration.sql (exports: status checks, the worker's partial
+//   indexes and grants; ADR 0010)
 
 generator client {
   provider = "prisma-client-js"
@@ -325,6 +327,33 @@ model File {
 
   @@index([ownerUserId, createdAt(sort: Desc)])
   @@map("files")
+}
+
+// CSV exports of a list view (PRD 4.9, 6.9). Status checks, the worker's partial indexes and
+// the grant are in migrations/0009_exports/migration.sql.
+model Export {
+  id            String    @id
+  entity        String
+  status        String    @default("queued")
+  request       Json
+  rowCount      Int       @default(0) @map("row_count")
+  processedRows Int       @default(0) @map("processed_rows")
+  background    Boolean   @default(false)
+  fileId        String?   @map("file_id")
+  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(6)
+  failureReason String?   @map("failure_reason")
+  requestedBy   String    @map("requested_by")
+  teamId        String?   @map("team_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(6)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  @@index([requestedBy, createdAt(sort: Desc)])
+  @@index([teamId])
+  @@index([fileId])
+  @@map("exports")
 }
 
 model ImportBatch {

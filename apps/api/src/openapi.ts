@@ -655,11 +655,49 @@ const duplicatePaths: Record<string, Record<string, unknown>> = {
   },
 };
 
+const exportPaths: Record<string, Record<string, unknown>> = {
+  '/exports': {
+    post: {
+      operationId: 'createExport',
+      summary:
+        'Export a list view as CSV: { entity, q, sort, filter } exactly as the list takes them. Rows follow the list scope and the exports.run scope; more than 1,000 rows needs exports.run with scope all and alerts admins; up to 5,000 rows the file is ready at once, larger ones are built in the background and notify you (PRD 2.3, 4.9; audited)',
+      responses: {
+        '201': { description: 'Export, ready or queued' },
+        '400': { description: 'Invalid filter' },
+        '403': { description: 'No export permission, or too many rows for your scope' },
+        '422': { description: 'Nothing to export, too many rows, or an unknown sort' },
+      },
+    },
+  },
+  '/exports/{id}': {
+    get: {
+      operationId: 'getExport',
+      summary: 'One of your exports: its status and progress',
+      parameters: idParam,
+      responses: { '200': { description: 'Export' }, '404': { description: 'Not found' } },
+    },
+  },
+  '/exports/{id}/download': {
+    get: {
+      operationId: 'downloadExport',
+      summary: 'The CSV file of one of your ready exports, kept for 7 days (audited)',
+      parameters: idParam,
+      responses: {
+        '200': { description: 'CSV file', content: { 'text/csv': {} } },
+        '404': { description: 'Not found' },
+        '409': { description: 'Not ready yet, or failed' },
+        '410': { description: 'Deleted after 7 days' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
   ...adminAndDashboardPaths,
   ...duplicatePaths,
+  ...exportPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

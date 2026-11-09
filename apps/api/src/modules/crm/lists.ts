@@ -1,4 +1,4 @@
-import type { SessionUser } from '@adas/shared';
+import type { ExportEntity, SessionUser } from '@adas/shared';
 import { type DatabaseService } from '../../platform/db/index.js';
 import { ValidationDomainError } from '../../platform/errors/index.js';
 import {
@@ -10,6 +10,7 @@ import {
   type Page,
 } from '../../platform/list/index.js';
 import { scopeWhere } from '../../platform/scope/index.js';
+import { EXPORT_SPECS, exportHeader } from './export-columns.js';
 
 /**
  * Field registries and list specs for the record lists (PRD 4.3-4.8, 6.7, 6.8).
@@ -254,7 +255,14 @@ export class CrmListService {
     entity: ListEntity,
     user: SessionUser,
     req: ListRequest,
-    options: { taskView?: string } = {},
+    options: {
+      taskView?: string;
+      /** A second capability whose scope also applies (exports: `exports.run`). */
+      alsoCapability?: string;
+      /** Developer-written SQL added to the select (export columns). */
+      extraSelect?: string;
+      withTotal?: boolean;
+    } = {},
   ): Promise<Page<Record<string, unknown>>> {
     const { spec: baseSpec, capability, alias, ownerColumn } = SPECS[entity];
     const params = new SqlParams();
@@ -264,8 +272,20 @@ export class CrmListService {
       startParamIndex: params.next,
     });
     scope.params.forEach((v) => params.add(v));
+    let scopeSql = scope.sql;
+    if (options.alsoCapability) {
+      const also = scopeWhere(user, options.alsoCapability, {
+        alias,
+        ownerColumn,
+        startParamIndex: params.next,
+      });
+      also.params.forEach((v) => params.add(v));
+      scopeSql = `${scopeSql} AND ${also.sql}`;
+    }
 
-    let spec = baseSpec;
+    let spec = options.extraSelect
+      ? { ...baseSpec, select: `${baseSpec.select}, ${options.extraSelect}` }
+      : baseSpec;
     if (entity === 'tasks') {
       const view = TASK_VIEWS[options.taskView ?? 'open'];
       if (!view) {
@@ -273,9 +293,55 @@ export class CrmListService {
           view: ['Use open, today, overdue, upcoming, done or all.'],
         });
       }
-      spec = { ...baseSpec, where: [...baseSpec.where, view] };
+      spec = { ...spec, where: [...spec.where, view] };
     }
-    return runList(this.db, spec, req, params, scope.sql, user.id);
+    return runList(this.db, spec, req, params, scopeSql, user.id, {
+      withTotal: options.withTotal ?? true,
+    });
+  }
+
+  /**
+   * One page of a CSV export (PRD 2.3, 4.9): the list's own query, filters and read scope,
+   * with the `exports.run` scope applied on top, so an export never holds a row the person
+   * couldn't export. Rows come back as the CSV cells.
+   */
+  async exportPage(
+    entity: ExportEntity,
+    user: SessionUser,
+    view: { q: string; sort?: string; filter?: unknown },
+    page: { cursor: string | null; limit: number; withTotal: boolean },
+    timeZone: string,
+  ): Promise<{ rows: string[][]; nextCursor: string | null; total: number }> {
+    const exportSpec = EXPORT_SPECS[entity];
+    const result = await this.list(
+      exportSpec.list,
+      user,
+      {
+        q: view.q,
+        sort: view.sort ?? SPECS[exportSpec.list].spec.defaultSort,
+        filter: view.filter ?? null,
+        cursor: page.cursor,
+        limit: page.limit,
+      },
+      {
+        alsoCapability: 'exports.run',
+        extraSelect: exportSpec.extraSelect,
+        withTotal: page.withTotal,
+      },
+    );
+    return {
+      rows: result.items.map((row) => exportSpec.columns.map((c) => c.value(row, timeZone))),
+      nextCursor: result.nextCursor,
+      total: result.total,
+    };
+  }
+
+  exportHeader(entity: ExportEntity, timeZone: string): string[] {
+    return exportHeader(entity, timeZone);
+  }
+
+  exportPlural(entity: ExportEntity): string {
+    return EXPORT_SPECS[entity].plural;
   }
 
   /**

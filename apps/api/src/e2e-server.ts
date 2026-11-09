@@ -54,6 +54,19 @@ setInterval(() => {
     });
 }, 1_000).unref();
 
+// The export job, in-process like the import job (the worker runs it through pg-boss).
+let exportBusy = false;
+setInterval(() => {
+  if (exportBusy) return;
+  exportBusy = true;
+  void services.exports
+    .processNext()
+    .catch((err: Error) => logger.error({ err: err.name }, 'e2e export job failed'))
+    .finally(() => {
+      exportBusy = false;
+    });
+}, 500).unref();
+
 // A synthetic emergency admin for the admin sign-in test. playwright.config.ts generates its
 // password and authenticator secret afresh on every run; nothing is stored in the repository.
 const password = process.env['E2E_ADMIN_PASSWORD'];

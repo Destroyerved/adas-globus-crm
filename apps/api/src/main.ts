@@ -27,6 +27,7 @@ import { NotificationService } from './modules/notifications/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
 import { ImportService, registerImportRoutes } from './modules/imports/index.js';
 import { DuplicateService, registerDuplicateRoutes } from './modules/duplicates/index.js';
+import { ExportService, registerExportRoutes } from './modules/exports/index.js';
 import { WebsiteIntakeService } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
@@ -203,6 +204,14 @@ export function createAppServer(
   registerImportRoutes(router, imports, env.MAX_IMPORT_UPLOAD_BYTES);
   const duplicates = new DuplicateService(db);
   registerDuplicateRoutes(router, duplicates);
+  const exportService = new ExportService(
+    db,
+    files,
+    lists,
+    (userId) => auth.resolveSessionUser(userId),
+    logger,
+  );
+  registerExportRoutes(router, exportService);
   router.get('/api/v1/notifications', async (ctx) => {
     ctx.json(
       200,
@@ -919,6 +928,7 @@ export function createAppServer(
       dashboard,
       imports,
       duplicates,
+      exports: exportService,
     },
     files,
   };

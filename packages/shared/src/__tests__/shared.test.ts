@@ -13,6 +13,7 @@ import {
   formatPercent,
   formatMinutes,
   formatPersonWithCompany,
+  formatSpreadsheetDateTime,
   formatRelative,
   formatTime,
   MarketSchema,
@@ -174,5 +175,16 @@ describe('dashboard periods', () => {
       from: '2026-01-01',
       to: '2026-03-14',
     });
+  });
+});
+
+describe('dates in CSV files', () => {
+  it('writes the local date and 24-hour time a spreadsheet reads in any locale', () => {
+    const at = '2026-11-10T14:03:09Z';
+    expect(formatSpreadsheetDateTime(at, 'UTC')).toBe('2026-11-10 14:03');
+    expect(formatSpreadsheetDateTime(at, 'America/Chicago')).toBe('2026-11-10 08:03');
+    expect(formatSpreadsheetDateTime(at, 'Asia/Kolkata')).toBe('2026-11-10 19:33');
+    // Midnight is 00, not 24.
+    expect(formatSpreadsheetDateTime('2026-11-10T00:05:00Z', 'UTC')).toBe('2026-11-10 00:05');
   });
 });
