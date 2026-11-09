@@ -25,6 +25,7 @@ import {
 import { DashboardService, registerDashboardRoutes } from './modules/dashboard/index.js';
 import { NotificationService } from './modules/notifications/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
+import { ImportService, registerImportRoutes } from './modules/imports/index.js';
 import { WebsiteIntakeService } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
@@ -37,6 +38,7 @@ import {
 } from './platform/config/index.js';
 import { loadSecretBox, type SecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
+import { LocalFileStorage, type FileStorage } from './platform/files/index.js';
 import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
@@ -170,6 +172,8 @@ export function createAppServer(
   options: {
     /** Tests and the e2e server pass a throw-away key; otherwise TOKEN_ENCRYPTION_KEY_FILE. */
     secretBox?: SecretBox | null;
+    /** Tests pass in-memory storage; otherwise FILE_STORAGE_LOCAL_PATH. */
+    files?: FileStorage;
   } = {},
 ) {
   const logger = createLogger(env.LOG_LEVEL);
@@ -192,6 +196,10 @@ export function createAppServer(
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
   registerDashboardRoutes(router, dashboard);
+  const files =
+    options.files ?? new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH));
+  const imports = new ImportService(db, files);
+  registerImportRoutes(router, imports, env.MAX_IMPORT_UPLOAD_BYTES);
   router.get('/api/v1/notifications', async (ctx) => {
     ctx.json(
       200,
@@ -622,15 +630,7 @@ export function createAppServer(
         return;
       }
 
-      // Imports & Search
-      if (method === 'POST' && pathname === '/api/v1/imports/csv') {
-        const body = await readJsonBody(req);
-        const summary = await dataQuality.runCsvImport(user, body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(summary));
-        return;
-      }
-
+      // Search
       if (method === 'GET' && pathname === '/api/v1/search') {
         const q = parsedUrl.searchParams.get('q') ?? '';
         const results = await dataQuality.globalSearch(user, q);
@@ -923,7 +923,9 @@ export function createAppServer(
       notifications,
       admin,
       dashboard,
+      imports,
     },
+    files,
   };
 }
 

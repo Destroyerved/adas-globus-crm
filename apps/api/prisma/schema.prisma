@@ -12,6 +12,9 @@
 //   outbox_events.available_at, partial indexes for the worker's sweeps; the pgboss schema
 //   is installed by `pnpm db:migrate`, ADR 0006)
 //   prisma/migrations/0006_break_glass/migration.sql (local_credentials and its grant)
+//   prisma/migrations/0007_imports/migration.sql (files, import tables and their check
+//   constraints, partial indexes and grants; source and import batch on companies and
+//   contacts; record_history.via; the open-pair unique index on duplicate_candidates; ADR 0008)
 
 generator client {
   provider = "prisma-client-js"
@@ -123,6 +126,8 @@ model Company {
   customFields          Json      @default("{}") @map("custom_fields")
   version               Int       @default(1)
   lastContactedAt DateTime? @map("last_contacted_at") @db.Timestamptz(6) // migration 0003
+  source                String? // migration 0007
+  importBatchId         String?   @map("import_batch_id") // migration 0007, partial index
   deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -159,6 +164,8 @@ model Contact {
   customFields            Json      @default("{}") @map("custom_fields")
   version                 Int       @default(1)
   lastContactedAt DateTime? @map("last_contacted_at") @db.Timestamptz(6) // migration 0003
+  source                  String? // migration 0007
+  importBatchId           String?   @map("import_batch_id") // migration 0007, partial index
   deletedAt               DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -298,4 +305,88 @@ model MessageSend {
   @@index([recipientEmail, sentAt])
   @@index([senderUserId, sentAt])
   @@map("message_sends")
+}
+
+// Imports (PRD 4.9, 6.11). Status and purpose checks, the "waiting" partial index and the
+// grants are in migrations/0007_imports/migration.sql.
+model File {
+  id           String    @id
+  storageKey   String    @unique @map("storage_key")
+  originalName String    @map("original_name")
+  contentType  String    @map("content_type")
+  sizeBytes    BigInt    @map("size_bytes")
+  sha256       String
+  purpose      String // import | export
+  ownerUserId  String    @map("owner_user_id")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([ownerUserId, createdAt(sort: Desc)])
+  @@map("files")
+}
+
+model ImportBatch {
+  id            String    @id
+  entity        String    @default("contact")
+  filename      String
+  fileId        String    @map("file_id")
+  status        String    @default("uploaded")
+  columns       Json      @default("[]")
+  rowCount      Int       @default(0) @map("row_count")
+  sample        Json      @default("[]")
+  mapping       Json      @default("{}")
+  options       Json      @default("{}")
+  dryRunCounts  Json?     @map("dry_run_counts")
+  counts        Json      @default("{}")
+  undoCounts    Json?     @map("undo_counts")
+  processedRows Int       @default(0) @map("processed_rows")
+  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(6)
+  failureReason String?   @map("failure_reason")
+  createdBy     String    @map("created_by")
+  teamId        String?   @map("team_id")
+  version       Int       @default(1)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(6)
+  rolledBackAt  DateTime? @map("rolled_back_at") @db.Timestamptz(6)
+  rolledBackBy  String?   @map("rolled_back_by")
+
+  @@index([createdBy, createdAt(sort: Desc)])
+  @@index([teamId, createdAt(sort: Desc)])
+  @@index([fileId])
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id               String   @id
+  batchId          String   @map("batch_id")
+  dryRun           Boolean  @map("dry_run")
+  rowNumber        Int      @map("row_number")
+  raw              Json
+  status           String
+  errors           Json     @default("[]")
+  entityId         String?  @map("entity_id")
+  entityVersion    Int?     @map("entity_version")
+  before           Json?
+  createdCompanyId String?  @map("created_company_id")
+  probableOf       String?  @map("probable_of")
+  undoStatus       String?  @map("undo_status")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([batchId, dryRun, rowNumber])
+  @@index([batchId, dryRun, status, rowNumber])
+  @@map("import_rows")
+}
+
+// Unique per user, entity and LOWER(name): expression index in migration 0007.
+model ImportMappingTemplate {
+  id        String   @id
+  name      String
+  entity    String
+  mapping   Json
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("import_mapping_templates")
 }

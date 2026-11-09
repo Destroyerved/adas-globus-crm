@@ -89,6 +89,15 @@ async function versionOf(table: string, id: string, key = 'id'): Promise<number>
   return res.rows[0]?.version ?? 0;
 }
 
+/** Today's date where the person works. The dashboard reads periods in the viewer's time zone. */
+async function localToday(userId: string): Promise<string> {
+  const res = await db.query<{ d: string }>(
+    `SELECT (NOW() AT TIME ZONE timezone)::date::text AS d FROM users WHERE id = $1`,
+    [userId],
+  );
+  return String(res.rows[0]?.d);
+}
+
 async function widget(userId: string, id: string, query = '') {
   return (await as(userId)).get(`/dashboard/widgets/${id}${query}`);
 }
@@ -173,24 +182,23 @@ describe('Role dashboard (PRD 4.2, 14)', () => {
     );
     expect(own['total']).toBe(owned.rows[0]?.n);
 
-    const today = new Date().toISOString().slice(0, 10);
     const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
-    const year = `?from=${yearAgo}&to=${today}`;
-    const bySourceTeam = (await widget('usr_mgr_1', 'leads_by_source_market', year)).body[
-      'data'
-    ] as Json;
+    const year = async (userId: string) => `?from=${yearAgo}&to=${await localToday(userId)}`;
+    const bySourceTeam = (
+      await widget('usr_mgr_1', 'leads_by_source_market', await year('usr_mgr_1'))
+    ).body['data'] as Json;
     expect(Object.keys(bySourceTeam['byMarket'] as Json)).not.toContain('CA');
-    const bySourceAll = (await widget('usr_ro_1', 'leads_by_source_market', year)).body[
-      'data'
-    ] as Json;
+    const bySourceAll = (await widget('usr_ro_1', 'leads_by_source_market', await year('usr_ro_1')))
+      .body['data'] as Json;
     expect(Object.keys(bySourceAll['byMarket'] as Json)).toContain('CA');
   });
 
   it('follow-ups today count the assignee time zone, and overdue tasks group by person within scope', async () => {
     const before = (await widget('usr_mgr_1', 'followups_today')).body['data'] as Json;
-    // Just before midnight today in the manager's own time zone.
+    // Just before midnight today in the manager's own time zone (whatever an earlier test set).
     const later = await db.query<{ at: string }>(
-      `SELECT (((NOW() AT TIME ZONE 'Asia/Kolkata')::date + TIME '23:58')::timestamp AT TIME ZONE 'Asia/Kolkata')::text AS at`,
+      `SELECT (((NOW() AT TIME ZONE timezone)::date + TIME '23:58')::timestamp AT TIME ZONE timezone)::text AS at
+       FROM users WHERE id = 'usr_mgr_1'`,
     );
     const mgr = await as('usr_mgr_1');
     const created = await mgr.post('/tasks', {
@@ -265,7 +273,10 @@ describe('Role dashboard (PRD 4.2, 14)', () => {
     expect(BigInt(String(summary['revenueWonMinor']))).toBeGreaterThanOrEqual(10_080_000n);
     expect(summary['winRate']).not.toBeNull();
 
-    const trial = (await widget('usr_ro_1', 'trial_to_win', q)).body['data'] as Json;
+    // Each viewer's period is in their own time zone, so the analyst gets their own range.
+    const roRange = (await (await as('usr_ro_1')).get('/dashboard')).body['defaultRange'] as Json;
+    const roQ = `?from=${String(roRange['from'])}&to=${String(roRange['to'])}`;
+    const trial = (await widget('usr_ro_1', 'trial_to_win', roQ)).body['data'] as Json;
     expect(Number(trial['leftTrial'])).toBeGreaterThanOrEqual(1);
     expect(Number(trial['won'])).toBeGreaterThanOrEqual(1);
 

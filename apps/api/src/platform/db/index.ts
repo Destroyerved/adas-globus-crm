@@ -40,6 +40,8 @@ export interface RecordHistoryInput {
   oldValue: unknown;
   newValue: unknown;
   changedByUserId?: string | null;
+  /** How the change happened (PRD 7.3); defaults to 'ui'. */
+  via?: 'ui' | 'api' | 'import' | 'merge' | 'system';
 }
 
 export function sha256Hex(value: string): string {
@@ -264,8 +266,8 @@ export class DatabaseService {
 
   async writeRecordHistory(tx: DbTx, change: RecordHistoryInput): Promise<void> {
     await tx.query(
-      `INSERT INTO record_history (id, entity_type, entity_id, field_name, old_value, new_value, changed_by_user_id)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
+      `INSERT INTO record_history (id, entity_type, entity_id, field_name, old_value, new_value, changed_by_user_id, via)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
       [
         `rh_${randomUUID()}`,
         change.entityType,
@@ -274,6 +276,7 @@ export class DatabaseService {
         JSON.stringify(change.oldValue ?? null),
         JSON.stringify(change.newValue ?? null),
         change.changedByUserId ?? null,
+        change.via ?? 'ui',
       ],
     );
   }

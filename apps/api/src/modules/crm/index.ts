@@ -1156,3 +1156,13 @@ export { CrmListService } from './lists.js';
 export { CrmRecordService } from './records.js';
 export { CrmTimelineService } from './timeline.js';
 export { CrmJobs } from './jobs.js';
+export {
+  ImportRecordWriter,
+  IMPORT_UPDATABLE,
+  type ImportCompanyInput,
+  type ImportContactInput,
+  type ImportContext,
+  type ImportedEntity,
+  type ProbableMatch,
+} from './import-records.js';
+export { referenceList, resolveAssignee } from './access.js';

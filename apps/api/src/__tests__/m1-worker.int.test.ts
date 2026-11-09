@@ -3,6 +3,7 @@ import { buildWorker, purgeExpired } from '../jobs.js';
 import { DatabaseService } from '../platform/db/index.js';
 import { createLogger } from '../platform/logger/index.js';
 import { OutboxDispatcher } from '../platform/outbox/index.js';
+import { MemoryFileStorage } from '../platform/files/index.js';
 import { CrmJobs } from '../modules/crm/index.js';
 
 /**
@@ -268,7 +269,7 @@ describe('housekeeping', () => {
 
 describe('the worker on pg-boss', () => {
   it('installs its queues and runs a job end to end', async () => {
-    const { runner } = buildWorker(db, logger, { install: true });
+    const { runner } = buildWorker(db, logger, { install: true, files: new MemoryFileStorage() });
     await runner.start();
     try {
       await addTask('tsk_w_boss', {
@@ -286,6 +287,7 @@ describe('the worker on pg-boss', () => {
       expect(queues.rows.map((q) => q.name)).toEqual([
         'deals.idle',
         'housekeeping.purge',
+        'import.process',
         'outbox.dispatch',
         'sla.check',
         'tasks.reminders',

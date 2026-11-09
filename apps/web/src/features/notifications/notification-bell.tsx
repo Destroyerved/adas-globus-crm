@@ -5,7 +5,7 @@ import { formatRelative } from '@adas/shared';
 import { api, type NotificationRow } from '@/lib/api.js';
 import { errorMessage } from '@/features/shared/live-kit.js';
 
-export type RecordScreen = 'lead' | 'contact' | 'company' | 'deal' | 'tasks';
+export type RecordScreen = 'lead' | 'contact' | 'company' | 'deal' | 'tasks' | 'imports';
 
 function targetOf(n: NotificationRow): { screen: RecordScreen; id: string | null } | null {
   switch (n.entity_type) {
@@ -16,6 +16,8 @@ function targetOf(n: NotificationRow): { screen: RecordScreen; id: string | null
       return n.entity_id ? { screen: n.entity_type, id: n.entity_id } : null;
     case 'task':
       return { screen: 'tasks', id: null };
+    case 'import_batch':
+      return { screen: 'imports', id: n.entity_id };
     default:
       return null;
   }

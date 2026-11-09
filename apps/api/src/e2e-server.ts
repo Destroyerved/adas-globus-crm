@@ -6,15 +6,39 @@
  *   pnpm --filter @adas/api start:e2e
  */
 import { createAppServer } from './main.js';
+import { ImportProcessor } from './modules/imports/index.js';
 import { validateEnv } from './platform/config/index.js';
 import { SecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
+import { MemoryFileStorage } from './platform/files/index.js';
 
 const env = validateEnv({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'warn' });
+const files = new MemoryFileStorage();
 const { server, db, logger, services } = createAppServer(env, DatabaseService.forTests(), {
   secretBox: SecretBox.ephemeral(),
+  files,
 });
 await db.ensureInitialized();
+
+// The import job, in-process on the same test database. The real worker runs the same
+// ImportProcessor through pg-boss (jobs.ts; tested in m1-worker and m2-imports).
+const imports = new ImportProcessor(
+  db,
+  files,
+  (userId) => services.auth.resolveSessionUser(userId),
+  logger,
+);
+let importBusy = false;
+setInterval(() => {
+  if (importBusy) return;
+  importBusy = true;
+  void imports
+    .processNext()
+    .catch((err: Error) => logger.error({ err: err.name }, 'e2e import job failed'))
+    .finally(() => {
+      importBusy = false;
+    });
+}, 500).unref();
 
 // A synthetic emergency admin for the admin sign-in test. playwright.config.ts generates its
 // password and authenticator secret afresh on every run; nothing is stored in the repository.

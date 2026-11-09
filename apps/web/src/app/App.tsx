@@ -14,6 +14,7 @@ import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen
 import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
 import { SettingsScreen } from '@/features/settings/settings-screen.js';
+import { ImportsScreen } from '@/features/imports/imports-screen.js';
 import { ToastProvider } from '@/components/ui/toast.js';
 import { ErrorState } from '@/components/ui/state-views.js';
 import { ApiError, api } from '@/lib/api.js';
@@ -37,8 +38,8 @@ const queryClient: QueryClient = new QueryClient({
   },
 });
 
-// Only screens that work on live data. Inbox, Outreach, Imports and Reports come back when
-// their real connectors and data exist (docs/PROGRESS.md, "Make it real").
+// Only screens that work on live data. Inbox, Outreach and Reports come back when their real
+// connectors and data exist (docs/PROGRESS.md, "Make it real").
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'dashboard',
   'settings',
@@ -51,6 +52,7 @@ const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'deals',
   'deal',
   'tasks',
+  'imports',
 ]);
 
 /** Which sidebar item is highlighted for a record page. */
@@ -190,6 +192,13 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
           />
         )}
         {activeScreen === 'settings' && <SettingsScreen />}
+        {activeScreen === 'imports' && (
+          <ImportsScreen
+            importId={recordId}
+            onOpen={(id) => navigateScreen('imports', id)}
+            onBack={() => navigateScreen('imports')}
+          />
+        )}
         {activeScreen === 'leads' && <LeadsScreen onOpenLead={openLead} />}
         {activeScreen === 'lead' && (
           <LeadProfileScreen

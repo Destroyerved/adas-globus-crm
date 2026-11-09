@@ -424,3 +424,74 @@ test('an admin adds a pipeline stage and removes it again', async ({ page }) => 
   await page.reload();
   await expect(page.getByRole('row', { name: /Reference check/ })).toHaveCount(0);
 });
+
+test('a CSV of contacts is mapped, checked, imported, survives a reload and is undone', async ({
+  page,
+}) => {
+  // Three steps, each checked with axe at two widths.
+  test.setTimeout(180_000);
+  const file = [
+    'Email,First name,Last name,Company,Website',
+    'e2e.one@lakeside-cpa.example.com,Lena,Hart,Lakeside CPA,lakeside-cpa.example.com',
+    'e2e.two@lakeside-cpa.example.com,Owen,Park,Lakeside CPA,lakeside-cpa.example.com',
+    'not-an-email,Bad,Row,,',
+  ].join('\n');
+
+  const checkStep = async (name: string) => {
+    for (const width of [1440, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectNoHorizontalOverflow(page);
+      await expectNoAxeViolations(page);
+      await page.screenshot({
+        path: resolve(SCREENS_DIR, `${name}-${width}w.png`),
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=imports');
+  await expect(page.getByRole('heading', { name: /Imports/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Import a file' }).first().click();
+  await page.getByTestId('import-file-input').setInputFiles({
+    name: 'e2e-contacts.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(file),
+  });
+
+  // Mapping: the columns are matched from their names.
+  await expect(page.getByRole('heading', { name: 'Match columns to CRM fields' })).toBeVisible();
+  await expect(page.getByLabel('CRM field for Email')).toHaveValue('email');
+  await expect(page.getByLabel('CRM field for Website')).toHaveValue('companyWebsite');
+  await checkStep('14-import-mapping');
+
+  // Dry run: nothing saved, the preview counts every row.
+  await page.getByRole('button', { name: 'Check the file' }).click();
+  await expect(page.getByRole('heading', { name: 'What will happen' })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText('Email is not a valid address.')).toBeVisible();
+  await checkStep('15-import-check');
+
+  // Real run in the background, then the result survives a reload.
+  await page.getByRole('button', { name: 'Import 2 records' }).click();
+  await expect(page.getByRole('heading', { name: 'Import finished' })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Import finished' })).toBeVisible();
+  await checkStep('16-import-result');
+
+  const contacts = await page.request.get('/api/v1/contacts?q=Lakeside');
+  expect(contacts.ok()).toBe(true);
+  expect(JSON.stringify(await contacts.json())).toContain('e2e.one@lakeside-cpa.example.com');
+
+  // Undo: confirmed in a dialog, then the records are gone.
+  await page.getByRole('button', { name: 'Undo import' }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Undo import' }).click();
+  await expect(page.getByRole('heading', { name: 'Import undone' })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText('Records removed')).toBeVisible();
+});

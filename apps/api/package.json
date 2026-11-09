@@ -20,6 +20,8 @@
     "@adas/shared": "workspace:*",
     "@electric-sql/pglite": "^0.5.14",
     "@node-rs/argon2": "^2.2.2",
+    "csv-parse": "^6.2.1",
+    "exceljs": "^4.4.0",
     "openid-client": "^6.8.9",
     "pg": "^8.23.1",
     "pg-boss": "^10.4.2",

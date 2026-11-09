@@ -1,14 +1,15 @@
 /**
  * The background worker (PRD 6.9): pg-boss queues for outbox dispatch, task reminders and
- * overdue alerts, inquiry SLA warnings and breaches, idle deals and housekeeping. Run it next
+ * overdue alerts, inquiry SLA warnings and breaches, idle deals, imports and housekeeping. Run it next
  * to the API; any number of workers can run because every queue is "stately" and every
  * sweep locks the rows it works on.
  *
  *   pnpm --filter @adas/api dev:worker
  */
 import { buildWorker } from './jobs.js';
-import { loadDotEnv, validateEnv } from './platform/config/index.js';
+import { loadDotEnv, resolveConfigPath, validateEnv } from './platform/config/index.js';
 import { DatabaseService } from './platform/db/index.js';
+import { LocalFileStorage } from './platform/files/index.js';
 import { createLogger } from './platform/logger/index.js';
 
 loadDotEnv();
@@ -22,7 +23,9 @@ if (env.NODE_ENV === 'production') {
 }
 
 const db = DatabaseService.connect(env.DATABASE_URL);
-const { runner } = buildWorker(db, logger);
+const { runner } = buildWorker(db, logger, {
+  files: new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH)),
+});
 try {
   await db.ensureInitialized();
   await runner.start();

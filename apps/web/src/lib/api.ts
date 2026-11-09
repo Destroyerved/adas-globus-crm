@@ -1,4 +1,10 @@
-import { type Currency, type Market } from '@adas/shared';
+import {
+  type Currency,
+  type ImportBatchView,
+  type ImportEntity,
+  type ImportRowView,
+  type Market,
+} from '@adas/shared';
 
 /**
  * Typed client for the ADAS CRM API. Every failure throws an ApiError so screens can show
@@ -31,7 +37,9 @@ export interface CurrentUser {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
-  if (init.body !== undefined) headers.set('Content-Type', 'application/json');
+  if (init.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   let response: Response;
   try {
@@ -390,6 +398,26 @@ export interface SearchResults {
 // ---------------------------------------------------------------------------
 
 type Items<T> = { items: T[] };
+
+export interface ImportTemplate {
+  id: string;
+  name: string;
+  entity: ImportEntity;
+  mapping: Record<string, string>;
+}
+
+export interface ImportMappingRequest {
+  entity: ImportEntity;
+  mapping: Record<string, string>;
+  version: number;
+  options: {
+    duplicatePolicy: 'skip' | 'fill_blanks' | 'overwrite';
+    source: string;
+    ownerUserId: string;
+    market: Market;
+    tags: string[];
+  };
+}
 type Patch = Record<string, unknown> & { version: number };
 
 const plural = (entityType: EntityType) =>
@@ -688,6 +716,46 @@ export const api = {
     if (period.market) search.set('market', period.market);
     return request<WidgetResult<T>>(`/dashboard/widgets/${id}?${search.toString()}`);
   },
+
+  // Imports (PRD 4.9). The file goes as the raw body; its name in a header, not the URL.
+  listImports: () => request<Items<ImportBatchView>>('/imports').then((r) => r.items),
+  getImport: (importId: string) => request<ImportBatchView>(`/imports/${enc(importId)}`),
+  uploadImport: (file: File) =>
+    request<{ batch: ImportBatchView; suggested: Record<ImportEntity, Record<string, string>> }>(
+      '/imports',
+      {
+        method: 'POST',
+        body: file,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'X-Upload-Filename': encodeURIComponent(file.name),
+        },
+      },
+    ),
+  setImportMapping: (importId: string, input: ImportMappingRequest) =>
+    put<ImportBatchView>(`/imports/${enc(importId)}/mapping`, input),
+  checkImport: (importId: string, version: number) =>
+    post<ImportBatchView>(`/imports/${enc(importId)}/dry-run`, { version }),
+  runImport: (importId: string, version: number) =>
+    post<ImportBatchView>(`/imports/${enc(importId)}/run`, { version }),
+  undoImport: (importId: string, version: number) =>
+    post<ImportBatchView>(`/imports/${enc(importId)}/rollback`, { version }),
+  importRows: (importId: string, params: { status?: string; undo?: 'kept'; cursor?: string }) => {
+    const search = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);
+    return request<{ items: ImportRowView[]; nextCursor: string | null }>(
+      `/imports/${enc(importId)}/rows?${search.toString()}`,
+    );
+  },
+  /** A download link (the browser sends the session cookie); the API audits each download. */
+  importErrorsUrl: (importId: string) => `/api/v1/imports/${enc(importId)}/errors.csv`,
+  importTemplates: (entity: ImportEntity) =>
+    request<Items<ImportTemplate>>(`/imports/templates?entity=${entity}`).then((r) => r.items),
+  saveImportTemplate: (input: {
+    name: string;
+    entity: ImportEntity;
+    mapping: Record<string, string>;
+  }) => post<ImportTemplate>('/imports/templates', input),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

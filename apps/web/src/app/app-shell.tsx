@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Settings,
+  Upload,
   UserPlus,
   Users,
   X,
@@ -18,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { StatusBadge } from '@/components/ui/badge.js';
 import { type AppScreenId } from '@/features/command-palette/command-palette.js';
+import { can, useMe } from '@/features/shared/list-kit.js';
 import { NotificationBell, type RecordScreen } from '@/features/notifications/notification-bell.js';
 /** The signed-in user, as the shell shows it. */
 export interface ShellUser {
@@ -42,10 +44,12 @@ interface NavItem {
   label: string;
   icon: typeof UserPlus;
   count?: string;
+  /** Shown only to people whose role has this capability (the API checks it too). */
+  capability?: string;
 }
 
-// Only modules that work end to end appear here (AGENTS.md section 3). Inbox, Outreach,
-// Imports and Reports return when their real connectors and data exist.
+// Only modules that work end to end appear here (AGENTS.md section 3). Inbox, Outreach and
+// Reports return when their real connectors and data exist.
 const WORK_ITEMS: NavItem[] = [
   {
     id: 'dashboard',
@@ -56,6 +60,12 @@ const WORK_ITEMS: NavItem[] = [
     id: 'tasks',
     label: 'Tasks',
     icon: CheckSquare,
+  },
+  {
+    id: 'imports',
+    label: 'Imports',
+    icon: Upload,
+    capability: 'imports.run',
   },
 ];
 
@@ -102,6 +112,8 @@ export function AppShell({
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const gChordRef = useRef<boolean>(false);
+  const me = useMe();
+  const workItems = WORK_ITEMS.filter((item) => !item.capability || can(me, item.capability));
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -275,7 +287,7 @@ export function AppShell({
             </div>
           )}
           <ul className="m-0 p-0 list-none space-y-[2px]">
-            {WORK_ITEMS.map((item) => {
+            {workItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeScreen === item.id;
               return (

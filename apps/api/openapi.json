@@ -633,13 +633,140 @@
         }
       }
     },
-    "/imports/csv": {
-      "post": {
-        "operationId": "runCsvImport",
-        "summary": "Run CSV dry-run preview or background import (PRD §4.9)",
+    "/imports": {
+      "get": {
+        "operationId": "listImports",
+        "summary": "Imports within your scope, newest first (PRD 4.9)",
         "responses": {
           "200": {
-            "description": "Import summary"
+            "description": "Imports"
+          }
+        }
+      },
+      "post": {
+        "operationId": "uploadImport",
+        "summary": "Upload a CSV or XLSX file (raw body, up to 50 MB and 100,000 rows; file name in the X-Upload-Filename header). Returns the columns, a preview and suggested mappings",
+        "responses": {
+          "201": {
+            "description": "Uploaded"
+          },
+          "413": {
+            "description": "File larger than 50 MB"
+          },
+          "415": {
+            "description": "Not a CSV or XLSX file (checked by content)"
+          },
+          "422": {
+            "description": "Empty file or more than 100,000 rows"
+          }
+        }
+      }
+    },
+    "/imports/templates": {
+      "get": {
+        "operationId": "listImportTemplates",
+        "summary": "Your saved column mappings",
+        "responses": {
+          "200": {
+            "description": "Templates"
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveImportTemplate",
+        "summary": "Save a column mapping under a name (same name replaces it)",
+        "responses": {
+          "201": {
+            "description": "Saved"
+          }
+        }
+      }
+    },
+    "/imports/{id}": {
+      "get": {
+        "operationId": "getImport",
+        "summary": "One import: status, progress and counts",
+        "responses": {
+          "200": {
+            "description": "Import"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/imports/{id}/mapping": {
+      "put": {
+        "operationId": "setImportMapping",
+        "summary": "Choose the record type, column mapping, duplicate rule, source, owner and tags",
+        "responses": {
+          "200": {
+            "description": "Mapped"
+          },
+          "409": {
+            "description": "Already run"
+          }
+        }
+      }
+    },
+    "/imports/{id}/dry-run": {
+      "post": {
+        "operationId": "requestImportDryRun",
+        "summary": "Check every row without saving; the worker fills in the preview counts",
+        "responses": {
+          "200": {
+            "description": "Checking"
+          }
+        }
+      }
+    },
+    "/imports/{id}/run": {
+      "post": {
+        "operationId": "requestImportRun",
+        "summary": "Run the import in the background after a dry run (audited)",
+        "responses": {
+          "200": {
+            "description": "Queued"
+          },
+          "409": {
+            "description": "Not checked"
+          }
+        }
+      }
+    },
+    "/imports/{id}/rollback": {
+      "post": {
+        "operationId": "requestImportUndo",
+        "summary": "Undo a finished import within 7 days: created records removed, updates reverted, records edited since kept and listed",
+        "responses": {
+          "200": {
+            "description": "Undoing"
+          },
+          "409": {
+            "description": "Not undoable"
+          }
+        }
+      }
+    },
+    "/imports/{id}/rows": {
+      "get": {
+        "operationId": "listImportRows",
+        "summary": "Row results of the latest pass; filter by status or undo=kept",
+        "responses": {
+          "200": {
+            "description": "Rows"
+          }
+        }
+      }
+    },
+    "/imports/{id}/errors.csv": {
+      "get": {
+        "operationId": "downloadImportErrors",
+        "summary": "The rows that failed, with an Error column (audited)",
+        "responses": {
+          "200": {
+            "description": "CSV file"
           }
         }
       }
