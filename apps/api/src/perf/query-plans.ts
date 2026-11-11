@@ -163,15 +163,43 @@ const SCOPES: [keyof People, string][] = [
   ['rep', 'own scope'],
 ];
 
-function listScenarios(): Scenario[] {
+/**
+ * Search text taken from the data itself, so the scenarios search for people and firms that
+ * exist. Without the large seed they fall back to names from the small one.
+ */
+interface SearchTerms {
+  contactName: string;
+  firstName: string;
+  leadName: string;
+  firmWord: string;
+}
+
+async function searchTerms(db: DatabaseService): Promise<SearchTerms> {
+  const one = async (sql: string, fallback: string): Promise<string> =>
+    (await db.query<{ v: string | null }>(sql)).rows[0]?.v ?? fallback;
+  return {
+    contactName: await one(
+      `SELECT full_name AS v FROM contacts WHERE id = 'cnt_l_3'`,
+      'Jane Patel',
+    ),
+    firstName: await one(`SELECT first_name AS v FROM contacts WHERE id = 'cnt_l_3'`, 'Jane'),
+    leadName: await one(`SELECT full_name AS v FROM leads WHERE id = 'lead_l_2'`, 'Elena Rostova'),
+    firmWord: await one(
+      `SELECT split_part(name, ' ', 1) AS v FROM deals WHERE id = 'deal_l_1'`,
+      'Tax',
+    ),
+  };
+}
+
+function listScenarios(terms: SearchTerms): Scenario[] {
   const out: Scenario[] = [];
   const entities = [
-    { entity: 'leads', q: 'avery okafor' },
-    { entity: 'contacts', q: 'avery hartwell' },
-    { entity: 'companies', q: 'acme' },
-    { entity: 'deals', q: 'barlow' },
+    { entity: 'leads', q: terms.leadName, what: 'a full name' },
+    { entity: 'contacts', q: terms.contactName, what: 'a full name' },
+    { entity: 'companies', q: 'acme', what: '"acme"' },
+    { entity: 'deals', q: terms.firmWord, what: 'a firm name' },
   ] as const;
-  for (const { entity, q } of entities) {
+  for (const { entity, q, what } of entities) {
     for (const [who, label] of SCOPES) {
       out.push({
         group: 'Lists',
@@ -198,13 +226,13 @@ function listScenarios(): Scenario[] {
       },
       {
         group: 'Lists',
-        name: `${entity}: search "${q}" (all scope)`,
+        name: `${entity}: search for ${what} (all scope)`,
         budgetMs: BUDGET.list,
         run: (s, p) => s.lists.list(entity, p.admin, page('-updatedAt', { q })),
       },
       {
         group: 'Lists',
-        name: `${entity}: search "${q}" (team scope)`,
+        name: `${entity}: search for ${what} (team scope)`,
         budgetMs: BUDGET.list,
         run: (s, p) => s.lists.list(entity, p.manager, page('-updatedAt', { q })),
       },
@@ -235,10 +263,17 @@ function listScenarios(): Scenario[] {
   out.push(
     {
       group: 'Lists',
-      name: 'contacts: search "hartwell", a broad search: about 1 in 20 matches (all scope)',
+      name: 'contacts: search for a first name, a broad search: about 1 in 40 matches (all scope)',
       budgetMs: BUDGET.list,
       broad: true,
-      run: (s, p) => s.lists.list('contacts', p.admin, page('-updatedAt', { q: 'hartwell' })),
+      run: (s, p) => s.lists.list('contacts', p.admin, page('-updatedAt', { q: terms.firstName })),
+    },
+    {
+      group: 'Lists',
+      name: 'companies: search "cpa", a broad search: about half the firms match (all scope)',
+      budgetMs: BUDGET.list,
+      broad: true,
+      run: (s, p) => s.lists.list('companies', p.admin, page('-updatedAt', { q: 'cpa' })),
     },
     {
       group: 'Lists',
@@ -322,6 +357,13 @@ function listScenarios(): Scenario[] {
   }
   out.push({
     group: 'Lists',
+    name: 'tasks: search for a contact’s name, open tasks (all scope)',
+    budgetMs: BUDGET.list,
+    run: (s, p) =>
+      s.lists.list('tasks', p.admin, page('dueAt', { q: terms.contactName }), { taskView: 'open' }),
+  });
+  out.push({
+    group: 'Lists',
     name: 'export: first 1,000 contacts with the count (all scope)',
     budgetMs: BUDGET.list,
     run: (s, p) =>
@@ -336,7 +378,7 @@ function listScenarios(): Scenario[] {
   return out;
 }
 
-function otherScenarios(): Scenario[] {
+function otherScenarios(terms: SearchTerms): Scenario[] {
   const out: Scenario[] = [];
   for (const [who, label] of SCOPES) {
     out.push(
@@ -348,18 +390,18 @@ function otherScenarios(): Scenario[] {
       },
       {
         group: 'Search',
-        name: `global search "avery hartwell" (${label})`,
+        name: `global search for a full name (${label})`,
         budgetMs: BUDGET.search,
-        run: (s, p) => s.search.globalSearch(p[who], 'avery hartwell'),
+        run: (s, p) => s.search.globalSearch(p[who], terms.contactName),
       },
     );
   }
   out.push({
     group: 'Search',
-    name: 'global search "hartwell", a broad search: about 1 contact in 20 matches (all scope)',
+    name: 'global search for a first name, a broad search: about 1 contact in 40 matches (all scope)',
     budgetMs: BUDGET.search,
     broad: true,
-    run: (s, p) => s.search.globalSearch(p.admin, 'hartwell'),
+    run: (s, p) => s.search.globalSearch(p.admin, terms.firstName),
   });
   out.push(
     {
@@ -418,7 +460,7 @@ function otherScenarios(): Scenario[] {
       group: 'Deals board',
       name: 'board with a search (all scope)',
       budgetMs: BUDGET.board,
-      run: (s, p) => s.lists.board(p.admin, 'pipeline_new_business', { q: 'barlow' }),
+      run: (s, p) => s.lists.board(p.admin, 'pipeline_new_business', { q: terms.firmWord }),
     },
     {
       group: 'Duplicates',
@@ -474,6 +516,10 @@ export async function collectQueryPlans(
      * its times show which queries stand out, but can't be held against the budgets.
      */
     judgeTime?: boolean;
+    /** Unmeasured runs of each scenario first (default 1). */
+    warmups?: number;
+    /** Measured runs of each scenario; the middle one is reported (default 3). */
+    runs?: number;
   } = {},
 ): Promise<ScenarioResult[]> {
   const userIds = options.userIds ?? {
@@ -493,14 +539,15 @@ export async function collectQueryPlans(
     manager: await auth.resolveSessionUser(userIds.manager),
     rep: await auth.resolveSessionUser(userIds.rep),
   };
+  const terms = await searchTerms(db);
   const scenarios = [
-    ...listScenarios(),
-    ...otherScenarios(),
+    ...listScenarios(terms),
+    ...otherScenarios(terms),
     ...(await dashboardScenarios(new DashboardService(db), people)),
   ];
 
   const results: ScenarioResult[] = [];
-  for (const scenario of scenarios) {
+  const runOnce = async (scenario: Scenario): Promise<{ queries: QueryPlan[]; ms: number }> => {
     const queries: QueryPlan[] = [];
     const recorded = recordingDb(db, queries);
     const services: Services = {
@@ -512,7 +559,21 @@ export async function collectQueryPlans(
       duplicates: new DuplicateService(recorded),
     };
     await scenario.run(services, people);
-    const ms = queries.reduce((sum, q) => sum + q.ms, 0);
+    return { queries, ms: queries.reduce((sum, q) => sum + q.ms, 0) };
+  };
+  // A first use of a table on a new database connection loads its catalogue and can take
+  // 100 ms by itself. A running API's connections are warm, so each scenario is warmed up
+  // and then measured several times; the middle run is kept.
+  const warmups = options.warmups ?? 1;
+  const runs = Math.max(1, options.runs ?? 3);
+
+  for (const scenario of scenarios) {
+    for (let i = 0; i < warmups; i += 1) await runOnce(scenario);
+    const measured: { queries: QueryPlan[]; ms: number }[] = [];
+    for (let i = 0; i < runs; i += 1) measured.push(await runOnce(scenario));
+    measured.sort((a, b) => a.ms - b.ms);
+    const middle = measured[Math.floor(measured.length / 2)] ?? { queries: [], ms: 0 };
+    const { queries, ms } = middle;
     const flags: string[] = [];
     for (const q of queries.filter((x) => x.paged && !scenario.broad)) {
       for (const scan of q.scans) {
@@ -554,7 +615,7 @@ export function renderQueryPlanReport(
     `- **Rows:** ${Object.entries(context.rows)
       .map(([table, n]) => `${formatNumber(n)} ${table}`)
       .join(', ')}`,
-    '- **What the times are:** database time for one run of each screen’s queries (planning plus execution, from `EXPLAIN (ANALYZE)`). The budgets are PRD 12.2’s p95 for the whole API call on the production server, so they are a yardstick here, not a pass mark.',
+    '- **What the times are:** database time for each screen’s queries (planning plus execution, from `EXPLAIN (ANALYZE)`). Each scenario runs once to warm up and then three times, and the middle run is shown. The budgets are PRD 12.2’s p95 for the whole API call on the production server, so they are a yardstick here, not a pass mark.',
     `- **Flagged:** a query that returns one page but reads ${formatNumber(SCAN_ROWS)} rows or more of a table from end to end${context.judgeTime === false ? '' : ', or database time over half the budget'}. Row counts, totals and broad searches are judged on time only, because they have to read every row the person can see.`,
     ...(context.judgeTime === false
       ? [

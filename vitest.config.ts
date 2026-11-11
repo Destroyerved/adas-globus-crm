@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // With TEST_DATABASE_URL every integration file rebuilds the same real database, so test
+    // files must run one after another. PGlite gives each file its own, so they run together.
+    // (The setting only takes effect here, not inside a project.)
+    fileParallelism: !process.env['TEST_DATABASE_URL'],
     projects: [
       {
         test: {

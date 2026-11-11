@@ -113,6 +113,42 @@ describe('contact list search (PRD 6.8)', () => {
   });
 });
 
+describe('deal and task list search (PRD 6.8)', () => {
+  const page = (q: string) => ({ limit: 50, cursor: null, sort: '-updatedAt', q, filter: null });
+
+  it('finds deals by their own name or their company’s name, within scope', async () => {
+    const byName = await lists.list('deals', admin, page('Tax Season Prep'));
+    expect(names(byName.items, 'name')).toEqual(['2027 Tax Season Prep Pod (3 FTE)']);
+    // "Advisory LLP" is only in the company's name.
+    const byCompany = await lists.list('deals', admin, page('Advisory LLP'));
+    expect(names(byCompany.items, 'company_name')).toEqual(['Acme Tax & Advisory LLP']);
+    expect(byCompany.total).toBe(1);
+    // The Canadian deal is outside the U.S. manager's team.
+    expect((await lists.list('deals', admin, page('Northstar'))).total).toBe(1);
+    expect((await lists.list('deals', managerUs, page('Northstar'))).total).toBe(0);
+  });
+
+  it('finds tasks by title, or by the name of their company, contact or lead', async () => {
+    const find = async (q: string) =>
+      names(
+        (
+          await lists.list(
+            'tasks',
+            admin,
+            { limit: 50, cursor: null, sort: 'dueAt', q, filter: null },
+            { taskView: 'all' },
+          )
+        ).items,
+        'id',
+      );
+    expect(await find('Free Trial check-in')).toEqual(['tsk_trial_d1']);
+    // "Chartered" is only in the company's name; "Vance" is in the title, contact and lead.
+    expect(await find('Chartered')).toEqual(['tsk_ca_call']);
+    expect(await find('Marcus Vance')).toEqual(['tsk_ca_call']);
+    expect(await find('nothing-like-this')).toEqual([]);
+  });
+});
+
 describe('search just after a large import', () => {
   it('stays quick while the table statistics are still out of date', async () => {
     // 4,000 contacts arrive in one go and nothing has refreshed the statistics yet. An

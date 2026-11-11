@@ -60,6 +60,8 @@ beforeAll(
     results = await collectQueryPlans(db, {
       plannerSettings: PRODUCTION_PLANNER,
       judgeTime: REAL_SERVER,
+      // The everyday small run only checks that the tool works: one run, no warm-up.
+      ...(LARGE ? {} : { warmups: 0, runs: 1 }),
     });
   },
   LARGE ? 3_600_000 : 180_000,

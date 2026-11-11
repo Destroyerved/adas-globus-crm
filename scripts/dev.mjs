@@ -2,6 +2,10 @@ import { spawn, spawnSync } from 'node:child_process';
 
 console.log('[adas-crm] Starting local development stack...');
 
+// A separate development PostgreSQL made by `pnpm db:local init` (README): start it if this
+// machine has one. It does nothing otherwise.
+spawnSync('node', ['scripts/local-db.mjs', 'start', '--if-present'], { stdio: 'inherit' });
+
 const dockerCheck = spawnSync('docker', ['compose', '-f', 'infra/compose.dev.yml', 'up', '-d'], {
   stdio: 'inherit',
   shell: true,

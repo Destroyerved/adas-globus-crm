@@ -5,7 +5,7 @@ import { type SeedTarget } from './seed.js';
  * `pnpm db:seed --size=large` loads 20,000 companies, 60,000 contacts and 300,000 activities,
  * plus leads, deals, tasks and tags in proportion, on top of the small baseline.
  *
- * - Everything is invented. Names are combined from the lists below, domains end in
+ * - Everything is invented. Names are built from the name parts below, domains end in
  *   example.com or example.ca, and phone numbers use the reserved 555-01xx range.
  * - Rows are generated inside PostgreSQL with generate_series, in chunks, so nothing large
  *   crosses the wire. Every value is a pure function of the row number: the same command
@@ -79,69 +79,68 @@ const FIRST = [
   'Oscar',
 ] as const;
 
-const LAST = [
-  'Abbott',
-  'Barlow',
-  'Castell',
-  'Dunmore',
-  'Everly',
-  'Fenwick',
-  'Garrison',
-  'Hartwell',
-  'Iverson',
-  'Jarvis',
-  'Kessler',
-  'Lachance',
-  'Mercer',
-  'Novak',
-  'Okafor',
-  'Pemberton',
-  'Quimby',
-  'Ramsey',
-  'Sandoval',
-  'Thackeray',
-  'Underhill',
-  'Vasquez',
-  'Whitlock',
-  'Yoder',
-  'Zeller',
-  'Ashby',
-  'Bellamy',
-  'Corbin',
-  'Delacroix',
-  'Ellison',
-  'Fairbanks',
-  'Galloway',
-  'Holloway',
-  'Ingram',
-  'Jessop',
-  'Kirkland',
-  'Langford',
-  'Mahoney',
-  'Nakamura',
-  'Oduya',
-  'Prescott',
-  'Quarles',
-  'Redmond',
-  'Stanhope',
-  'Tolliver',
-  'Upton',
-  'Varga',
-  'Wexford',
-  'Yardley',
-  'Zamora',
-  'Atwood',
-  'Bristow',
-  'Calloway',
-  'Draper',
-  'Eastman',
-  'Frost',
-  'Greer',
-  'Hale',
-  'Irving',
-  'Joyner',
-  'Keane',
+/**
+ * Surnames are built from three parts (20 x 20 x 10), giving 4,000 invented names such as
+ * "Haranwell" or "Belolford". A CRM's real surnames are that varied; a short list would make
+ * every name search match thousands of rows and say nothing about search speed.
+ */
+const SURNAME_START = [
+  'Har',
+  'Bel',
+  'Cor',
+  'Dun',
+  'Ever',
+  'Fen',
+  'Gar',
+  'Hol',
+  'Iver',
+  'Jar',
+  'Kes',
+  'Lan',
+  'Mer',
+  'Nor',
+  'Oak',
+  'Pem',
+  'Quin',
+  'Ram',
+  'San',
+  'Thack',
 ] as const;
+const SURNAME_MIDDLE = [
+  'a',
+  'e',
+  'i',
+  'o',
+  'u',
+  'ar',
+  'er',
+  'or',
+  'an',
+  'en',
+  'in',
+  'on',
+  'al',
+  'el',
+  'il',
+  'ol',
+  'as',
+  'es',
+  'is',
+  'os',
+] as const;
+const SURNAME_END = [
+  'well',
+  'wick',
+  'ford',
+  'ton',
+  'ley',
+  'man',
+  'son',
+  'field',
+  'wood',
+  'worth',
+] as const;
+const SURNAMES = SURNAME_START.length * SURNAME_MIDDLE.length * SURNAME_END.length;
 
 const FIRM_SUFFIX = [
   'CPA Group',
@@ -354,12 +353,20 @@ function companyTraits(c: string) {
   };
 }
 
-/** Two different last names for company `c`, so firm names rarely repeat. */
-const firmNames = (c: string) => {
-  const first = `(${c}) % ${LAST.length}`;
-  const second = `((${c}) % ${LAST.length} + 1 + ((${c}) / ${LAST.length}) % ${LAST.length - 1}) % ${LAST.length}`;
-  return { a: pick(LAST, first), b: pick(LAST, second) };
+/**
+ * The surname for an integer SQL expression. Multiplying by a prime that shares no factor
+ * with the number of surnames spreads neighbouring rows across all of them evenly.
+ */
+const surname = (expr: string): string => {
+  const k = `((((${expr})::bigint * 7919) % ${SURNAMES})::int)`;
+  return `(${pick(SURNAME_START, k)} || ${pick(SURNAME_MIDDLE, `${k} / ${SURNAME_START.length}`)} || ${pick(SURNAME_END, `${k} / ${SURNAME_START.length * SURNAME_MIDDLE.length}`)})`;
 };
+
+/** Two surnames for company `c`, never the same one twice, so firm names don't repeat. */
+const firmNames = (c: string) => ({
+  a: surname(c),
+  b: surname(`(${c}) * 3 + 1711`),
+});
 
 const companyDomain = (c: string): string => {
   const names = firmNames(c);
@@ -383,7 +390,7 @@ function companiesSql(from: number, to: number): string {
     SELECT
       'cmp_l_' || n,
       CASE WHEN n % 400 = 0 THEN 'Acme ' ELSE '' END
-        || ${names.a} || ' ' || ${names.b} || ' ' || ${pick(FIRM_SUFFIX, `n / ${LAST.length * (LAST.length - 1)}`)},
+        || ${names.a} || ' ' || ${names.b} || ' ' || ${pick(FIRM_SUFFIX, `n / ${SURNAMES}`)},
       ${companyDomain('n')},
       'https://' || ${companyDomain('n')},
       ${pick(FIRM_TYPE, 'n / 3')},
@@ -408,7 +415,7 @@ function contactsSql(from: number, to: number, size: LargeSeedSize): string {
   const c = `((n - 1) % ${size.companies}) + 1`;
   const t = companyTraits(c);
   const first = pick(FIRST, 'n * 7');
-  const last = pick(LAST, 'n * 11 + n / 41');
+  const last = surname(`n * 3 + n / ${SURNAMES}`);
   const email = `LOWER(${first} || '.' || ${last}) || '.' || n || '@' || ${companyDomain(c)}`;
   return `
     INSERT INTO contacts (
@@ -452,7 +459,7 @@ function leadsSql(from: number, to: number, size: LargeSeedSize): string {
   const t = companyTraits(c);
   const names = firmNames(c);
   const first = pick(FIRST, 'n * 13');
-  const last = pick(LAST, 'n * 17 + n / 41');
+  const last = surname(`n * 7 + n / ${SURNAMES} + 11`);
   const status = pick(LEAD_STATUS, 'n / 3');
   return `
     INSERT INTO leads (
@@ -464,7 +471,7 @@ function leadsSql(from: number, to: number, size: LargeSeedSize): string {
     SELECT
       'lead_l_' || n, ${first}, ${last}, ${first} || ' ' || ${last},
       LOWER(${first} || '.' || ${last}) || '.lead' || n || '@' || ${companyDomain(c)},
-      ${names.a} || ' ' || ${names.b} || ' ' || ${pick(FIRM_SUFFIX, `(${c}) / ${LAST.length * (LAST.length - 1)}`)},
+      ${names.a} || ' ' || ${names.b} || ' ' || ${pick(FIRM_SUFFIX, `(${c}) / ${SURNAMES}`)},
       ${companyDomain(c)}, 'https://' || ${companyDomain(c)},
       ${pick(TITLE, 'n / 5')}, ${t.market}, ${t.state}, ${pick(STAFF_BAND, 'n / 7')},
       ${pick(LEAD_SOURCE, 'n / 2')}, ${status},
@@ -637,8 +644,10 @@ export async function seedLarge(
   }
   await db.exec(tagsSql(size));
   onProgress('tags added');
-  // Fresh statistics, so the planner chooses as it would after a normal day of use.
-  await db.exec('ANALYZE;');
+  // Leave the database as a normal day of use would: fresh statistics, and the search
+  // indexes' pending lists merged in. Straight after a bulk load those lists are long, and
+  // PostgreSQL avoids the trigram indexes until its background vacuum has merged them.
+  await db.exec('VACUUM (ANALYZE);');
 
   const counts: Record<string, number> = {};
   for (const table of ['companies', 'contacts', 'leads', 'deals', 'tasks', 'activities']) {

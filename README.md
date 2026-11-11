@@ -44,6 +44,8 @@ You need Node.js 22 or newer, pnpm, and PostgreSQL 17 (a local install or Docker
 
    It creates the `adas_admin` and `adas_app` roles and the `adas_crm` and `adas_crm_test` databases, with the development passwords from `.env.example`. With Docker instead: `docker compose -f infra/compose.dev.yml up -d`.
 
+   **No `postgres` password and no Docker?** Run `pnpm db:local init` instead. It uses the PostgreSQL programs already installed to create a separate development server on port 5433, with its own data folder under your user profile, and needs no administrator rights. Then copy `.env.example` to `.env` and change the port in `DATABASE_URL` and `DATABASE_ADMIN_URL` from 5432 to 5433. It is not a Windows service: `pnpm dev` starts it, and `pnpm db:local start` starts it by hand after a restart.
+
 2. **Install, migrate and load demo data:**
 
    ```bash
@@ -74,6 +76,7 @@ The demo data is synthetic (example.com addresses only). Never load real custome
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm dev`                  | API on :3000 (PostgreSQL via `DATABASE_URL`) and web app on :5174                                                                                                       |
 | `pnpm db:migrate`           | Apply new migrations in `apps/api/prisma/migrations` as `adas_admin`                                                                                                    |
+| `pnpm db:local init`        | Create and start a separate development PostgreSQL on port 5433 (also `start`, `stop`, `status`, and `reset` to empty both databases)                                   |
 | `pnpm db:seed`              | Load synthetic demo data (refuses to run in production)                                                                                                                 |
 | `pnpm db:seed --size=large` | Also load 20,000 companies, 60,000 contacts and 300,000 timeline entries for performance work; safe to run again                                                        |
 | `pnpm db:plans`             | Explain the screens' real queries on that data and write `docs/perf/query-plans-postgres.md`; exits with 1 if a query reads a large table whole                         |
@@ -82,7 +85,7 @@ The demo data is synthetic (example.com addresses only). Never load real custome
 | `pnpm test:e2e`             | Build the web app and run Playwright browser tests (with accessibility checks)                                                                                          |
 | `pnpm build`                | Production build                                                                                                                                                        |
 
-Tests use a throw-away database: in-memory PGlite by default, or real PostgreSQL when `TEST_DATABASE_URL` points at a disposable database (for example `postgresql://adas_admin:adas_admin_password@localhost:5432/adas_crm_test`). The test setup drops and rebuilds that database's schema. To check query plans at full size without a server, run `pnpm db:plans:test`: it loads the large seed into the test database and writes `docs/perf/query-plans-pglite.md` (plans only; times are judged on real PostgreSQL with `pnpm db:plans`).
+Tests use a throw-away database: in-memory PGlite by default, or real PostgreSQL when `TEST_DATABASE_URL` points at a disposable database (for example `postgresql://adas_admin:adas_admin_password@localhost:5432/adas_crm_test`). The test setup drops and rebuilds that database's schema. Test files then run one at a time, because they share that database. To check query plans at full size without a server, run `pnpm db:plans:test`: it loads the large seed into the test database and writes `docs/perf/query-plans-pglite.md` (plans only; times are judged on real PostgreSQL with `pnpm db:plans`).
 
 ## Layout
 

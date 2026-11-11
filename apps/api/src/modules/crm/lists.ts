@@ -184,7 +184,16 @@ export const DEAL_LIST: ListSpec = {
     updatedAt: { sql: 'd.updated_at', type: 'date' },
     tags: { sql: 'd.id', type: 'tags', tagEntity: 'deal' },
   },
-  search: (q, p) => ilikeAny(['d.name', 'cmp.name'], q, p),
+  // The deal's name or its company's name, as indexed lookups that fill an array (see the
+  // contact list's search).
+  search: (q, p) => {
+    const like = likeParam(q, p);
+    return `d.id = ANY(ARRAY(
+      SELECT x.id FROM deals x WHERE x.name ILIKE ${like}
+      UNION ALL
+      SELECT x.id FROM deals x JOIN companies co ON co.id = x.company_id
+      WHERE x.deleted_at IS NULL AND co.name ILIKE ${like}))`;
+  },
 };
 
 export const TASK_LIST: ListSpec = {
@@ -223,7 +232,19 @@ export const TASK_LIST: ListSpec = {
     dealId: { sql: 't.deal_id', type: 'enum' },
     createdAt: { sql: 't.created_at', type: 'date' },
   },
-  search: (q, p) => ilikeAny(['t.title', 'cmp.name', 'ct.full_name', 'ld.full_name'], q, p),
+  // The task's title, or the name of its company, contact or lead: one indexed lookup per
+  // table, filling an array (see the contact list's search).
+  search: (q, p) => {
+    const like = likeParam(q, p);
+    return `t.id = ANY(ARRAY(
+      SELECT x.id FROM tasks x WHERE x.title ILIKE ${like}
+      UNION ALL
+      SELECT x.id FROM tasks x JOIN companies co ON co.id = x.company_id WHERE co.name ILIKE ${like}
+      UNION ALL
+      SELECT x.id FROM tasks x JOIN contacts ct ON ct.id = x.contact_id WHERE ct.full_name ILIKE ${like}
+      UNION ALL
+      SELECT x.id FROM tasks x JOIN leads ld ON ld.id = x.lead_id WHERE ld.full_name ILIKE ${like}))`;
+  },
 };
 
 /** Task views (PRD 4.7). "Today" and "upcoming" use the assignee's time zone. */

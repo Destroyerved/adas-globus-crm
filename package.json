@@ -16,6 +16,7 @@
     "db:seed": "pnpm --filter @adas/api db:seed",
     "db:plans": "pnpm --filter @adas/api db:plans",
     "db:plans:test": "node scripts/query-plans-test.mjs",
+    "db:local": "node scripts/local-db.mjs",
     "break-glass": "pnpm --filter @adas/api break-glass",
     "lint": "eslint . --max-warnings 0 && prettier --check \"**/*.{ts,tsx,mjs,json,css,md}\"",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,json,css,md}\"",
