@@ -116,6 +116,7 @@ export function AuditTab() {
       <DataPanel
         query={query}
         isEmpty={rows.length === 0}
+        scrollLabel="Audit log entries"
         emptyTitle={filtered ? 'Nothing matches these filters' : 'Nothing recorded yet'}
         emptyDescription={
           filtered

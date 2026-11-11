@@ -70,16 +70,19 @@ The demo data is synthetic (example.com addresses only). Never load real custome
 
 ## Commands
 
-| Command           | What it does                                                                   |
-| ----------------- | ------------------------------------------------------------------------------ |
-| `pnpm dev`        | API on :3000 (PostgreSQL via `DATABASE_URL`) and web app on :5174              |
-| `pnpm db:migrate` | Apply new migrations in `apps/api/prisma/migrations` as `adas_admin`           |
-| `pnpm db:seed`    | Load synthetic demo data (refuses to run in production)                        |
-| `pnpm check`      | Lint, typecheck, unit and integration tests. Must pass before every commit     |
-| `pnpm test:e2e`   | Build the web app and run Playwright browser tests (with accessibility checks) |
-| `pnpm build`      | Production build                                                               |
+| Command                     | What it does                                                                                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                  | API on :3000 (PostgreSQL via `DATABASE_URL`) and web app on :5174                                                                                                       |
+| `pnpm db:migrate`           | Apply new migrations in `apps/api/prisma/migrations` as `adas_admin`                                                                                                    |
+| `pnpm db:seed`              | Load synthetic demo data (refuses to run in production)                                                                                                                 |
+| `pnpm db:seed --size=large` | Also load 20,000 companies, 60,000 contacts and 300,000 timeline entries for performance work; safe to run again                                                        |
+| `pnpm db:plans`             | Explain the screens' real queries on that data and write `docs/perf/query-plans-postgres.md`; exits with 1 if a query reads a large table whole                         |
+| `pnpm db:plans:test`        | The same check without a server: loads the large seed into the throw-away test database and writes `docs/perf/query-plans-pglite.md` (plans only, times are not judged) |
+| `pnpm check`                | Lint, typecheck, unit and integration tests. Must pass before every commit                                                                                              |
+| `pnpm test:e2e`             | Build the web app and run Playwright browser tests (with accessibility checks)                                                                                          |
+| `pnpm build`                | Production build                                                                                                                                                        |
 
-Tests use a throw-away database: in-memory PGlite by default, or real PostgreSQL when `TEST_DATABASE_URL` points at a disposable database (for example `postgresql://adas_admin:adas_admin_password@localhost:5432/adas_crm_test`). The test setup drops and rebuilds that database's schema.
+Tests use a throw-away database: in-memory PGlite by default, or real PostgreSQL when `TEST_DATABASE_URL` points at a disposable database (for example `postgresql://adas_admin:adas_admin_password@localhost:5432/adas_crm_test`). The test setup drops and rebuilds that database's schema. To check query plans at full size without a server, run `pnpm db:plans:test`: it loads the large seed into the test database and writes `docs/perf/query-plans-pglite.md` (plans only; times are judged on real PostgreSQL with `pnpm db:plans`).
 
 ## Layout
 

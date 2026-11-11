@@ -4,6 +4,7 @@ import { ValidationDomainError } from '../../platform/errors/index.js';
 import {
   SqlParams,
   ilikeAny,
+  likeParam,
   runList,
   type ListRequest,
   type ListSpec,
@@ -95,7 +96,19 @@ export const CONTACT_LIST: ListSpec = {
     lastContactedAt: { sql: 'c.last_contacted_at', type: 'date' },
     tags: { sql: 'c.id', type: 'tags', tagEntity: 'contact' },
   },
-  search: (q, p) => ilikeAny(['c.full_name', 'c.primary_email', 'cmp.name'], q, p),
+  // Name or email on the contact, or the company's name. Written as two indexed lookups: an
+  // OR across the two tables can't use the trigram indexes and reads every contact. The
+  // lookups fill an array, which PostgreSQL always computes once; as an IN (sub-query) it
+  // could be run again for every row when the table's statistics are out of date, for example
+  // just after a large import (docs/perf, ADR 0011).
+  search: (q, p) => {
+    const like = likeParam(q, p);
+    return `c.id = ANY(ARRAY(
+      SELECT x.id FROM contacts x WHERE x.full_name ILIKE ${like} OR x.primary_email ILIKE ${like}
+      UNION ALL
+      SELECT x.id FROM contacts x JOIN companies co ON co.id = x.company_id
+      WHERE x.deleted_at IS NULL AND co.name ILIKE ${like}))`;
+  },
 };
 
 export const COMPANY_LIST: ListSpec = {
@@ -216,7 +229,10 @@ export const TASK_LIST: ListSpec = {
 /** Task views (PRD 4.7). "Today" and "upcoming" use the assignee's time zone. */
 const TASK_VIEWS: Record<string, string> = {
   open: `t.status = 'open'`,
-  today: `t.status = 'open' AND (t.due_at AT TIME ZONE au.timezone)::date = (NOW() AT TIME ZONE au.timezone)::date`,
+  // "Today" in any time zone lies within two days of now: that part can use the due-date
+  // index, and the exact per-person check then runs on a handful of rows.
+  today: `t.status = 'open' AND t.due_at > NOW() - INTERVAL '2 days' AND t.due_at < NOW() + INTERVAL '2 days'
+    AND (t.due_at AT TIME ZONE au.timezone)::date = (NOW() AT TIME ZONE au.timezone)::date`,
   overdue: `t.status = 'open' AND t.due_at < NOW()`,
   upcoming: `t.status = 'open' AND (t.due_at AT TIME ZONE au.timezone)::date > (NOW() AT TIME ZONE au.timezone)::date`,
   done: `t.status = 'completed'`,

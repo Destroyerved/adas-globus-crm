@@ -136,10 +136,14 @@ export function compileFilter(
         }
         const values = list(value).map(String);
         if (def.type === 'tags') {
-          const names = params.add(values.map((v) => v.trim().toLowerCase()));
-          const match = `SELECT COUNT(DISTINCT t.name) FROM entity_tags et JOIN tags t ON t.id = et.tag_id
-            WHERE et.entity_type = ${params.add(def.tagEntity)} AND et.entity_id = ${col} AND t.name = ANY(${names}::text[])`;
-          return op === 'hasAny' ? `(${match}) > 0` : `(${match}) = ${params.add(values.length)}`;
+          // A semi-join from the tag side: one pass over the tagged rows, instead of a
+          // sub-query for every record in the list (docs/perf, ADR 0011).
+          const wanted = [...new Set(values.map((v) => v.trim().toLowerCase()))];
+          const tagged = `SELECT et.entity_id FROM entity_tags et JOIN tags t ON t.id = et.tag_id
+            WHERE et.entity_type = ${params.add(def.tagEntity)} AND t.name = ANY(${params.add(wanted)}::text[])`;
+          return op === 'hasAny'
+            ? `${col} IN (${tagged})`
+            : `${col} IN (${tagged} GROUP BY et.entity_id HAVING COUNT(DISTINCT t.name) = ${params.add(wanted.length)})`;
         }
         const arr = params.add(values);
         return op === 'hasAny' ? `${col} ?| ${arr}::text[]` : `${col} ?& ${arr}::text[]`;
@@ -362,8 +366,18 @@ export async function runList<T extends Record<string, unknown>>(
   };
 }
 
+/** The ILIKE pattern for "contains this text", with the text's own % and _ taken literally. */
+export function containsPattern(q: string): string {
+  return `%${escapeLike(q)}%`;
+}
+
+/** Adds the "contains this text" pattern for ILIKE and returns its placeholder. */
+export function likeParam(q: string, params: SqlParams): string {
+  return params.add(containsPattern(q));
+}
+
 /** Free-text search across several columns with ILIKE (trigram-indexed, PRD 6.10). */
 export function ilikeAny(columns: string[], q: string, params: SqlParams): string {
-  const p = params.add(`%${escapeLike(q)}%`);
+  const p = likeParam(q, params);
   return `(${columns.map((c) => `${c} ILIKE ${p}`).join(' OR ')})`;
 }

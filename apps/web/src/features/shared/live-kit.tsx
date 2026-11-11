@@ -103,6 +103,7 @@ export function DataPanel({
   onEmptyAction,
   children,
   footer,
+  scrollLabel,
 }: {
   query: QueryState;
   isEmpty: boolean;
@@ -112,6 +113,11 @@ export function DataPanel({
   onEmptyAction?: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /**
+   * Names the table for a panel whose rows hold nothing focusable. The panel then takes
+   * keyboard focus itself, so the table can be scrolled sideways on a phone without a mouse.
+   */
+  scrollLabel?: string;
 }) {
   return (
     <div className="bg-surface border border-line rounded-[10px] overflow-hidden">
@@ -131,7 +137,8 @@ export function DataPanel({
       {query.isSuccess && !isEmpty && (
         <div
           aria-busy={query.isFetching || undefined}
-          className={`relative overflow-x-auto ${query.isFetching ? 'opacity-70' : ''}`}
+          className={`relative overflow-x-auto focus-visible:outline-2 focus-visible:outline-primary ${query.isFetching ? 'opacity-70' : ''}`}
+          {...(scrollLabel ? { tabIndex: 0, role: 'region', 'aria-label': scrollLabel } : {})}
         >
           {children}
         </div>

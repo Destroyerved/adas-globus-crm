@@ -1,12 +1,20 @@
 import { type SessionUser } from '@adas/shared';
 import { type DatabaseService } from '../../platform/db/index.js';
+import { containsPattern } from '../../platform/list/index.js';
 import { requireCapability, scopeWhere } from '../../platform/scope/index.js';
 
 export class DataQualityService {
   constructor(private readonly db: DatabaseService) {}
 
   /**
-   * PRD §6.8 — Global trigram + full-text search across Companies, Contacts, Leads, and Deals.
+   * Global search across companies, contacts, leads and deals (PRD 6.10): one query per
+   * record type, in parallel, each scoped in SQL.
+   *
+   * A record matches when the text is part of its name, email or domain, or when its name is
+   * similar to the text (pg_trgm's `%` operator, so a typo still finds it). Both are written
+   * as indexed lookups that fill an array; a single OR with similarity() can't use the
+   * trigram indexes and reads every row. PostgreSQL always computes the array once, even
+   * when a table's statistics are out of date (docs/perf, ADR 0011).
    */
   async globalSearch(
     user: SessionUser,
@@ -21,7 +29,7 @@ export class DataQualityService {
     if (!q) {
       return { companies: [], contacts: [], leads: [], deals: [] };
     }
-    const likePattern = `%${q}%`;
+    const likePattern = containsPattern(q);
 
     const cmpScope = scopeWhere(user, 'companies.read', { alias: 'c', startParamIndex: 3 });
     const cntScope = scopeWhere(user, 'contacts.read', { alias: 'c', startParamIndex: 3 });
@@ -34,7 +42,10 @@ export class DataQualityService {
                 similarity(c.name, $1) AS score
          FROM companies c
          WHERE c.deleted_at IS NULL
-           AND (c.name ILIKE $2 OR c.domain ILIKE $2 OR similarity(c.name, $1) > 0.2)
+           AND c.id = ANY(ARRAY(
+             SELECT x.id FROM companies x WHERE x.name ILIKE $2 OR x.domain ILIKE $2
+             UNION ALL
+             SELECT x.id FROM companies x WHERE x.name % $1))
            AND ${cmpScope.sql}
          ORDER BY score DESC, c.name ASC
          LIMIT 10`,
@@ -45,7 +56,10 @@ export class DataQualityService {
                 similarity(c.full_name, $1) AS score
          FROM contacts c
          WHERE c.deleted_at IS NULL
-           AND (c.full_name ILIKE $2 OR c.primary_email ILIKE $2 OR similarity(c.full_name, $1) > 0.2)
+           AND c.id = ANY(ARRAY(
+             SELECT x.id FROM contacts x WHERE x.full_name ILIKE $2 OR x.primary_email ILIKE $2
+             UNION ALL
+             SELECT x.id FROM contacts x WHERE x.full_name % $1))
            AND ${cntScope.sql}
          ORDER BY score DESC, c.full_name ASC
          LIMIT 10`,
@@ -56,7 +70,11 @@ export class DataQualityService {
                 similarity(l.full_name, $1) AS score
          FROM leads l
          WHERE l.deleted_at IS NULL
-           AND (l.full_name ILIKE $2 OR l.firm_name ILIKE $2 OR l.email ILIKE $2 OR similarity(l.full_name, $1) > 0.2)
+           AND l.id = ANY(ARRAY(
+             SELECT x.id FROM leads x
+             WHERE x.full_name ILIKE $2 OR x.firm_name ILIKE $2 OR x.email ILIKE $2
+             UNION ALL
+             SELECT x.id FROM leads x WHERE x.full_name % $1))
            AND ${leadScope.sql}
          ORDER BY score DESC, l.full_name ASC
          LIMIT 10`,

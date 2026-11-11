@@ -19,6 +19,9 @@
 //   'stopped_merged' enrollment status; duplicate pair and foreign-key indexes; ADR 0009)
 //   prisma/migrations/0009_exports/migration.sql (exports: status checks, the worker's partial
 //   indexes and grants; ADR 0010)
+//   prisma/migrations/0010_list_indexes/migration.sql (partial and expression indexes for the
+//   list sorts: name, last contacted, created, status, score, value, close date, due and
+//   completed; ADR 0011)
 
 generator client {
   provider = "prisma-client-js"
