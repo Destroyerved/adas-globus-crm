@@ -53,6 +53,7 @@ export const CAPABILITY_LABEL: Record<string, string> = {
   'exports.run': 'Export data',
   'duplicates.merge': 'Merge duplicates',
   'compliance.manage': 'Manage suppressions and consent',
+  'privacy.manage': 'Lift suppressions, export personal data and erase contacts',
   'reports.read': 'See reports and dashboards',
   'settings.manage': 'Change settings',
   'users.manage': 'Manage people and roles',

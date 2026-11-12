@@ -14,7 +14,7 @@ import {
   sessionCookieName,
 } from './modules/auth/index.js';
 import { AdminService, registerAdminRoutes } from './modules/admin/index.js';
-import { ComplianceService, checkSendable } from './modules/compliance/index.js';
+import { ComplianceService, registerComplianceRoutes } from './modules/compliance/index.js';
 import {
   CrmListService,
   CrmRecordService,
@@ -45,7 +45,7 @@ import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/e
 import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
 import { MailpitTransport } from './platform/mail-transport/index.js';
-import { effectiveCapabilities } from './platform/scope/index.js';
+import { effectiveCapabilities, requireCapability } from './platform/scope/index.js';
 
 function serializeJson(data: unknown): string {
   return JSON.stringify(data, (_key, value) =>
@@ -194,6 +194,7 @@ export function createAppServer(
   const notifications = new NotificationService(db);
   const router = new Router();
   registerCrmRoutes(router, { crm, lists, records, timeline });
+  registerComplianceRoutes(router, compliance);
   const admin = new AdminService(db);
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
@@ -596,40 +597,11 @@ export function createAppServer(
         return;
       }
 
-      // Users & Audit Logs
+      // Users
       if (method === 'GET' && pathname === '/api/v1/users') {
         const items = await auth.listUsers();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
-        return;
-      }
-
-      // Compliance
-      if (method === 'POST' && pathname === '/api/v1/compliance/check-sendable') {
-        const body = await readJsonBody(req);
-        const result = checkSendable(body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/compliance/suppressions') {
-        const items = await compliance.listSuppressions();
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/compliance/suppressions') {
-        const body = await readJsonBody(req);
-        const created = await compliance.addSuppression({
-          email: String(body['email'] ?? ''),
-          reason: (body['reason'] as 'manual_dnc') ?? 'manual_dnc',
-          source: String(body['source'] ?? 'manual_ui'),
-          actorUserId: user.id,
-        });
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
         return;
       }
 
@@ -644,6 +616,7 @@ export function createAppServer(
 
       // Inbox, Sequences, Campaigns, Reports
       if (method === 'GET' && pathname === '/api/v1/inbox/threads') {
+        requireCapability(user, 'inbox.read');
         const items = await outreach.listInboxThreads(user);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
@@ -651,6 +624,7 @@ export function createAppServer(
       }
 
       if (method === 'GET' && pathname === '/api/v1/sequences') {
+        requireCapability(user, 'sequences.read');
         const items = await outreach.listSequences();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
@@ -658,6 +632,7 @@ export function createAppServer(
       }
 
       if (method === 'POST' && pathname === '/api/v1/sequences/enroll') {
+        requireCapability(user, 'sequences.enroll');
         const body = await readJsonBody(req);
         const enrolled = await outreach.enrollInSequence(user, body as never);
         if (body['executeStepOneImmediately'] === true) {
@@ -673,63 +648,8 @@ export function createAppServer(
         return;
       }
 
-      if (method === 'POST' && pathname === '/api/v1/n8n/pipeline/trigger') {
-        const body = await readJsonBody(req);
-        const result = await outreach.runN8nMarketingPipeline(user, {
-          workflowId:
-            body['workflowId'] === 'wf_02_marketing_campaign_dispatch'
-              ? 'wf_02_marketing_campaign_dispatch'
-              : 'wf_01_lead_sequence_enroll',
-          contactId: typeof body['contactId'] === 'string' ? body['contactId'] : undefined,
-          sequenceId: typeof body['sequenceId'] === 'string' ? body['sequenceId'] : undefined,
-          campaignId: typeof body['campaignId'] === 'string' ? body['campaignId'] : undefined,
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/n8n/webhooks/dispatch') {
-        const result = await intelligence.dispatchPendingOutboxEventsToWebhooks();
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/n8n/api-tokens') {
-        const body = await readJsonBody(req);
-        const tokenName =
-          typeof body['name'] === 'string' && body['name'].trim() !== ''
-            ? body['name'].trim()
-            : 'n8n Marketing Automation Service Token';
-        const scopes = Array.isArray(body['scopes'])
-          ? (body['scopes'] as string[])
-          : ['leads:read', 'leads:write', 'sequences:enroll', 'campaigns:trigger'];
-        const created = await intelligence.createApiToken(user, tokenName, scopes);
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(created));
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/outreach/warmup-status') {
-        const dayParam = Number(parsedUrl.searchParams.get('day') ?? '21');
-        const status = outreach.getWarmupAndDeliverabilityStatus(
-          Number.isFinite(dayParam) && dayParam > 0 ? dayParam : 21,
-        );
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(status));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/outreach/tailor-preview') {
-        const body = await readJsonBody(req);
-        const preview = await outreach.tailorOutreachEmail(body as never);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(preview));
-        return;
-      }
-
       if (method === 'GET' && pathname === '/api/v1/campaigns') {
+        requireCapability(user, 'campaigns.read');
         const items = await outreach.listCampaigns();
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
@@ -749,90 +669,11 @@ export function createAppServer(
       }
 
       if (method === 'GET' && pathname === '/api/v1/reports/pipeline-rollup') {
+        requireCapability(user, 'reports.read');
         const currency = (parsedUrl.searchParams.get('currency') as 'USD' | 'CAD') ?? 'USD';
         const report = await intelligence.getPipelineRollupReport(user, currency);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson(report));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/deployment/blueprint') {
-        const body = await readJsonBody(req);
-        const rawDomain =
-          typeof body['domain'] === 'string' && body['domain'].trim() !== ''
-            ? body['domain']
-                .trim()
-                .toLowerCase()
-                .replace(/^https?:\/\//, '')
-                .replace(/\/.*$/, '')
-            : 'adasglobuspro.com';
-        const tunnelName =
-          typeof body['tunnelName'] === 'string' && body['tunnelName'].trim() !== ''
-            ? body['tunnelName'].trim()
-            : 'adas-crm-prod-16gb';
-
-        const cloudflareTunnelYaml = [
-          `# ADAS CRM Production Cloudflare Tunnel Config (PRD §10.4)`,
-          `tunnel: ${tunnelName}`,
-          `credentials-file: /etc/cloudflared/${tunnelName}.json`,
-          `ingress:`,
-          `  - hostname: crm.${rawDomain}`,
-          `    service: http://localhost:3000`,
-          `  - hostname: go.${rawDomain}`,
-          `    service: http://localhost:3000`,
-          `  - hostname: status.${rawDomain}`,
-          `    service: http://localhost:3001`,
-          `  - hostname: automation.${rawDomain}`,
-          `    service: http://localhost:5678`,
-          `  - service: http_status:404`,
-        ].join('\n');
-
-        const dnsRecordsBind = [
-          `; --- ADAS CRM Cloudflare Tunnel CNAMEs & Anti-Spam Email Records (PRD §5.4, §10.4) ---`,
-          `crm.${rawDomain}.         1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
-          `go.${rawDomain}.          1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
-          `status.${rawDomain}.      1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
-          `automation.${rawDomain}.  1   IN  CNAME   ${tunnelName}.cfargotunnel.com.`,
-          `${rawDomain}.             300 IN  TXT     "v=spf1 include:spf.protection.outlook.com -all"`,
-          `mail.${rawDomain}.        300 IN  TXT     "v=spf1 include:amazonses.com -all"`,
-          `_dmarc.${rawDomain}.      300 IN  TXT     "v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@${rawDomain}; adkim=s; aspf=s"`,
-          `_dmarc.mail.${rawDomain}. 300 IN  TXT     "v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@${rawDomain}"`,
-        ].join('\n');
-
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(
-          serializeJson({
-            domain: rawDomain,
-            tunnelName,
-            serverMemoryGb: 16,
-            memoryAllocationMb: {
-              postgres: 4096,
-              apiAndSpa: 1024,
-              worker: 768,
-              n8n: 1536,
-              uptimeKuma: 256,
-              cloudflared: 128,
-              osAndPostgresPageCache: 8448,
-            },
-            postgresTuning: {
-              shared_buffers: '2GB',
-              effective_cache_size: '8GB',
-              work_mem: '16MB',
-              maintenance_work_mem: '512MB',
-              max_connections: 60,
-              wal_compression: 'on',
-            },
-            hostRoutes: {
-              crmAppUrl: `https://crm.${rawDomain}`,
-              publicIntakeAndUnsubUrl: `https://go.${rawDomain}`,
-              uptimeStatusUrl: `https://status.${rawDomain}`,
-              n8nAutomationUrl: `https://automation.${rawDomain}`,
-            },
-            cloudflareTunnelYaml,
-            dnsRecordsBind,
-            exeInstallerPath: 'dist/deployer/ADAS-CRM-Deployer.exe',
-          }),
-        );
         return;
       }
 

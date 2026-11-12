@@ -1,13 +1,33 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatDate, formatMoney, formatRelative } from '@adas/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  PrivacyEraseInputSchema,
+  RecordConsentInputSchema,
+  WithdrawConsentInputSchema,
+  formatDate,
+  formatMoney,
+  formatRelative,
+  type ConsentBasis,
+  type ConsentPurpose,
+} from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
+import { ConfirmDialog } from '@/components/ui/dialog.js';
+import { Input } from '@/components/ui/input.js';
 import { Callout, Panel } from '@/components/ui/panel.js';
+import { Select, Textarea } from '@/components/ui/select.js';
+import { useToast } from '@/components/ui/toast.js';
 import { api } from '@/lib/api.js';
-import { useUserNames } from '@/features/shared/live-kit.js';
+import { errorMessage, useUserNames } from '@/features/shared/live-kit.js';
 import { can, useMe } from '@/features/shared/list-kit.js';
 import { ContactEditDrawer } from '@/features/records/edit-drawers.js';
+import {
+  EditDrawer,
+  formError,
+  issuesOf,
+  serverFieldErrors,
+  useDraft,
+} from '@/features/records/record-form.js';
 import {
   BackLink,
   DeleteRecordButton,
@@ -19,6 +39,7 @@ import {
 } from '@/features/records/profile-kit.js';
 import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
+import { FormRow } from '@/features/settings/settings-kit.js';
 import { VERIFICATION_TONE } from './contacts-screen.js';
 
 const SUPPRESSION_LABEL: Record<string, string> = {
@@ -27,9 +48,32 @@ const SUPPRESSION_LABEL: Record<string, string> = {
   hard_bounce: 'Email bounced',
   manual_dnc: 'Do not contact',
   privacy_erasure: 'Privacy erasure request',
+  domain_suppressed: 'Domain blocked',
 };
 
-/** Contact page (PRD 4.4, 5): details, consent and suppression, deals, sequences, timeline. */
+const CONSENT_BASIS_LABEL: Record<ConsentBasis, string> = {
+  express: 'Express opt-in',
+  implied_inquiry: 'Implied — recent inquiry (6 months)',
+  implied_ebr: 'Implied — active client relationship (24 months)',
+  implied_published: 'Implied — published business address',
+  legitimate_interest_b2b: 'US business outreach',
+};
+
+function saveDownloadedFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+}
+
+/** Contact page (PRD 4.4, 4.18, 5): details, consent and suppression, deals, sequences, privacy, timeline. */
 export function ContactProfileScreen({
   contactId,
   onBack,
@@ -44,10 +88,21 @@ export function ContactProfileScreen({
   onOpenLead: (id: string) => void;
 }) {
   const me = useMe();
+  const toast = useToast();
   const queryClient = useQueryClient();
   const ownerName = useUserNames();
   const timeZone = viewerTimeZone();
   const [editing, setEditing] = useState(false);
+  const [recordingConsent, setRecordingConsent] = useState(false);
+  const [withdrawingConsent, setWithdrawingConsent] = useState(false);
+  const [withdrawReason, setWithdrawReason] = useState('');
+  const [withdrawSuppress, setWithdrawSuppress] = useState(false);
+  const [withdrawValidation, setWithdrawValidation] = useState<string | null>(null);
+
+  const [erasing, setErasing] = useState(false);
+  const [eraseReason, setEraseReason] = useState('');
+  const [eraseValidation, setEraseValidation] = useState<string | null>(null);
+
   const key = ['contact', contactId] as const;
   const profile = useQuery({
     queryKey: key,
@@ -58,7 +113,62 @@ export function ContactProfileScreen({
     Promise.all([
       queryClient.invalidateQueries({ queryKey: key }),
       queryClient.invalidateQueries({ queryKey: ['contacts'] }),
+      queryClient.invalidateQueries({ queryKey: ['timeline', 'contact', contactId] }),
     ]);
+
+  const withdrawMutation = useMutation({
+    mutationFn: ({
+      id,
+      reason,
+      suppressAddress,
+    }: {
+      id: string;
+      reason: string;
+      suppressAddress: boolean;
+    }) => api.withdrawContactConsent(id, { reason, suppressAddress }),
+    onSuccess: async (res) => {
+      setWithdrawingConsent(false);
+      setWithdrawReason('');
+      setWithdrawSuppress(false);
+      setWithdrawValidation(null);
+      toast(res.suppressed ? 'Consent withdrawn and address suppressed.' : 'Consent withdrawn.');
+      await refresh();
+      await queryClient.invalidateQueries({ queryKey: ['suppressions'] });
+    },
+  });
+
+  const exportPrivacyMutation = useMutation({
+    mutationFn: async ({ id, format }: { id: string; format: 'json' | 'csv' }) => {
+      const file =
+        format === 'csv'
+          ? await api.downloadContactPrivacyCsv(id)
+          : await api.downloadContactPrivacyJson(id);
+      saveDownloadedFile(file.blob, file.filename);
+      return format;
+    },
+    onSuccess: async (format) => {
+      toast(`Exported personal data (${format.toUpperCase()}).`);
+      await queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+    },
+  });
+
+  const eraseMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.eraseContactPrivacy(id, { reason }),
+    onSuccess: async () => {
+      setErasing(false);
+      setEraseReason('');
+      setEraseValidation(null);
+      toast('Erased personal data and recorded permanent suppression.');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['contacts'] }),
+        queryClient.invalidateQueries({ queryKey: ['leads'] }),
+        queryClient.invalidateQueries({ queryKey: ['suppressions'] }),
+        queryClient.invalidateQueries({ queryKey: ['audit-logs'] }),
+      ]);
+      onBack();
+    },
+  });
 
   const back = <BackLink label="All contacts" onClick={onBack} />;
   if (contactId === null) {
@@ -81,9 +191,16 @@ export function ContactProfileScreen({
     tasks,
     suppression,
     consent,
+    marketingBasis,
     enrollments,
   } = profile.data;
   const canWrite = can(me, 'contacts.write');
+  const canManagePrivacy = can(me, 'privacy.manage');
+  const isBlocked = Boolean(contact.do_not_contact || suppression);
+  const basisBadgeText =
+    marketingBasis.kind === 'implied' && marketingBasis.expiresAt
+      ? `Implied until ${formatDate(marketingBasis.expiresAt, timeZone)}`
+      : marketingBasis.label;
 
   return (
     <div className="space-y-[16px]" data-testid="contact-profile-screen">
@@ -126,7 +243,7 @@ export function ContactProfileScreen({
         }
       />
 
-      {(contact.do_not_contact || suppression) && (
+      {isBlocked && (
         <Callout tone="danger">
           {suppression
             ? `${SUPPRESSION_LABEL[suppression.reason] ?? 'Suppressed'} on ${formatDate(suppression.created_at, timeZone)}. No email can be sent to this address.`
@@ -173,13 +290,46 @@ export function ContactProfileScreen({
                     contact.last_contacted_at ? formatRelative(contact.last_contacted_at) : 'Never',
                   ],
                   [
-                    'Consent',
+                    'Marketing basis',
+                    <span
+                      key="mb"
+                      className="inline-flex flex-wrap items-center gap-[8px]"
+                      data-testid="contact-marketing-basis"
+                    >
+                      <StatusBadge tone={marketingBasis.tone}>{basisBadgeText}</StatusBadge>
+                      <span className="text-[13px] text-ink-2">{marketingBasis.detail}</span>
+                    </span>,
+                  ],
+                  [
+                    'Consent record',
                     consent
-                      ? `${consent.basis.replace(/_/g, ' ')} · ${consent.status}${consent.expires_at ? ` until ${formatDate(consent.expires_at, timeZone)}` : ''}`
-                      : 'No consent on record',
+                      ? `${CONSENT_BASIS_LABEL[consent.basis as ConsentBasis] ?? consent.basis.replace(/_/g, ' ')} · ${consent.status} (${consent.source.replace(/_/g, ' ')})`
+                      : 'No consent recorded',
                   ],
                 ]}
               />
+              {canWrite && !isBlocked && (
+                <div className="mt-[16px] pt-[12px] border-t border-line flex flex-wrap gap-[8px]">
+                  <Button variant="secondary" size="sm" onClick={() => setRecordingConsent(true)}>
+                    Record consent
+                  </Button>
+                  {consent && consent.status === 'active' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        withdrawMutation.reset();
+                        setWithdrawReason('');
+                        setWithdrawSuppress(false);
+                        setWithdrawValidation(null);
+                        setWithdrawingConsent(true);
+                      }}
+                    >
+                      Withdraw consent
+                    </Button>
+                  )}
+                </div>
+              )}
             </Panel>
             <Panel title="Timeline" padded>
               <Timeline
@@ -272,6 +422,55 @@ export function ContactProfileScreen({
               canWrite={can(me, 'tasks.write')}
               queryKeys={[key]}
             />
+            {canManagePrivacy && (
+              <Panel title="Privacy" padded>
+                <div className="space-y-[12px]" data-testid="contact-privacy-panel">
+                  <p className="m-0 text-[13px] text-ink-2">
+                    Download all personal data held on this contact, or permanently erase it under a
+                    verified privacy request.
+                  </p>
+                  <div className="flex flex-wrap gap-[8px]">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={exportPrivacyMutation.isPending}
+                      onClick={() =>
+                        exportPrivacyMutation.mutate({ id: contact.id, format: 'json' })
+                      }
+                    >
+                      Export JSON
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={exportPrivacyMutation.isPending}
+                      onClick={() =>
+                        exportPrivacyMutation.mutate({ id: contact.id, format: 'csv' })
+                      }
+                    >
+                      Export CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        eraseMutation.reset();
+                        setEraseReason('');
+                        setEraseValidation(null);
+                        setErasing(true);
+                      }}
+                    >
+                      Erase personal data…
+                    </Button>
+                  </div>
+                  {exportPrivacyMutation.isError && (
+                    <p role="alert" className="m-0 text-[13px] text-danger">
+                      {errorMessage(exportPrivacyMutation.error)}
+                    </p>
+                  )}
+                </div>
+              </Panel>
+            )}
           </>
         }
       />
@@ -287,6 +486,251 @@ export function ContactProfileScreen({
           }}
         />
       )}
+
+      {recordingConsent && (
+        <RecordConsentDrawer
+          contactId={contact.id}
+          contactName={contact.full_name}
+          onClose={() => setRecordingConsent(false)}
+          onSaved={() => {
+            setRecordingConsent(false);
+            void refresh();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={withdrawingConsent}
+        title={`Withdraw consent for ${contact.full_name}`}
+        tone="primary"
+        confirmLabel="Withdraw consent"
+        pending={withdrawMutation.isPending}
+        error={
+          withdrawValidation ??
+          (withdrawMutation.isError ? errorMessage(withdrawMutation.error) : null)
+        }
+        onCancel={() => {
+          setWithdrawingConsent(false);
+          setWithdrawReason('');
+          setWithdrawSuppress(false);
+          setWithdrawValidation(null);
+        }}
+        onConfirm={() => {
+          const parsed = WithdrawConsentInputSchema.safeParse({
+            reason: withdrawReason,
+            suppressAddress: withdrawSuppress,
+          });
+          if (!parsed.success) {
+            setWithdrawValidation(parsed.error.issues[0]?.message ?? 'Enter a short reason.');
+            return;
+          }
+          setWithdrawValidation(null);
+          withdrawMutation.mutate({
+            id: contact.id,
+            reason: parsed.data.reason,
+            suppressAddress: parsed.data.suppressAddress,
+          });
+        }}
+        body={
+          <div className="space-y-[12px]">
+            <p className="m-0">
+              This marks the contact’s consent as withdrawn and records the change on their
+              timeline.
+            </p>
+            <FormRow id="withdraw-consent-reason" label="Reason">
+              <Textarea
+                id="withdraw-consent-reason"
+                rows={3}
+                value={withdrawReason}
+                onChange={(e) => setWithdrawReason(e.target.value)}
+                placeholder="Asked to stop receiving newsletter updates"
+              />
+            </FormRow>
+            <label className="flex items-start gap-[8px] text-[13px] text-ink cursor-pointer">
+              <input
+                type="checkbox"
+                checked={withdrawSuppress}
+                onChange={(e) => setWithdrawSuppress(e.target.checked)}
+                className="mt-[2px]"
+              />
+              <span>Also suppress all future outreach to {contact.primary_email}</span>
+            </label>
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={erasing}
+        title={`Erase personal data for ${contact.full_name}`}
+        tone="danger"
+        confirmLabel="Erase personal data"
+        pending={eraseMutation.isPending}
+        error={
+          eraseValidation ?? (eraseMutation.isError ? errorMessage(eraseMutation.error) : null)
+        }
+        onCancel={() => {
+          setErasing(false);
+          setEraseReason('');
+          setEraseValidation(null);
+        }}
+        onConfirm={() => {
+          const parsed = PrivacyEraseInputSchema.safeParse({ reason: eraseReason });
+          if (!parsed.success) {
+            setEraseValidation(
+              parsed.error.issues[0]?.message ?? 'Enter the privacy request reference or reason.',
+            );
+            return;
+          }
+          setEraseValidation(null);
+          eraseMutation.mutate({ id: contact.id, reason: parsed.data.reason });
+        }}
+        body={
+          <div className="space-y-[12px]">
+            <p className="m-0">
+              This permanently removes <strong className="text-ink">{contact.full_name}</strong>’s
+              names, email addresses, phone numbers, notes, tasks and message bodies. Deal totals
+              and activity counts are kept for reporting, and a permanent hashed block stops this
+              address from being imported or contacted again.
+            </p>
+            <FormRow id="privacy-erase-reason" label="Request reference or reason">
+              <Textarea
+                id="privacy-erase-reason"
+                rows={3}
+                value={eraseReason}
+                onChange={(e) => setEraseReason(e.target.value)}
+                placeholder="Verified privacy erasure request received by email"
+              />
+            </FormRow>
+          </div>
+        }
+      />
     </div>
+  );
+}
+
+function RecordConsentDrawer({
+  contactId,
+  contactName,
+  onClose,
+  onSaved,
+}: {
+  contactId: string;
+  contactName: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const { values, set } = useDraft({
+    basis: 'express' as ConsentBasis,
+    purpose: 'marketing' as ConsentPurpose,
+    source: '',
+    expiresOn: '',
+    proofText: '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const payload = {
+    basis: values.basis,
+    purpose: values.purpose,
+    source: values.source.trim(),
+    proofText: values.proofText.trim() || undefined,
+    expiresAt: values.expiresOn
+      ? new Date(`${values.expiresOn}T23:59:59.000Z`).toISOString()
+      : undefined,
+  };
+
+  const save = useMutation({
+    mutationFn: () => api.recordContactConsent(contactId, payload),
+    onSuccess: () => {
+      toast(`Recorded consent for ${contactName}.`);
+      onSaved();
+    },
+    onError: (err) => setErrors(serverFieldErrors(err)),
+  });
+
+  const submit = () => {
+    const issues = issuesOf(RecordConsentInputSchema, payload);
+    setErrors(issues);
+    if (Object.keys(issues).length === 0) save.mutate();
+  };
+
+  const showExpiry =
+    values.basis === 'implied_inquiry' ||
+    values.basis === 'implied_ebr' ||
+    values.basis === 'implied_published';
+
+  return (
+    <EditDrawer
+      title="Record consent"
+      description={`Save how ${contactName} agreed to receive outreach or marketing, and keep the wording or reference on file.`}
+      formId="record-consent"
+      pending={save.isPending}
+      error={save.isError && Object.keys(errors).length === 0 ? formError(save.error) : null}
+      onClose={onClose}
+      onSubmit={submit}
+      submitLabel="Save consent"
+    >
+      <FormRow id="consent-basis" label="Basis" error={errors['basis']}>
+        <Select
+          id="consent-basis"
+          value={values.basis}
+          onChange={(e) => set('basis', e.target.value as ConsentBasis)}
+        >
+          {Object.entries(CONSENT_BASIS_LABEL).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
+      </FormRow>
+      <FormRow id="consent-purpose" label="Purpose" error={errors['purpose']}>
+        <Select
+          id="consent-purpose"
+          value={values.purpose}
+          onChange={(e) => set('purpose', e.target.value as ConsentPurpose)}
+        >
+          <option value="marketing">Marketing & newsletters</option>
+          <option value="outreach">One-to-one business outreach</option>
+        </Select>
+      </FormRow>
+      <FormRow
+        id="consent-source"
+        label="Where consent came from"
+        hint="For example: website checkbox, conference sign-up sheet, signed engagement letter."
+        error={errors['source']}
+      >
+        <Input
+          id="consent-source"
+          value={values.source}
+          invalid={Boolean(errors['source'])}
+          onChange={(e) => set('source', e.target.value)}
+          placeholder="Website opt-in form"
+        />
+      </FormRow>
+      {showExpiry && (
+        <FormRow
+          id="consent-expires"
+          label="Expires on (optional)"
+          hint="Leave blank to apply the standard 6-month inquiry or 24-month client window."
+          error={errors['expiresAt']}
+        >
+          <Input
+            id="consent-expires"
+            type="date"
+            value={values.expiresOn}
+            onChange={(e) => set('expiresOn', e.target.value)}
+          />
+        </FormRow>
+      )}
+      <FormRow id="consent-proof" label="Proof or notes (optional)" error={errors['proofText']}>
+        <Textarea
+          id="consent-proof"
+          rows={3}
+          value={values.proofText}
+          onChange={(e) => set('proofText', e.target.value)}
+          placeholder="Exact checkbox wording or confirmation email summary"
+        />
+      </FormRow>
+    </EditDrawer>
   );
 }

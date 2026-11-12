@@ -31,7 +31,12 @@ import {
 type Row = Record<string, unknown>;
 
 /** Capabilities the Admin role must keep at "all", so nobody can lock the CRM out. */
-const ADMIN_LOCKED_CAPABILITIES = ['users.manage', 'settings.manage', 'audit.read'] as const;
+const ADMIN_LOCKED_CAPABILITIES = [
+  'users.manage',
+  'settings.manage',
+  'audit.read',
+  'privacy.manage',
+] as const;
 const ADMIN_ROLE_ID = 'role_admin';
 
 const EDITABLE_SETTING_KEYS: readonly string[] = [...REFERENCE_LIST_KEYS, ...NUMBER_SETTING_KEYS];

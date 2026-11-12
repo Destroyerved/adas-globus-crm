@@ -5,10 +5,12 @@ import {
   RecordEntityTypeSchema,
   SetTagsInputSchema,
   UpdateNoteInputSchema,
+  deriveMarketingBasis,
+  type Market,
   type RecordEntityType,
   type SessionUser,
 } from '@adas/shared';
-import { type DatabaseService } from '../../platform/db/index.js';
+import { sha256Hex, type DatabaseService } from '../../platform/db/index.js';
 import {
   DomainError,
   NotFoundDomainError,
@@ -400,6 +402,7 @@ export class CrmTimelineService {
     const dealScope = scopeWhere(user, 'deals.read', { alias: 'd', startParamIndex: 2 });
     const leadScope = scopeWhere(user, 'leads.read', { alias: 'l', startParamIndex: 2 });
     const email = String(contact['primary_email']);
+    const emailHash = sha256Hex(email);
     const [tags, tasks, company, emails, phones, deals, leads, suppression, consent, enrollments] =
       await Promise.all([
         this.tagsFor('contact', contactId),
@@ -432,17 +435,40 @@ export class CrmTimelineService {
            ORDER BY l.created_at DESC`,
           [contactId, ...leadScope.params],
         ),
-        this.db.query(
-          `SELECT reason, source, created_at FROM suppressions WHERE email = $1
+        this.db.query<{
+          id: string;
+          kind: 'email' | 'domain';
+          reason: string;
+          source: string;
+          created_at: string;
+        }>(
+          `SELECT id, 'email' AS kind, reason, source, created_at
+           FROM suppressions
+           WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
            UNION ALL
-           SELECT reason, 'domain', created_at FROM suppressed_domains WHERE domain = split_part($1, '@', 2)
+           SELECT id, 'domain' AS kind, reason, 'domain' AS source, created_at
+           FROM suppressed_domains
+           WHERE domain = split_part($1, '@', 2)
            LIMIT 1`,
-          [email],
+          [email, emailHash],
         ),
-        this.db.query(
-          `SELECT basis, status, source, captured_at, expires_at FROM consent_records
-           WHERE email = $1 ORDER BY created_at DESC LIMIT 1`,
-          [email],
+        this.db.query<{
+          id: string;
+          basis: string;
+          purpose: string;
+          status: string;
+          source: string;
+          proof_text: string | null;
+          captured_at: string;
+          expires_at: string | null;
+          revoked_at: string | null;
+        }>(
+          `SELECT id, basis, purpose, status, source, proof_text, captured_at, expires_at, revoked_at
+           FROM consent_records
+           WHERE contact_id = $1 OR email = $2
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [contactId, email],
         ),
         this.db.query(
           `SELECT e.id, s.name AS sequence_name, e.status, e.enrolled_at, e.stop_reason
@@ -451,16 +477,34 @@ export class CrmTimelineService {
           [contactId],
         ),
       ]);
+    const companyRow = company.rows[0] ?? null;
+    const suppressionRow = suppression.rows[0] ?? null;
+    const consentRow = consent.rows[0] ?? null;
+    const marketingBasis = deriveMarketingBasis({
+      market: (contact['market'] as Market) ?? 'US',
+      suppressed: Boolean(suppressionRow),
+      doNotContact: Boolean(contact['do_not_contact']),
+      hardBounced: Boolean(contact['hard_bounced_at']),
+      companyAccountStatus: (companyRow?.['account_status'] as string | null) ?? null,
+      consent: consentRow
+        ? {
+            basis: consentRow.basis,
+            status: consentRow.status,
+            expiresAt: consentRow.expires_at ? new Date(consentRow.expires_at).toISOString() : null,
+          }
+        : null,
+    });
     return {
       contact: { ...contact, tags },
-      company: company.rows[0] ?? null,
+      company: companyRow,
       emails: emails.rows,
       phones: phones.rows,
       deals: deals.rows,
       leads: leads.rows,
       tasks,
-      suppression: suppression.rows[0] ?? null,
-      consent: consent.rows[0] ?? null,
+      suppression: suppressionRow,
+      consent: consentRow,
+      marketingBasis,
       enrollments: enrollments.rows,
     };
   }

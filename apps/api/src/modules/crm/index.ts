@@ -18,7 +18,7 @@ import {
   type SessionUser,
   type UpdateCompanyInput,
 } from '@adas/shared';
-import { type DatabaseService } from '../../platform/db/index.js';
+import { sha256Hex, type DatabaseService } from '../../platform/db/index.js';
 import {
   DomainError,
   NotFoundDomainError,
@@ -315,6 +315,26 @@ export class CrmService {
     const emailDomain = extractDomainFromEmail(cleanEmail);
 
     return this.db.transaction(async (tx) => {
+      const supRes = await tx.query<{ reason: string }>(
+        `SELECT reason FROM suppressions
+         WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
+         LIMIT 1`,
+        [cleanEmail, sha256Hex(cleanEmail)],
+      );
+      if (supRes.rows[0]?.reason === 'privacy_erasure') {
+        throw new DomainError({
+          status: 409,
+          code: 'PRIVACY_ERASED',
+          title: 'Address permanently suppressed',
+          detail:
+            'This email address was erased after a privacy request and cannot be added again.',
+          fieldErrors: {
+            primaryEmail: ['This email address was erased after a privacy request.'],
+          },
+        });
+      }
+      const suppressedDnc = supRes.rows.length > 0;
+
       // Auto-link company if email domain is corporate and companyId wasn't passed
       let companyId = input.companyId ?? null;
       if (!companyId && emailDomain && !isFreeMailDomain(emailDomain)) {
@@ -353,7 +373,7 @@ export class CrmService {
           input.timezone,
           ownerId,
           teamId,
-          input.doNotContact,
+          input.doNotContact || suppressedDnc,
         ],
       );
 
@@ -420,6 +440,23 @@ export class CrmService {
       : null;
 
     return this.db.transaction(async (tx) => {
+      const erased = await tx.query<{ id: string }>(
+        `SELECT id FROM suppressions
+         WHERE email_sha256 = $1 AND reason = 'privacy_erasure'
+         LIMIT 1`,
+        [sha256Hex(cleanEmail)],
+      );
+      if (erased.rows[0]) {
+        throw new DomainError({
+          status: 409,
+          code: 'PRIVACY_ERASED',
+          title: 'Address permanently suppressed',
+          detail:
+            'This email address was erased after a privacy request and cannot be added again.',
+          fieldErrors: { email: ['This email address was erased after a privacy request.'] },
+        });
+      }
+
       // PRD 3.1: at most one open lead per person. Checked across all owners, so two
       // people can't unknowingly prospect the same contact (PRD 2.3).
       const openLead = await tx.query<{ full_name: string }>(
@@ -1064,6 +1101,61 @@ export class CrmService {
                  stopped_at = NOW()
              WHERE contact_id = $1 AND status IN ('active', 'paused')`,
             [deal.primary_contact_id],
+          );
+        }
+        // PRD 5.3: a won deal creates a 24-month implied_ebr consent basis for client contacts
+        // that are not suppressed or already holding active express consent.
+        const clientContacts = await tx.query<{
+          id: string;
+          primary_email: string;
+          market: 'US' | 'CA' | 'OTHER';
+        }>(
+          `SELECT c.id, c.primary_email, c.market
+           FROM contacts c
+           WHERE (c.company_id = $1 OR c.id = $2)
+             AND c.deleted_at IS NULL
+             AND c.do_not_contact = FALSE
+             AND c.hard_bounced_at IS NULL`,
+          [deal.company_id, deal.primary_contact_id],
+        );
+        for (const cc of clientContacts.rows) {
+          const hash = sha256Hex(cc.primary_email);
+          const blocked = await tx.query<{ id: string }>(
+            `SELECT id FROM suppressions
+             WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
+             LIMIT 1`,
+            [cc.primary_email, hash],
+          );
+          if (blocked.rows.length > 0) continue;
+          const latestConsent = await tx.query<{ basis: string; status: string }>(
+            `SELECT basis, status FROM consent_records
+             WHERE contact_id = $1 OR email = $2
+             ORDER BY created_at DESC LIMIT 1`,
+            [cc.id, cc.primary_email],
+          );
+          if (
+            latestConsent.rows[0]?.status === 'revoked' ||
+            (latestConsent.rows[0]?.status === 'active' &&
+              latestConsent.rows[0]?.basis === 'express')
+          ) {
+            continue;
+          }
+          await tx.query(
+            `INSERT INTO consent_records (
+               id, email, contact_id, market, basis, purpose, status, source, proof_text,
+               captured_at, expires_at, recorded_by_user_id
+             ) VALUES (
+               $1, $2, $3, $4, 'implied_ebr', 'marketing', 'active', 'deal_won', $5,
+               NOW(), NOW() + INTERVAL '24 months', $6
+             )`,
+            [
+              `cns_${randomUUID()}`,
+              cc.primary_email,
+              cc.id,
+              cc.market,
+              `Deal won (${dealId})`,
+              user.id,
+            ],
           );
         }
         await this.db.addOutboxEvent(tx, {

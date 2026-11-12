@@ -605,19 +605,62 @@
     "/compliance/suppressions": {
       "get": {
         "operationId": "listSuppressions",
-        "summary": "List append-only suppressions (PRD §5.3)",
+        "summary": "Keyset-paged suppressions searchable by address or SHA-256 hash, filtered by state and reason (PRD 4.17, 5.5)",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["active", "lifted", "all"]
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Suppressions"
+            "description": "{ items, nextCursor, total }"
           }
         }
       },
       "post": {
         "operationId": "addSuppression",
-        "summary": "Add suppression and immediately stop active sequences (PRD §5.3)",
+        "summary": "Add an email suppression, mark matching contacts do_not_contact and stop active enrollments (PRD 5.5)",
         "responses": {
           "201": {
             "description": "Suppressed"
+          },
+          "422": {
+            "description": "Invalid email"
           }
         }
       }
@@ -2007,6 +2050,214 @@
           },
           "410": {
             "description": "Deleted after 7 days"
+          }
+        }
+      }
+    },
+    "/compliance/suppressions/{id}/lift": {
+      "post": {
+        "operationId": "liftSuppression",
+        "summary": "Lift an active suppression with a required reason (requires privacy.manage; privacy_erasure rows are permanent; audited — PRD 4.18, 5.5, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lifted"
+          },
+          "403": {
+            "description": "Requires privacy.manage"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Already lifted or permanent privacy erasure"
+          },
+          "422": {
+            "description": "Reason shorter than 5 characters"
+          }
+        }
+      }
+    },
+    "/compliance/suppressed-domains": {
+      "get": {
+        "operationId": "listSuppressedDomains",
+        "summary": "List blocked corporate domains (PRD 4.17, 5.1)",
+        "responses": {
+          "200": {
+            "description": "{ items }"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addSuppressedDomain",
+        "summary": "Block an entire corporate domain and stop active sequences for matching addresses; free-mail domains are refused (PRD 5.1)",
+        "responses": {
+          "201": {
+            "description": "Domain blocked"
+          },
+          "422": {
+            "description": "Invalid or free-mail domain"
+          }
+        }
+      }
+    },
+    "/compliance/suppressed-domains/{id}/remove": {
+      "post": {
+        "operationId": "removeSuppressedDomain",
+        "summary": "Remove a blocked corporate domain with a required reason (requires privacy.manage; audited — PRD 4.17, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed"
+          },
+          "403": {
+            "description": "Requires privacy.manage"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Reason shorter than 5 characters"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/consents": {
+      "post": {
+        "operationId": "recordContactConsent",
+        "summary": "Record express or implied consent for a contact inside your contacts.write scope (audited — PRD 5.3, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Recorded"
+          },
+          "404": {
+            "description": "Not found or outside scope"
+          },
+          "409": {
+            "description": "Contact is suppressed or do not contact"
+          },
+          "422": {
+            "description": "Missing proof or invalid date"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/consents/withdraw": {
+      "post": {
+        "operationId": "withdrawContactConsent",
+        "summary": "Withdraw marketing consent for a contact and optionally suppress all outreach (audited — PRD 5.3, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawn"
+          },
+          "404": {
+            "description": "Not found or outside scope"
+          },
+          "422": {
+            "description": "Reason required"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/privacy-export": {
+      "get": {
+        "operationId": "exportContactPrivacyData",
+        "summary": "Export all personal data held on a contact as JSON or CSV (requires privacy.manage; audited — PRD 4.18, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["json", "csv"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON or CSV archive"
+          },
+          "403": {
+            "description": "Requires privacy.manage"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/privacy-erase": {
+      "post": {
+        "operationId": "eraseContactPrivacyData",
+        "summary": "Erase personal details, notes and email bodies for a contact while keeping deal financials, activity counts and a permanent SHA-256 suppression (requires privacy.manage; audited — PRD 4.18, 9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erased"
+          },
+          "403": {
+            "description": "Requires privacy.manage"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Reason shorter than 5 characters"
           }
         }
       }

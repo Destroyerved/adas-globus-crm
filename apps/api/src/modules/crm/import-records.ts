@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type DatabaseService, type DbTx } from '../../platform/db/index.js';
+import { sha256Hex, type DatabaseService, type DbTx } from '../../platform/db/index.js';
 import { insertActivity } from './access.js';
 import { queueDuplicatePair } from './merge-records.js';
 
@@ -66,6 +66,17 @@ export class ImportRecordWriter {
   // -------------------------------------------------------------------------
   // Matching (PRD 4.9 duplicate rules)
   // -------------------------------------------------------------------------
+
+  /** Active suppression entry for an email address or its SHA-256 hash (PRD 4.9, 4.18, 5.6). */
+  async suppressionForEmail(tx: DbTx, email: string): Promise<{ reason: string } | null> {
+    const res = await tx.query<{ reason: string }>(
+      `SELECT reason FROM suppressions
+       WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
+       LIMIT 1`,
+      [email, sha256Hex(email)],
+    );
+    return res.rows[0] ?? null;
+  }
 
   /** Definite contact match: the same normalised email on an active contact. */
   async contactByEmail(tx: DbTx, email: string): Promise<Row | null> {
@@ -177,6 +188,7 @@ export class ImportRecordWriter {
     input: ImportContactInput,
     companyId: string | null,
     ctx: ImportContext,
+    doNotContact = false,
   ): Promise<{ id: string; version: number }> {
     const id = `cnt_${randomUUID()}`;
     const fullName = `${input.firstName} ${input.lastName}`.trim();
@@ -184,8 +196,8 @@ export class ImportRecordWriter {
       `INSERT INTO contacts (
          id, company_id, first_name, last_name, full_name, title, job_function, seniority,
          primary_email, phone_e164, market, timezone, owner_user_id, team_id, source,
-         import_batch_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, '', '', $7, $8, $9, $10, $11, $12, $13, $14)`,
+         import_batch_id, do_not_contact
+       ) VALUES ($1, $2, $3, $4, $5, $6, '', '', $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         companyId,
@@ -201,6 +213,7 @@ export class ImportRecordWriter {
         ctx.ownerTeamId,
         ctx.source,
         ctx.batchId,
+        doNotContact,
       ],
     );
     await tx.query(

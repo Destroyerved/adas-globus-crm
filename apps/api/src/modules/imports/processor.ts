@@ -370,6 +370,14 @@ export class ImportProcessor {
   }
 
   private async contactRow(tx: DbTx, state: RunState, v: ContactValues): Promise<RowOutcome> {
+    const suppression = await this.writer.suppressionForEmail(tx, v.email);
+    if (suppression?.reason === 'privacy_erasure') {
+      return {
+        status: 'skipped',
+        entityId: null,
+        messages: ['This email address was erased after a privacy request and cannot be imported.'],
+      };
+    }
     const policy = state.options.duplicatePolicy;
     const existing = await this.writer.contactByEmail(tx, v.email);
     const usesCompany = this.mapped(state, 'companyName') || this.mapped(state, 'companyWebsite');
@@ -446,7 +454,13 @@ export class ImportProcessor {
 
     const company = usesCompany || v.companyDomain ? await this.companyFor(tx, state, v) : null;
     const probable = await this.writer.probableContact(tx, v, v.companyDomain);
-    const created = await this.writer.createContact(tx, v, company?.id ?? null, state.ctx);
+    const created = await this.writer.createContact(
+      tx,
+      v,
+      company?.id ?? null,
+      state.ctx,
+      Boolean(suppression),
+    );
     if (probable) {
       await this.writer.addDuplicateCandidate(
         tx,

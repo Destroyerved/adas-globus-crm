@@ -10,7 +10,7 @@ import {
   type LeadSystemStatus,
   type SessionUser,
 } from '@adas/shared';
-import { type DatabaseService } from '../../platform/db/index.js';
+import { sha256Hex, type DatabaseService } from '../../platform/db/index.js';
 import {
   DomainError,
   NotFoundDomainError,
@@ -144,6 +144,26 @@ export class CrmRecordService {
           throw new ValidationDomainError('Enter a valid email address.', {
             email: ['Enter a valid email address.'],
           });
+        }
+        if (clean !== cur['email']) {
+          const erased = await tx.query<{ id: string }>(
+            `SELECT id FROM suppressions
+             WHERE email_sha256 = $1 AND reason = 'privacy_erasure' AND lifted_at IS NULL
+             LIMIT 1`,
+            [sha256Hex(clean)],
+          );
+          if (erased.rows.length > 0) {
+            throw new DomainError({
+              status: 409,
+              code: 'PRIVACY_ERASED_ADDRESS',
+              title: 'Address cannot be used',
+              detail:
+                'This email address was removed under a privacy erasure request and cannot be re-added.',
+              fieldErrors: {
+                email: ['Removed under a privacy erasure request.'],
+              },
+            });
+          }
         }
         email = clean;
       }
@@ -337,6 +357,24 @@ export class CrmRecordService {
           });
         }
         if (clean !== email) {
+          const erased = await tx.query<{ id: string }>(
+            `SELECT id FROM suppressions
+             WHERE email_sha256 = $1 AND reason = 'privacy_erasure'
+             LIMIT 1`,
+            [sha256Hex(clean)],
+          );
+          if (erased.rows[0]) {
+            throw new DomainError({
+              status: 409,
+              code: 'PRIVACY_ERASED',
+              title: 'Address permanently suppressed',
+              detail:
+                'This email address was erased after a privacy request and cannot be used again.',
+              fieldErrors: {
+                primaryEmail: ['This email address was erased after a privacy request.'],
+              },
+            });
+          }
           // PRD 3.1: an email address belongs to one contact only.
           const owner = await tx.query<{ full_name: string; contact_id: string }>(
             `SELECT c.full_name, ce.contact_id FROM contact_emails ce

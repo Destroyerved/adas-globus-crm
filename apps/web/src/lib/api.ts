@@ -1,4 +1,6 @@
 import {
+  type AddSuppressedDomainInput,
+  type AddSuppressionInput,
   type Currency,
   type DuplicateCandidateView,
   type ExportCreateInput,
@@ -6,11 +8,18 @@ import {
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
+  type LiftSuppressionInput,
   type Market,
+  type MarketingBasisSummary,
   type MergeEntity,
   type MergeInput,
   type MergePreviewView,
   type MergeView,
+  type PrivacyEraseInput,
+  type RecordConsentInput,
+  type RemoveSuppressedDomainInput,
+  type SuppressionStateFilter,
+  type WithdrawConsentInput,
 } from '@adas/shared';
 
 const MERGE_PATH: Record<MergeEntity, string> = { contact: 'contacts', company: 'companies' };
@@ -356,9 +365,52 @@ export interface ContactProfile {
     created_at: string;
   }[];
   tasks: TaskRow[];
-  suppression: { reason: string; source: string; created_at: string } | null;
-  consent: { basis: string; status: string; source: string; expires_at: string | null } | null;
+  suppression: {
+    id: string;
+    kind: 'email' | 'domain';
+    reason: string;
+    source: string;
+    created_at: string;
+  } | null;
+  consent: {
+    id: string;
+    basis: string;
+    purpose: string;
+    status: string;
+    source: string;
+    proof_text: string | null;
+    captured_at: string;
+    expires_at: string | null;
+    revoked_at: string | null;
+  } | null;
+  marketingBasis: MarketingBasisSummary;
   enrollments: { id: string; sequence_name: string; status: string; enrolled_at: string }[];
+}
+
+export interface SuppressionView {
+  id: string;
+  email: string | null;
+  emailSha256: string;
+  reason: 'unsubscribe' | 'complaint' | 'hard_bounce' | 'manual_dnc' | 'privacy_erasure';
+  source: string;
+  notes: string | null;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  liftedAt: string | null;
+  liftedByUserId: string | null;
+  liftedByName: string | null;
+  liftedReason: string | null;
+  isPermanent: boolean;
+}
+
+export interface SuppressedDomainView {
+  id: string;
+  domain: string;
+  reason: string;
+  createdByUserId: string | null;
+  createdByName: string | null;
+  createdAt: string;
 }
 
 export interface StageRow {
@@ -808,6 +860,63 @@ export const api = {
   createExport: (input: ExportCreateInput) => createWithKey<ExportView>('/exports', input),
   getExport: (exportId: string) => request<ExportView>(`/exports/${enc(exportId)}`),
   downloadExport: (exportId: string) => download(`/exports/${enc(exportId)}/download`),
+
+  // Compliance, suppressions, consent and privacy (PRD 4.17, 4.18, 5.1-5.6)
+  listSuppressions: (params: {
+    q?: string;
+    reason?: string;
+    state?: SuppressionStateFilter;
+    cursor?: string | null;
+    limit?: number;
+  }) => {
+    const search = new URLSearchParams();
+    if (params.q) search.set('q', params.q);
+    if (params.reason) search.set('reason', params.reason);
+    if (params.state) search.set('state', params.state);
+    if (params.cursor) search.set('cursor', params.cursor);
+    if (params.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return request<Page<SuppressionView>>(`/compliance/suppressions${qs ? `?${qs}` : ''}`);
+  },
+  addSuppression: (input: AddSuppressionInput) =>
+    createWithKey<SuppressionView>('/compliance/suppressions', input),
+  liftSuppression: (suppressionId: string, input: LiftSuppressionInput) =>
+    post<SuppressionView>(`/compliance/suppressions/${enc(suppressionId)}/lift`, input),
+  listSuppressedDomains: () =>
+    request<Items<SuppressedDomainView>>('/compliance/suppressed-domains').then((r) => r.items),
+  addSuppressedDomain: (input: AddSuppressedDomainInput) =>
+    createWithKey<SuppressedDomainView>('/compliance/suppressed-domains', input),
+  removeSuppressedDomain: (domainId: string, input: RemoveSuppressedDomainInput) =>
+    post<{ id: string; removed: boolean }>(
+      `/compliance/suppressed-domains/${enc(domainId)}/remove`,
+      input,
+    ),
+  recordContactConsent: (contactId: string, input: RecordConsentInput) =>
+    createWithKey<{
+      id: string;
+      contactId: string;
+      basis: string;
+      purpose: string;
+      status: string;
+      source: string;
+      expiresAt: string | null;
+    }>(`/contacts/${enc(contactId)}/consents`, input),
+  withdrawContactConsent: (contactId: string, input: WithdrawConsentInput) =>
+    post<{ contactId: string; revoked: boolean; suppressed: boolean }>(
+      `/contacts/${enc(contactId)}/consents/withdraw`,
+      input,
+    ),
+  downloadContactPrivacyJson: (contactId: string) =>
+    download(`/contacts/${enc(contactId)}/privacy-export`),
+  downloadContactPrivacyCsv: (contactId: string) =>
+    download(`/contacts/${enc(contactId)}/privacy-export?format=csv`),
+  eraseContactPrivacy: (contactId: string, input: PrivacyEraseInput) =>
+    post<{
+      contactId: string;
+      erasedAt: string;
+      suppressedHashes: string[];
+      scrubbedLeadCount: number;
+    }>(`/contacts/${enc(contactId)}/privacy-erase`, input),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

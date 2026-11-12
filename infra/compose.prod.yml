@@ -75,6 +75,7 @@ services:
       - ../.env.production
     volumes:
       - ../secrets:/app/secrets:ro
+      - ../data/files:/app/data/files
     logging:
       driver: json-file
       options:

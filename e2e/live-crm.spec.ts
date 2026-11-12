@@ -382,14 +382,15 @@ test('people without admin rights see only their own preferences in settings', a
 });
 
 test('every settings tab passes axe and fits 1440px and 375px', async ({ page }) => {
-  // Twelve full axe scans (six tabs at two widths) need more than the default 30 seconds.
-  test.setTimeout(120_000);
+  // Fourteen full axe scans (seven tabs at two widths) need more than the default 30 seconds.
+  test.setTimeout(150_000);
   await signInAs(page, 'usr_admin_1');
   const tabs: [string, (p: Page) => Locator][] = [
     ['teams', (p) => p.getByRole('button', { name: 'New team' })],
     ['roles', (p) => p.getByRole('columnheader', { name: 'Which records' })],
     ['pipelines', (p) => p.getByText('Free Trial (3-Day)').first()],
     ['lists', (p) => p.getByRole('heading', { name: 'Lead sources' })],
+    ['suppressions', (p) => p.getByRole('button', { name: 'Add suppression' })],
     ['audit', (p) => p.getByRole('table', { name: 'Audit log, newest first' })],
     ['preferences', (p) => p.getByLabel('Time zone')],
   ];
@@ -637,4 +638,159 @@ test('the contacts in view are exported as a CSV file', async ({ page }) => {
   expect(lines[1]).toContain('Jane Patel');
   await expect(page.getByText('Exported 1 contact.')).toBeVisible();
   await expect(dialog).toBeHidden();
+});
+
+test('an admin adds and lifts a suppression, and blocks and removes a corporate domain', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await signInAs(page, 'usr_admin_1');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=settings&tab=suppressions');
+  const supTab = page.getByTestId('suppressions-tab');
+  await expect(supTab.getByRole('button', { name: 'Add suppression' })).toBeVisible();
+
+  await supTab.getByRole('button', { name: 'Add suppression' }).click();
+  const addForm = supTab.getByRole('form', { name: 'Suppress an email address' });
+  await addForm.getByLabel(/Email address/).fill('optout.partner@pinecrest-cpa.example.com');
+  await addForm.getByLabel(/Notes/).fill('Asked by phone to stop marketing emails');
+  await addForm.getByRole('button', { name: 'Suppress address' }).click();
+  await expect(supTab.getByText('optout.partner@pinecrest-cpa.example.com')).toBeVisible();
+
+  await supTab.getByRole('button', { name: 'Block domain' }).click();
+  const domForm = supTab.getByRole('form', { name: 'Block a corporate domain' });
+  await domForm.getByLabel(/Domain/).fill('pinecrest-cpa.example.com');
+  await domForm.getByLabel(/Reason/).fill('Managing partner requested firm-wide opt-out');
+  await domForm.getByRole('button', { name: 'Block domain' }).click();
+  await expect(
+    supTab.getByRole('cell', { name: 'pinecrest-cpa.example.com', exact: true }),
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(supTab.getByText('optout.partner@pinecrest-cpa.example.com')).toBeVisible();
+  await expect(
+    supTab.getByRole('cell', { name: 'pinecrest-cpa.example.com', exact: true }),
+  ).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `22-suppressions-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Lift the email suppression with a required reason and verify it moves to Lifted.
+  await page
+    .getByRole('button', {
+      name: 'Lift suppression for optout.partner@pinecrest-cpa.example.com',
+    })
+    .click();
+  const liftDialog = page.getByRole('alertdialog', { name: 'Lift email suppression' });
+  await liftDialog
+    .getByLabel('Reason for lifting')
+    .fill('Partner wrote in asking to receive tax staffing updates again');
+  await liftDialog.getByRole('button', { name: 'Lift suppression' }).click();
+  await expect(liftDialog).toBeHidden();
+  await expect(supTab.getByText('optout.partner@pinecrest-cpa.example.com')).toHaveCount(0);
+
+  await supTab.getByLabel('Suppression status').selectOption('lifted');
+  await expect(supTab.getByText('optout.partner@pinecrest-cpa.example.com')).toBeVisible();
+
+  // Remove the domain block with a reason.
+  await supTab.getByRole('button', { name: 'Remove block on pinecrest-cpa.example.com' }).click();
+  const remDialog = page.getByRole('alertdialog', { name: 'Remove domain block' });
+  await remDialog
+    .getByLabel('Reason for removing')
+    .fill('Signed engagement letter and requested onboarding updates');
+  await remDialog.getByRole('button', { name: 'Remove domain block' }).click();
+  await expect(remDialog).toBeHidden();
+  await expect(
+    supTab.getByRole('cell', { name: 'pinecrest-cpa.example.com', exact: true }),
+  ).toHaveCount(0);
+});
+
+test('consent is recorded, personal data is exported and a privacy erasure leaves a permanent hashed block', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await signInAs(page, 'usr_admin_1');
+  const createRes = await page.request.post('/api/v1/contacts', {
+    headers: { Origin: 'http://localhost:5174' },
+    data: {
+      firstName: 'Camille',
+      lastName: 'Bouchard',
+      primaryEmail: 'camille.bouchard@stlaurent-cpa.example.ca',
+      title: 'Tax Partner',
+      market: 'CA',
+    },
+  });
+  expect(createRes.status()).toBe(201);
+  const created = (await createRes.json()) as { id: string };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/?screen=contact&id=${created.id}`);
+  await expect(page.getByRole('heading', { name: 'Camille Bouchard' })).toBeVisible();
+  await expect(page.getByTestId('contact-marketing-basis')).toContainText('None');
+
+  // Record express consent and verify it persists after reload.
+  await page.getByRole('button', { name: 'Record consent' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Record consent' });
+  await drawer.getByLabel('Where consent came from').fill('Montreal CPA conference opt-in card');
+  await drawer
+    .getByLabel('Proof or notes (optional)')
+    .fill('Checked box agreeing to receive offshore tax staffing updates');
+  await drawer.getByRole('button', { name: 'Save consent' }).click();
+  await expect(drawer).toBeHidden();
+
+  await page.reload();
+  await expect(page.getByTestId('contact-marketing-basis')).toContainText('Express');
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `23-contact-privacy-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Export JSON and CSV archives and verify contents.
+  const jsonDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export JSON' }).click();
+  const jsonDownload = await jsonDownloadPromise;
+  expect(jsonDownload.suggestedFilename()).toMatch(/^privacy-export-.*\.json$/);
+  const jsonContent = readFileSync(await jsonDownload.path(), 'utf8');
+  expect(jsonContent).toContain('camille.bouchard@stlaurent-cpa.example.ca');
+
+  const csvDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  const csvDownload = await csvDownloadPromise;
+  expect(csvDownload.suggestedFilename()).toMatch(/^privacy-export-.*\.csv$/);
+  const csvContent = readFileSync(await csvDownload.path(), 'utf8');
+  expect(csvContent.charCodeAt(0)).toBe(0xfeff);
+  expect(csvContent).toContain('camille.bouchard@stlaurent-cpa.example.ca');
+
+  // Execute privacy erasure and confirm permanent hashed suppression in Settings.
+  await page.getByRole('button', { name: 'Erase personal data…' }).click();
+  const eraseDialog = page.getByRole('alertdialog', {
+    name: 'Erase personal data for Camille Bouchard',
+  });
+  await eraseDialog
+    .getByLabel('Request reference or reason')
+    .fill('Verified privacy erasure request received from partner');
+  await eraseDialog.getByRole('button', { name: 'Erase personal data' }).click();
+  await expect(eraseDialog).toBeHidden();
+
+  expect((await page.request.get(`/api/v1/contacts/${created.id}`)).status()).toBe(404);
+
+  await page.goto('/?screen=settings&tab=suppressions&sreason=privacy_erasure');
+  const erasedRow = page.getByRole('row', { name: /Erased address/ }).first();
+  await expect(erasedRow).toBeVisible();
+  await expect(erasedRow).toContainText('Permanent');
 });

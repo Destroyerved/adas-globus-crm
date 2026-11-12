@@ -5,10 +5,12 @@ import { ListsTab } from './lists-tab.js';
 import { PipelinesTab } from './pipelines-tab.js';
 import { PreferencesTab } from './preferences-tab.js';
 import { RolesTab } from './roles-tab.js';
+import { SuppressionsTab } from './suppressions-tab.js';
 import { TeamsTab } from './teams-tab.js';
 import { UsersTab } from './users-tab.js';
 
-type TabId = 'preferences' | 'people' | 'teams' | 'roles' | 'pipelines' | 'lists' | 'audit';
+type TabId =
+  'preferences' | 'people' | 'teams' | 'roles' | 'pipelines' | 'lists' | 'suppressions' | 'audit';
 
 const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'people', label: 'People', capability: 'users.manage' },
@@ -16,6 +18,7 @@ const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'roles', label: 'Roles', capability: 'users.manage' },
   { id: 'pipelines', label: 'Pipelines', capability: 'settings.manage' },
   { id: 'lists', label: 'Lists', capability: 'settings.manage' },
+  { id: 'suppressions', label: 'Suppressions', capability: 'compliance.manage' },
   { id: 'audit', label: 'Audit log', capability: 'audit.read' },
   { id: 'preferences', label: 'Your preferences', capability: null },
 ];
@@ -63,6 +66,7 @@ export function SettingsScreen() {
         {active?.id === 'roles' && <RolesTab />}
         {active?.id === 'pipelines' && <PipelinesTab />}
         {active?.id === 'lists' && <ListsTab />}
+        {active?.id === 'suppressions' && <SuppressionsTab />}
         {active?.id === 'audit' && <AuditTab />}
         {active?.id === 'preferences' && <PreferencesTab />}
       </div>

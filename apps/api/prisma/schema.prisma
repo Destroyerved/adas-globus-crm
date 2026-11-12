@@ -276,16 +276,21 @@ model Deal {
 }
 
 // Non-deletable table protected by REVOKE DELETE and trg_suppressions_no_delete
-// in migrations/0001_initial_schema/migration.sql (PRD §5.3 & §7.4)
+// in migrations/0001_initial_schema/migration.sql (PRD §5.3 & §7.4).
+// Lifting columns, permanent privacy_erasure CHECK + BEFORE UPDATE trigger, and
+// keyset/trigram indexes are in migrations/0011_compliance_and_privacy/migration.sql.
 model Suppression {
-  id          String   @id
-  email       String?  @unique
-  emailSha256 String   @unique @map("email_sha256")
-  reason      String
-  source      String
-  notes       String?
-  actorUserId String?  @map("actor_user_id")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String    @id
+  email        String?   @unique
+  emailSha256  String    @unique @map("email_sha256")
+  reason       String
+  source       String
+  notes        String?
+  actorUserId  String?   @map("actor_user_id")
+  liftedAt     DateTime? @map("lifted_at") @db.Timestamptz(6)
+  liftedBy     String?   @map("lifted_by")
+  liftedReason String?   @map("lifted_reason")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("suppressions")
 }
