@@ -113,50 +113,50 @@ Order matters: each step builds on the one before. Items marked **Owner** need s
 - [x] Screenshots at 1440px and 375px in `docs/screens/`
 - [ ] **Exit:** owner signs off the shell; clean clone to `pnpm dev` in under 10 minutes
 
-## Phases 1–6: prototype status
+## Phases 1–6: verified status vs remaining work
 
-Demo logic for these phases exists in `apps/api/src/modules/*` and runs against the in-memory database. It is useful as a starting point for the Make-it-real track, but none of these phases has met its exit criteria. Every checkbox below stays unticked until it works against real PostgreSQL, through the real UI, with real connectors where the item names one.
+The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is used in fast test runs only). A checkbox below is ticked only when the capability works end-to-end against real PostgreSQL 17 through the live UI, and — where the item names an external connector or production server — in that real environment. Full technical audit details live in [`docs/PRODUCTION_AUDIT.md`](PRODUCTION_AUDIT.md).
 
 ### Phase 1: Foundation
 
-- [ ] Entra OIDC sign-in, invite-only user creation (prototype: email-only stub)
-- [ ] Break-glass local admin (Argon2id + TOTP) (built and tested on PGlite; `pnpm break-glass set` not yet run on a real server)
-- [ ] Sessions, CSRF Origin check, dev login compiled out of production (prototype: sessions written but never read)
-- [ ] Users, teams, roles, capabilities with own/team/all scope and `scopeWhere` (prototype: scope logic works and is tested)
-- [ ] Audit log (append-only grants proven by test) (prototype: triggers tested on PGlite)
-- [ ] Settings store, file storage interface, in-app notifications
-- [ ] Outbox and worker (pg-boss), dead-letter alert (built and tested on PGlite, not on PostgreSQL; dead letters are logged, not yet sent to admins)
-- [x] Host routing (`crm.` vs `go.`) (verified by request on 4 Nov 2026)
-- [ ] Access JWT check
-- [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (files only; never run)
-- [ ] Off-site backups and restore-drill script (scripts only; never run)
-- [ ] `scripts/deploy.sh` with smoke checks and rollback (never run)
+- [ ] Entra OIDC sign-in, invite-only user creation (OIDC PKCE + ID-token verification built and unit/integration-tested; awaits Entra tenant registration to verify live)
+- [ ] Break-glass local admin (Argon2id + TOTP) (verified on PostgreSQL 17 and Playwright e2e; `pnpm break-glass set` not yet run on the production server)
+- [x] Sessions, CSRF Origin check, dev login compiled out of production (verified on PostgreSQL 17 in `auth-sessions.int.test.ts` and Playwright e2e)
+- [x] Users, teams, roles, capabilities with own/team/all scope and `scopeWhere` (verified on PostgreSQL 17 and Playwright e2e)
+- [x] Audit log (append-only grants and triggers proven on PostgreSQL 17; admin viewer verified in e2e)
+- [x] Settings store, file storage interface, in-app notifications (verified on PostgreSQL 17 and Playwright e2e)
+- [ ] Outbox and worker (pg-boss), dead-letter alert (worker verified on PostgreSQL 17; admin dead-letter notifications and retry UI still to build in Milestone 8)
+- [x] Host routing (`crm.` vs `go.`) (verified over TCP socket in `m4-intake-routing-unsubscribe.int.test.ts`)
+- [ ] Access JWT check (`CF_ACCESS_*` config exists; verification middleware lands in Milestone 2)
+- [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (files exist; production fixes and server deploy pending)
+- [ ] Off-site backups and restore-drill script (`scripts/restore-drill.sh` is currently a stub; full encrypted backup & restore drill land in Milestone 10/14)
+- [ ] `scripts/deploy.sh` with smoke checks and rollback (currently a stub; full implementation lands in Milestone 10)
 - [ ] **Exit:** SSO through Access in production; scope tests pass; role changes audited; first restore drill passes; external alert fires when the tunnel stops
 
 ### Phase 2: Core records and intake
 
-- [ ] Companies, contacts, leads and status history (built with edit screens and tests on PGlite; not run on real PostgreSQL)
-- [ ] Reference lists seeded (PRD 3.4) (in migration 0003; admin editing not built)
-- [ ] Notes, tags, custom fields, record history, basic timeline (all but custom fields built and tested on PGlite)
-- [ ] Filter language, field registry, saved views (filter language and registry built; saved views not built)
-- [ ] Global search (trigram + full-text) (trigram search works in the palette; full-text not built)
-- [ ] Imports: upload, mapping, dry run, background run, error CSV, rollback (built and tested on PGlite, ADR 0008; A1 speed not yet measured on real PostgreSQL)
-- [ ] Duplicate rules, review queue, merge with undo (built and tested on PGlite, ADR 0009; not yet run on real PostgreSQL)
-- [ ] Exports (permissioned, audited) (built and tested on PGlite, ADR 0010; speed on the large seed not yet measured)
+- [x] Companies, contacts, leads and status history (verified on PostgreSQL 17 and Playwright e2e)
+- [x] Reference lists seeded and admin-editable (PRD 3.4) (verified on PostgreSQL 17 and Playwright e2e)
+- [ ] Notes, tags, custom fields, record history, basic timeline (notes, tags, history and timeline verified on PostgreSQL 17; custom fields land in Milestone 3)
+- [ ] Filter language, field registry, saved views (filter language and registry verified on PostgreSQL 17; saved views land in Milestone 3)
+- [ ] Global search (trigram + full-text) (trigram search verified on 60k contacts on PostgreSQL 17; full-text notes/email subject index lands in Milestone 3/5)
+- [ ] Imports: upload, mapping, dry run, background run, error CSV, rollback (verified on PostgreSQL 17 and Playwright e2e, ADR 0008; 10,000-row XLSX < 5 min benchmark pending)
+- [x] Duplicate rules, review queue, merge with undo (verified on PostgreSQL 17 and Playwright e2e, ADR 0009; profile "Merge with…" shortcut lands in Milestone 3)
+- [x] Exports (permissioned, audited, background > 5,000 rows) (verified on PostgreSQL 17 and Playwright e2e, ADR 0010)
 - [x] Suppressions, suppressed domains, consent records (verified on PostgreSQL 17 and Playwright e2e on 12 Nov 2026; ADR 0013)
 - [x] Privacy operations: access export and erasure (verified on PostgreSQL 17 and Playwright e2e on 12 Nov 2026; A14 passing)
 - [x] Website inquiry endpoint, routing, reply task (verified on PostgreSQL 17 and Playwright e2e on 18 Nov 2026; ADR 0014; A13 passing; notification email awaits Phase 3 M365 Graph)
-- [ ] Basic dashboard (not built)
+- [x] Basic dashboard (verified on PostgreSQL 17 and Playwright e2e; period-over-period delta chips land in Milestone 4)
 - [ ] **Exit:** A1–A6, A13–A14 pass against PostgreSQL; the live website trial form creates a lead and reply task in production
 
 ### Phase 3: Sales and cutover
 
-- [ ] Pipelines and stages with required fields, deals (built and tested on PGlite; admin editing of stages not built)
-- [ ] Kanban (keyboard accessible) and deal table (built: stage moves by select, no drag and drop yet)
-- [ ] Lead conversion (prototype API works)
-- [ ] Tasks (list and calendar), reminders, SLA warnings
-- [ ] Email notifications and digest via Graph shared mailbox
-- [ ] Role dashboards, standard reports, metric definitions (PRD 14), FX rates
+- [x] Pipelines and stages with required fields, deals, and admin stage editor (verified on PostgreSQL 17 and Playwright e2e)
+- [ ] Kanban (keyboard accessible) and deal table (table and stage mover verified on PostgreSQL 17; keyboard drag-and-drop and deal contact roles land in Milestone 3)
+- [ ] Lead conversion (API conversion works; interactive conversion drawer with pipeline/stage/terms choice lands in Milestone 3)
+- [ ] Tasks (list and calendar), reminders, SLA warnings (list, reminders and SLA warnings verified on PostgreSQL 17; recurring tasks, team view and calendar view land in Milestone 3)
+- [ ] Email notifications and digest via Graph shared mailbox (awaits Microsoft 365 Graph connector in Milestone 5)
+- [ ] Role dashboards, standard reports, metric definitions (PRD 14), FX rates (role dashboards built; standalone standard reports screen & FX admin land in Milestone 3/4)
 - [ ] Bigin migration and cutover
 - [ ] **Exit:** A7–A9 pass; Bigin reconciles; team works only in ADAS CRM for 2 weeks
 
@@ -195,6 +195,8 @@ Demo logic for these phases exists in `apps/api/src/modules/*` and runs against 
 - [ ] **Exit:** Apollo import deduplicates with Apollo IDs; n8n reacts to `deal.won`; scoring is configurable and explained
 
 ## Review log
+
+- **18 Nov 2026, Milestone 1: production repository audit and documentation reconciliation.** Completed a full technical audit in [`docs/PRODUCTION_AUDIT.md`](PRODUCTION_AUDIT.md) across frontend, backend, database migrations, background jobs, outreach, security headers, Docker/Cloudflare configs, deployer `.exe`, CI/CD, and installer/Electron desktop management requirements. Reconciled stale prototype descriptions in `PROGRESS.md` and `README.md`, removed the generated `ADAS-CRM-Deployer.exe` binary from Git tracking (`.gitignore` + `dist/deployer/` output), and fixed `scripts/build-deployer-exe.mjs` so non-Windows CI builds cleanly without requiring a tracked `.exe`.
 
 - **18 Nov 2026, M4: website inquiry intake, market routing rules and public host guardrails.** Built migration `0012_intake_routing_and_tokens` (`inquiries`, `routing_rules`, `public_rate_events`, `consent_records.inquiry_id`, `unsubscribe_tokens.token_sha256`; ADR 0014). `WebsiteIntakeService` now stores sanitised raw submissions with salted `ip_sha256` (never raw IPs), deduplicates on `(email, formType, utcDay)` as well as 24-hour open leads, links free-mail inquiries with a firm name to a company whose `domain` remains `NULL`, honours active suppressions and drops re-inquiries from `privacy_erasure` hashes, links `consent_records.inquiry_id`, creates the 1-business-day SLA task, and notifies the assigned owner in-app. Market routing rules (`US`, `CA`, `OTHER`) now persist in `routing_rules` (`round_robin` excluding read-only roles, or `named_owner`) and are editable in `Settings → Routing` alongside a Recent website inquiries panel (verified with Playwright + axe at 1440px and 375px, screenshots `24-routing-*`). Hardened `POST /api/v1/public/inquiries` to return strictly `202 {"status":"received"}` without leaking internal IDs or honeypot hits, added salted per-IP rate limiting (`5` per 10 minutes → `429` with `Retry-After: 600`), enabled `/healthz` on `go.`, switched `unsubscribe_tokens` to store `token_sha256` only (`A12`), and extended privacy export/erasure and `housekeeping.purge` (`public_rate_events` > 1h, `inquiries` > 24 months). Found and fixed while inspecting screenshots: the Recent website inquiries table lacked horizontal cell padding until switched to `live-kit` table classes.
 

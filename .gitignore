@@ -6,6 +6,8 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+/ADAS-CRM-Deployer.exe
+release/
 
 # Environment and secrets (NEVER commit)
 .env

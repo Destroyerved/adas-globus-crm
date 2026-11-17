@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-bundle | Out-Null
-          Copy-Item ADAS-CRM-Deployer.exe -Destination release-bundle/
+          Copy-Item dist/deployer/ADAS-CRM-Deployer.exe -Destination release-bundle/ADAS-CRM-Deployer.exe
           Copy-Item README.md -Destination release-bundle/
           Copy-Item .env.example -Destination release-bundle/
           Copy-Item package.json -Destination release-bundle/
@@ -52,20 +52,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "ADAS CRM ${{ github.ref_name }} — One-Click 16GB Server & Cloudflare Deployer (.exe)"
+          name: "ADAS CRM ${{ github.ref_name }} — Server Installer & Deployment Bundle"
           body: |
-            ## ADAS CRM ${{ github.ref_name }} — Production Release (Phases 0–6 Complete)
+            ## ADAS CRM ${{ github.ref_name }}
+
+            See `docs/PROGRESS.md` and `docs/PRODUCTION_READINESS_REPORT.md` for verified capabilities and external connector requirements.
 
             ### Attached Release Assets
-            1. **`ADAS-CRM-Deployer.exe`** — Standalone Windows GUI + CLI One-Click Deployer with built-in **Cloudflare Tunnel (`crm.`, `go.`, `status.`, `automation.`)**, **Anti-Spam DNS (`SPF`, `2048-bit DKIM`, `DMARC p=quarantine`)**, and **16 GB RAM server provisioning**.
-            2. **`ADAS-CRM-16GB-Server-Bundle.zip`** — Complete deployment bundle including `ADAS-CRM-Deployer.exe`, `infra/compose.prod.yml` (16 GB RAM tuned), `infra/postgres/postgresql.16gb.conf`, and `infra/n8n/workflows/` (Workflows 01 & 02).
-
-            ### Quick Start on Your 16 GB Server
-            ```powershell
-            # Option A: Double-click ADAS-CRM-Deployer.exe (GUI Mode)
-            # Option B: Headless CLI Provision + Start
-            .\ADAS-CRM-Deployer.exe --start-service --domain yourdomain.com
-            ```
+            1. **`ADAS-CRM-Deployer.exe`** — Windows Server Installer & Provisioning Wizard (`dist/deployer/ADAS-CRM-Deployer.exe`).
+            2. **`ADAS-CRM-16GB-Server-Bundle.zip`** — Deployment bundle (`infra/`, `.env.example`, `README.md`, and installer).
           files: |
-            ADAS-CRM-Deployer.exe
+            dist/deployer/ADAS-CRM-Deployer.exe
             ADAS-CRM-16GB-Server-Bundle.zip
