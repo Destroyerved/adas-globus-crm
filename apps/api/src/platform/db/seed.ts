@@ -11,6 +11,13 @@ export const SEED_SQL: readonly string[] = [
         ('team_ca', 'Canada Chartered Practice Team', 'CA')
       ON CONFLICT (id) DO NOTHING;
 
+      INSERT INTO routing_rules (market, mode, team_id) VALUES
+        ('US', 'round_robin', 'team_us'),
+        ('CA', 'round_robin', 'team_ca'),
+        ('OTHER', 'round_robin', 'team_us')
+      ON CONFLICT (market) DO UPDATE
+        SET team_id = COALESCE(routing_rules.team_id, EXCLUDED.team_id);
+
       INSERT INTO roles (id, name, description, is_system) VALUES
         ('role_admin', 'Admin', 'Full system administration and compliance control', TRUE),
         ('role_sales_mgr', 'Sales Manager', 'Manages team pipeline, sequences, and conversions', TRUE),

@@ -27,7 +27,13 @@ export class AuthAndUsersService {
     const cleanHost = host.toLowerCase().split(':')[0] ?? '';
     if (cleanHost.startsWith('go.')) {
       const isPublicRoute =
-        path.startsWith('/u/') || path.startsWith('/api/v1/public/') || path === '/api/v1/health';
+        path === '/healthz' ||
+        path === '/api/v1/healthz' ||
+        path === '/api/v1/health' ||
+        path.startsWith('/u/') ||
+        path.startsWith('/c/') ||
+        path.startsWith('/api/v1/public/') ||
+        path.startsWith('/api/v1/webhooks/');
       return {
         allowed: isPublicRoute,
         target: 'go',

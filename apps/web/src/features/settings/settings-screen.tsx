@@ -5,18 +5,28 @@ import { ListsTab } from './lists-tab.js';
 import { PipelinesTab } from './pipelines-tab.js';
 import { PreferencesTab } from './preferences-tab.js';
 import { RolesTab } from './roles-tab.js';
+import { RoutingTab } from './routing-tab.js';
 import { SuppressionsTab } from './suppressions-tab.js';
 import { TeamsTab } from './teams-tab.js';
 import { UsersTab } from './users-tab.js';
 
 type TabId =
-  'preferences' | 'people' | 'teams' | 'roles' | 'pipelines' | 'lists' | 'suppressions' | 'audit';
+  | 'preferences'
+  | 'people'
+  | 'teams'
+  | 'roles'
+  | 'pipelines'
+  | 'routing'
+  | 'lists'
+  | 'suppressions'
+  | 'audit';
 
 const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'people', label: 'People', capability: 'users.manage' },
   { id: 'teams', label: 'Teams', capability: 'users.manage' },
   { id: 'roles', label: 'Roles', capability: 'users.manage' },
   { id: 'pipelines', label: 'Pipelines', capability: 'settings.manage' },
+  { id: 'routing', label: 'Routing', capability: 'settings.manage' },
   { id: 'lists', label: 'Lists', capability: 'settings.manage' },
   { id: 'suppressions', label: 'Suppressions', capability: 'compliance.manage' },
   { id: 'audit', label: 'Audit log', capability: 'audit.read' },
@@ -27,7 +37,7 @@ const TABS: { id: TabId; label: string; capability: string | null }[] = [
  * Settings (PRD 4.17). Each tab shows only for people whose role allows it; the API checks
  * the same capability on every request.
  */
-export function SettingsScreen() {
+export function SettingsScreen({ onOpenLead }: { onOpenLead?: (leadId: string) => void } = {}) {
   const me = useMe();
   const tabs = TABS.filter((t) => t.capability === null || can(me, t.capability));
   const [state, setState] = useUrlState({ tab: '' });
@@ -65,6 +75,7 @@ export function SettingsScreen() {
         {active?.id === 'teams' && <TeamsTab />}
         {active?.id === 'roles' && <RolesTab />}
         {active?.id === 'pipelines' && <PipelinesTab />}
+        {active?.id === 'routing' && <RoutingTab onOpenLead={onOpenLead} />}
         {active?.id === 'lists' && <ListsTab />}
         {active?.id === 'suppressions' && <SuppressionsTab />}
         {active?.id === 'audit' && <AuditTab />}

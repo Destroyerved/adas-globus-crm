@@ -28,7 +28,7 @@ import { DataQualityService } from './modules/data-quality/index.js';
 import { ImportService, registerImportRoutes } from './modules/imports/index.js';
 import { DuplicateService, registerDuplicateRoutes } from './modules/duplicates/index.js';
 import { ExportService, registerExportRoutes } from './modules/exports/index.js';
-import { WebsiteIntakeService } from './modules/intake/index.js';
+import { WebsiteIntakeService, registerIntakeRoutes } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
 import {
@@ -184,7 +184,9 @@ export function createAppServer(
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
   const compliance = new ComplianceService(db);
   const crm = new CrmService(db);
-  const intake = new WebsiteIntakeService(db);
+  const intake = new WebsiteIntakeService(db, {
+    rateLimitPer10Min: env.INQUIRY_RATE_LIMIT_PER_10M,
+  });
   const dataQuality = new DataQualityService(db);
   const outreach = new OutreachService(db, compliance, transport);
   const intelligence = new IntelligenceService(db);
@@ -195,6 +197,7 @@ export function createAppServer(
   const router = new Router();
   registerCrmRoutes(router, { crm, lists, records, timeline });
   registerComplianceRoutes(router, compliance);
+  registerIntakeRoutes(router, intake);
   const admin = new AdminService(db);
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
@@ -372,12 +375,21 @@ export function createAppServer(
         return;
       }
 
-      // Public Website Inquiry Intake (`POST /api/v1/public/inquiries` — PRD §4.10 A1 & A2)
+      // Public Website Inquiry Intake (`POST /api/v1/public/inquiries` — PRD §4.10, A13).
+      // Always returns `202 {"status":"received"}` so bots and external callers learn nothing
+      // about honeypot hits, deduplication or internal CRM IDs.
       if (method === 'POST' && pathname === '/api/v1/public/inquiries') {
         const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
-        const result = await intake.handlePublicInquiry(body as never);
-        res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(result));
+        await intake.handlePublicInquiry(body as never, {
+          ipAddress: clientIpOf(req),
+          userAgent:
+            typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
+        });
+        res.writeHead(202, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(serializeJson({ status: 'received' }));
         return;
       }
 
@@ -739,9 +751,13 @@ export function createAppServer(
         res.end();
         return;
       }
-      res.writeHead(problem.status, {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/problem+json; charset=utf-8',
-      });
+      };
+      if (problem.status === 429) {
+        headers['Retry-After'] = '600';
+      }
+      res.writeHead(problem.status, headers);
       res.end(serializeJson(problem));
     }
   });

@@ -423,6 +423,7 @@ export const WebsiteInquiryPayloadSchema = z.object({
   need: z.string().optional().nullable(), // trial form "What do you need?"
   location: z.string().optional().nullable(), // contact form state / province
   interests: z.union([z.array(z.string()), z.string()]).optional(), // contact form chips, comma-separated
+  form: z.enum(['trial', 'contact', 'consultation']).optional(),
   formType: z.enum(['trial', 'contact', 'consultation']).default('trial'),
   utmSource: z.string().optional().nullable(),
   utmMedium: z.string().optional().nullable(),

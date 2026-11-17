@@ -59,6 +59,7 @@ export const EnvSchema = z
       .string()
       .min(1)
       .default('https://www.adasglobuspro.com,https://adasglobuspro.com,http://localhost:5173'),
+    INQUIRY_RATE_LIMIT_PER_10M: z.coerce.number().int().min(1).max(1000).default(5),
 
     DEFAULT_REPORTING_CURRENCY: CurrencySchema.default('USD'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),

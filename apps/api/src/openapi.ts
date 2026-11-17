@@ -184,8 +184,14 @@ const openApiSpec = {
     '/public/inquiries': {
       post: {
         operationId: 'submitPublicInquiry',
-        summary: 'Public website form intake endpoint (PRD §4.10)',
-        responses: { '200': { description: 'Accepted' } },
+        summary:
+          'Public website form intake endpoint on go.adasglobuspro.com; stores raw submission in inquiries, deduplicates on (email, form, day), routes by market, creates 1-business-day SLA task and returns generic 202 {"status":"received"} (PRD 4.10, A13)',
+        responses: {
+          '202': { description: 'Received ({"status":"received"})' },
+          '413': { description: 'Body exceeds 16 KB' },
+          '422': { description: 'Invalid email or payload' },
+          '429': { description: 'Per-IP rate limit exceeded (5 per 10 minutes)' },
+        },
       },
     },
     '/compliance/check-sendable': {
@@ -822,6 +828,56 @@ const complianceAndPrivacyPaths: Record<string, Record<string, unknown>> = {
   },
 };
 
+const intakeAndRoutingPaths = {
+  '/admin/routing-rules': {
+    get: {
+      operationId: 'listRoutingRules',
+      summary:
+        'List market routing rules (US, CA, OTHER) for inbound website inquiries (requires settings.manage — PRD 4.10, 4.17, 15 Q13)',
+      responses: ok('{ items }'),
+    },
+  },
+  '/admin/routing-rules/{market}': {
+    put: {
+      operationId: 'updateRoutingRule',
+      summary:
+        'Update a market routing rule (round-robin within a team or named active owner; optimistic concurrency version; audited — PRD 4.17, 9)',
+      parameters: [
+        {
+          name: 'market',
+          in: 'path',
+          required: true,
+          schema: { type: 'string', enum: ['US', 'CA', 'OTHER'] },
+        },
+      ],
+      responses: {
+        '200': { description: 'Updated' },
+        '403': { description: 'Requires settings.manage' },
+        '409': { description: 'Stale version' },
+        '422': { description: 'Invalid team or inactive/non-writable owner' },
+      },
+    },
+  },
+  '/admin/inquiries': {
+    get: {
+      operationId: 'listRecentInquiries',
+      summary:
+        'Keyset-paged summary of recent website inquiries without personal message bodies or raw IP addresses (requires settings.manage — PRD 4.10, 4.17)',
+      parameters: [
+        { name: 'cursor', in: 'query', schema: { type: 'string' } },
+        { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 } },
+        { name: 'market', in: 'query', schema: { type: 'string', enum: ['US', 'CA', 'OTHER'] } },
+        {
+          name: 'formType',
+          in: 'query',
+          schema: { type: 'string', enum: ['trial', 'contact', 'consultation'] },
+        },
+      ],
+      responses: ok('{ items, nextCursor, total }'),
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
@@ -829,6 +885,7 @@ for (const [path, methods] of Object.entries({
   ...duplicatePaths,
   ...exportPaths,
   ...complianceAndPrivacyPaths,
+  ...intakeAndRoutingPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

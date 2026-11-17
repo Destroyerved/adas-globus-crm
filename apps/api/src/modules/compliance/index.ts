@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   AddSuppressedDomainInputSchema,
   AddSuppressionInputSchema,
@@ -1093,20 +1093,23 @@ export class ComplianceService {
     channel?: string;
     sourceId?: string | null;
   }): Promise<string> {
-    const token = `unsub_${randomUUID().replace(/-/g, '')}`;
+    const rawToken = `unsub_${randomBytes(24).toString('hex')}`;
+    const tokenSha256 = sha256Hex(rawToken);
+    const rowId = `utk_${randomUUID()}`;
     const cleanEmail = normalizeEmail(options.email) ?? options.email.trim().toLowerCase();
     await this.db.query(
-      `INSERT INTO unsubscribe_tokens (token, email, contact_id, channel, source_id)
-       VALUES ($1, $2, $3, $4, $5)`,
+      `INSERT INTO unsubscribe_tokens (token, token_sha256, email, contact_id, channel, source_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
-        token,
+        rowId,
+        tokenSha256,
         cleanEmail,
         options.contactId ?? null,
         options.channel ?? 'sequence',
         options.sourceId ?? null,
       ],
     );
-    return token;
+    return rawToken;
   }
 
   /**
@@ -1116,22 +1119,42 @@ export class ComplianceService {
   async describeUnsubscribeToken(
     token: string,
   ): Promise<{ maskedEmail: string; alreadyUnsubscribed: boolean }> {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      throw new NotFoundDomainError('Unsubscribe link', 'token');
+    }
+    const tokenSha256 = sha256Hex(trimmed);
     const res = await this.db.query<{ email: string; used_at: string | null }>(
-      `SELECT email, used_at FROM unsubscribe_tokens WHERE token = $1 LIMIT 1`,
-      [token],
+      `SELECT email, used_at
+       FROM unsubscribe_tokens
+       WHERE token_sha256 = $1 OR (token_sha256 IS NULL AND token = $2)
+       LIMIT 1`,
+      [tokenSha256, trimmed],
     );
     const row = res.rows[0];
     if (!row) {
       throw new NotFoundDomainError('Unsubscribe link', 'token');
     }
+    const isErased = row.email.endsWith('@erased.invalid');
     const [local = '', domain = ''] = row.email.split('@');
-    const maskedEmail = `${local.slice(0, 1)}${'*'.repeat(Math.max(1, local.length - 1))}@${domain}`;
-    return { maskedEmail, alreadyUnsubscribed: row.used_at !== null };
+    const maskedEmail = isErased
+      ? 'this address'
+      : `${local.slice(0, 1)}${'*'.repeat(Math.max(1, local.length - 1))}@${domain}`;
+    if (isErased || row.used_at !== null) {
+      return { maskedEmail, alreadyUnsubscribed: true };
+    }
+    const sup = await this.db.query<{ id: string }>(
+      `SELECT id FROM suppressions
+       WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
+       LIMIT 1`,
+      [row.email, sha256Hex(row.email)],
+    );
+    return { maskedEmail, alreadyUnsubscribed: sup.rows.length > 0 };
   }
 
   /**
-   * PRD §5.4 (A17) — Public one-click RFC 8058 unsubscribe and preference center.
-   * Never requires login.
+   * PRD §5.5 & §8.6 (A12) — Public one-click RFC 8058 unsubscribe and preference page.
+   * Never requires login; stores hashed tokens and suppresses immediately.
    */
   async handleUnsubscribeToken(
     token: string,
@@ -1141,19 +1164,45 @@ export class ComplianceService {
     emailSha256: string;
     stoppedEnrollments: number;
   }> {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      throw new NotFoundDomainError('Unsubscribe link', 'token');
+    }
+    const tokenSha256 = sha256Hex(trimmed);
     const tokenRow = await this.db.query<{
       token: string;
       email: string;
       contact_id: string | null;
-    }>(`SELECT token, email, contact_id FROM unsubscribe_tokens WHERE token = $1 LIMIT 1`, [token]);
+    }>(
+      `SELECT token, email, contact_id
+       FROM unsubscribe_tokens
+       WHERE token_sha256 = $1 OR (token_sha256 IS NULL AND token = $2)
+       LIMIT 1`,
+      [tokenSha256, trimmed],
+    );
 
     const found = tokenRow.rows[0];
     if (!found) {
       throw new NotFoundDomainError('Unsubscribe link', 'token');
     }
 
+    if (found.email.endsWith('@erased.invalid')) {
+      await this.db.query(
+        `UPDATE unsubscribe_tokens SET used_at = COALESCE(used_at, NOW()) WHERE token = $1`,
+        [found.token],
+      );
+      return {
+        unsubscribed: true,
+        emailSha256: sha256Hex(found.email),
+        stoppedEnrollments: 0,
+      };
+    }
+
     const result = await this.db.transaction(async (tx) => {
-      await tx.query(`UPDATE unsubscribe_tokens SET used_at = NOW() WHERE token = $1`, [token]);
+      await tx.query(
+        `UPDATE unsubscribe_tokens SET used_at = COALESCE(used_at, NOW()) WHERE token = $1`,
+        [found.token],
+      );
       return this.addSuppression(
         {
           email: found.email,
@@ -1209,6 +1258,7 @@ export class ComplianceService {
       suppressionRes,
       enrollmentsRes,
       sendsRes,
+      inquiriesRes,
     ] = await Promise.all([
       contact['company_id']
         ? this.db.query(
@@ -1283,6 +1333,13 @@ export class ComplianceService {
          ORDER BY sent_at DESC`,
         [contactId, allEmails],
       ),
+      this.db.query(
+        `SELECT id, form_type, market, page_url, deduplicated, raw_payload, created_at
+         FROM inquiries
+         WHERE contact_id = $1 OR email_sha256 = ANY($2::text[])
+         ORDER BY created_at DESC`,
+        [contactId, allHashes],
+      ),
     ]);
 
     return {
@@ -1300,6 +1357,7 @@ export class ComplianceService {
       suppressions: suppressionRes.rows,
       sequenceEnrollments: enrollmentsRes.rows,
       messageSends: sendsRes.rows,
+      inquiries: inquiriesRes.rows,
     };
   }
 
@@ -1514,6 +1572,18 @@ export class ComplianceService {
         ]),
       );
     }
+    for (const inq of bundle.inquiries) {
+      lines.push(
+        csvLine([
+          'inquiry',
+          String(inq['id']),
+          isoString(inq['created_at']),
+          String(inq['form_type'] ?? ''),
+          String(inq['market'] ?? ''),
+          String(inq['page_url'] ?? ''),
+        ]),
+      );
+    }
 
     const day = bundle.exportedAt.slice(0, 10);
     return {
@@ -1716,6 +1786,16 @@ export class ComplianceService {
              used_at = COALESCE(used_at, NOW())
          WHERE contact_id = $1 OR email = ANY($3::text[])`,
         [contactId, redactedEmail, addresses],
+      );
+
+      const addressHashes = addresses.map(sha256Hex);
+      await tx.query(
+        `UPDATE inquiries
+         SET raw_payload = '{}'::jsonb,
+             user_agent = NULL,
+             page_url = NULL
+         WHERE contact_id = $1 OR email_sha256 = ANY($2::text[])`,
+        [contactId, addressHashes],
       );
 
       await tx.query(

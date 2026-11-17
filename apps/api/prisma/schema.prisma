@@ -22,6 +22,10 @@
 //   prisma/migrations/0010_list_indexes/migration.sql (partial and expression indexes for the
 //   list sorts: name, last contacted, created, status, score, value, close date, due and
 //   completed; ADR 0011)
+//   prisma/migrations/0011_compliance_and_privacy/migration.sql (suppression lift columns,
+//   privacy_erasure immutability trigger, consent purpose/revocation columns; ADR 0013)
+//   prisma/migrations/0012_intake_routing_and_tokens/migration.sql (inquiries, routing_rules,
+//   public_rate_events, consent_records.inquiry_id, unsubscribe_tokens.token_sha256; ADR 0014)
 
 generator client {
   provider = "prisma-client-js"
@@ -428,4 +432,55 @@ model ImportMappingTemplate {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("import_mapping_templates")
+}
+
+// Raw website inquiries, market routing rules and public rate-limit events (PRD 4.10, 4.17, 9).
+// Check constraints, partial indexes and grants live in migrations/0012_intake_routing_and_tokens/migration.sql.
+model Inquiry {
+  id              String   @id
+  dedupKey        String   @map("dedup_key")
+  formType        String   @map("form_type")
+  market          String
+  emailSha256     String   @map("email_sha256")
+  rawPayload      Json     @default("{}") @map("raw_payload")
+  ipSha256        String?  @map("ip_sha256")
+  userAgent       String?  @map("user_agent")
+  pageUrl         String?  @map("page_url")
+  deduplicated    Boolean  @default(false)
+  leadId          String?  @map("lead_id")
+  contactId       String?  @map("contact_id")
+  companyId       String?  @map("company_id")
+  consentRecordId String?  @map("consent_record_id")
+  slaTaskId       String?  @map("sla_task_id")
+  assignedUserId  String?  @map("assigned_user_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([dedupKey, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([emailSha256])
+  @@map("inquiries")
+}
+
+model RoutingRule {
+  market             String   @id
+  mode               String   @default("round_robin")
+  teamId             String?  @map("team_id")
+  ownerUserId        String?  @map("owner_user_id")
+  lastAssignedUserId String?  @map("last_assigned_user_id")
+  version            Int      @default(1)
+  updatedByUserId    String?  @map("updated_by_user_id")
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("routing_rules")
+}
+
+model PublicRateEvent {
+  id        String   @id
+  endpoint  String
+  ipSha256  String   @map("ip_sha256")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([endpoint, ipSha256, createdAt(sort: Desc)])
+  @@index([createdAt])
+  @@map("public_rate_events")
 }

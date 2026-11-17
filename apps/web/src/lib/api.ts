@@ -8,6 +8,8 @@ import {
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
+  type InquiryFormType,
+  type InquirySummaryView,
   type LiftSuppressionInput,
   type Market,
   type MarketingBasisSummary,
@@ -18,7 +20,9 @@ import {
   type PrivacyEraseInput,
   type RecordConsentInput,
   type RemoveSuppressedDomainInput,
+  type RoutingRuleView,
   type SuppressionStateFilter,
+  type UpdateRoutingRuleInput,
   type WithdrawConsentInput,
 } from '@adas/shared';
 
@@ -779,6 +783,27 @@ export const api = {
   adminSettings: () => request<Items<SettingRow>>('/admin/settings').then((r) => r.items),
   updateSetting: (key: string, version: number, value: unknown) =>
     put<SettingRow>(`/admin/settings/${enc(key)}`, { version, value }),
+  routingRules: () => request<Items<RoutingRuleView>>('/admin/routing-rules').then((r) => r.items),
+  updateRoutingRule: (market: Market, input: UpdateRoutingRuleInput) =>
+    put<RoutingRuleView>(`/admin/routing-rules/${enc(market)}`, input),
+  recentInquiries: (
+    params: {
+      cursor?: string | null;
+      limit?: number;
+      market?: Market | '';
+      formType?: InquiryFormType | '';
+    } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.cursor) search.set('cursor', params.cursor);
+    if (params.limit) search.set('limit', String(params.limit));
+    if (params.market) search.set('market', params.market);
+    if (params.formType) search.set('formType', params.formType);
+    const qs = search.toString();
+    return request<{ items: InquirySummaryView[]; nextCursor: string | null; total: number }>(
+      `/admin/inquiries${qs ? `?${qs}` : ''}`,
+    );
+  },
   auditLogs: (params: Record<string, string | null | undefined>) => {
     const search = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);

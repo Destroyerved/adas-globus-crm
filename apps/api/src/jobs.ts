@@ -28,11 +28,15 @@ export const JOB_QUEUES = [
 
 /**
  * Deletes what nobody needs any more: replayable responses after their 24 hours
- * (ADR 0004) and sessions that ended more than 30 days ago.
+ * (ADR 0004), sessions that ended more than 30 days ago, public per-IP rate events older than
+ * 1 hour, and raw website inquiry rows older than 24 months (PRD 4.18, Q10 default).
  */
-export async function purgeExpired(
-  db: DatabaseService,
-): Promise<{ idempotencyKeys: number; sessions: number }> {
+export async function purgeExpired(db: DatabaseService): Promise<{
+  idempotencyKeys: number;
+  sessions: number;
+  rateEvents: number;
+  inquiries: number;
+}> {
   const keys = await db.query(
     `DELETE FROM idempotency_keys WHERE created_at < NOW() - INTERVAL '24 hours'`,
   );
@@ -40,7 +44,18 @@ export async function purgeExpired(
     `DELETE FROM sessions
      WHERE expires_at < NOW() - INTERVAL '30 days' OR revoked_at < NOW() - INTERVAL '30 days'`,
   );
-  return { idempotencyKeys: keys.rowCount, sessions: sessions.rowCount };
+  const rateEvents = await db.query(
+    `DELETE FROM public_rate_events WHERE created_at < NOW() - INTERVAL '1 hour'`,
+  );
+  const inquiries = await db.query(
+    `DELETE FROM inquiries WHERE created_at < NOW() - INTERVAL '24 months'`,
+  );
+  return {
+    idempotencyKeys: keys.rowCount,
+    sessions: sessions.rowCount,
+    rateEvents: rateEvents.rowCount,
+    inquiries: inquiries.rowCount,
+  };
 }
 
 export function buildWorker(

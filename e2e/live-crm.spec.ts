@@ -389,6 +389,7 @@ test('every settings tab passes axe and fits 1440px and 375px', async ({ page })
     ['teams', (p) => p.getByRole('button', { name: 'New team' })],
     ['roles', (p) => p.getByRole('columnheader', { name: 'Which records' })],
     ['pipelines', (p) => p.getByText('Free Trial (3-Day)').first()],
+    ['routing', (p) => p.getByRole('heading', { name: 'Website inquiry routing' })],
     ['lists', (p) => p.getByRole('heading', { name: 'Lead sources' })],
     ['suppressions', (p) => p.getByRole('button', { name: 'Add suppression' })],
     ['audit', (p) => p.getByRole('table', { name: 'Audit log, newest first' })],
@@ -793,4 +794,69 @@ test('consent is recorded, personal data is exported and a privacy erasure leave
   const erasedRow = page.getByRole('row', { name: /Erased address/ }).first();
   await expect(erasedRow).toBeVisible();
   await expect(erasedRow).toContainText('Permanent');
+});
+
+test('website inquiry routing rules persist, route live inquiries, notify the owner and pass axe at 1440px and 375px', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await signInAs(page, 'usr_admin_1');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=settings&tab=routing');
+
+  const caCard = page.getByTestId('routing-card-CA');
+  await expect(caCard).toBeVisible();
+
+  // Route Canadian inquiries to Ved Shah (usr_admin_1) so we also verify the notification bell.
+  await caCard.getByLabel('Assignment method').selectOption('named_owner');
+  await caCard.getByLabel('Assigned owner').selectOption('usr_admin_1');
+  await caCard.getByRole('button', { name: 'Save rule' }).click();
+  await expect(caCard).toContainText('Assigned to Ved Shah');
+
+  // Reload to verify PostgreSQL persistence.
+  await page.reload();
+  await expect(page.getByTestId('routing-card-CA')).toContainText('Assigned to Ved Shah');
+
+  // Submit a live website trial inquiry via the public endpoint.
+  const pubRes = await page.request.post('/api/v1/public/inquiries', {
+    headers: { 'Cf-Connecting-Ip': '198.51.100.201' },
+    data: {
+      name: 'Mathieu Pelletier',
+      email: 'mathieu.pelletier@pelletiercpa.example.ca',
+      firm: 'Pelletier & Associés CPA',
+      phone: '+1 514 555 0144',
+      need: 'Tax preparation and review',
+      country: 'Canada',
+      software: 'TaxCycle, QuickBooks',
+      message: 'Need two dedicated tax preparers before January',
+    },
+  });
+  expect(pubRes.status()).toBe(202);
+  expect(await pubRes.json()).toEqual({ status: 'received' });
+
+  await page.reload();
+  await expect(page.getByText('Pelletier & Associés CPA')).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `24-routing-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Open notification bell and verify the new website inquiry notification is there.
+  await page.getByRole('button', { name: /Notifications/ }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Notifications' }).getByText(/Pelletier & Associés CPA/),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Click the lead in Recent website inquiries to open its Lead profile.
+  await page.getByRole('button', { name: 'Mathieu Pelletier' }).click();
+  await expect(page.getByRole('heading', { name: 'Mathieu Pelletier' })).toBeVisible();
+  await expect(page.getByText('Reply to website inquiry: Mathieu Pelletier')).toBeVisible();
 });

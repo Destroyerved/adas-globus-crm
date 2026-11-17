@@ -193,7 +193,7 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             go={(screen, { id, ...params } = {}) => navigateScreen(screen, id ?? null, params)}
           />
         )}
-        {activeScreen === 'settings' && <SettingsScreen />}
+        {activeScreen === 'settings' && <SettingsScreen onOpenLead={openLead} />}
         {activeScreen === 'imports' && (
           <ImportsScreen
             importId={recordId}
