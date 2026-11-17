@@ -21,9 +21,15 @@ import {
   type RecordConsentInput,
   type RemoveSuppressedDomainInput,
   type RoutingRuleView,
+  type SavedView,
+  type SavedViewEntity,
   type SuppressionStateFilter,
   type UpdateRoutingRuleInput,
+  type UpdateSavedViewInput,
   type WithdrawConsentInput,
+  type BulkActionInput,
+  type BulkJobView,
+  type CreateSavedViewInput,
 } from '@adas/shared';
 
 const MERGE_PATH: Record<MergeEntity, string> = { contact: 'contacts', company: 'companies' };
@@ -942,6 +948,18 @@ export const api = {
       suppressedHashes: string[];
       scrubbedLeadCount: number;
     }>(`/contacts/${enc(contactId)}/privacy-erase`, input),
+
+  // Saved views & bulk actions (PRD 4.5, 4.8, 6.7)
+  listSavedViews: (entity: SavedViewEntity) =>
+    request<Items<SavedView>>(`/saved-views?entity=${enc(entity)}`).then((r) => r.items),
+  createSavedView: (input: CreateSavedViewInput) => createWithKey<SavedView>('/saved-views', input),
+  updateSavedView: (viewId: string, input: UpdateSavedViewInput) =>
+    patch<SavedView>(`/saved-views/${enc(viewId)}`, input),
+  deleteSavedView: (viewId: string) =>
+    del<{ id: string; deleted: true }>(`/saved-views/${enc(viewId)}`),
+  runBulkAction: (entity: SavedViewEntity, input: BulkActionInput) =>
+    createWithKey<BulkJobView>(`/${plural(entity)}/bulk`, input),
+  getBulkJob: (jobId: string) => request<BulkJobView>(`/bulk-jobs/${enc(jobId)}`),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

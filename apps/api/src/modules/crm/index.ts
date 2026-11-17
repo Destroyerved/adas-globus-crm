@@ -1247,6 +1247,8 @@ export { registerCrmRoutes } from './routes.js';
 export { CrmListService } from './lists.js';
 export { CrmRecordService } from './records.js';
 export { CrmTimelineService } from './timeline.js';
+export { SavedViewService } from './saved-views.js';
+export { BulkActionService } from './bulk.js';
 export { CrmJobs } from './jobs.js';
 export {
   ImportRecordWriter,

@@ -19,10 +19,12 @@ import {
 import { AdminService, registerAdminRoutes } from './modules/admin/index.js';
 import { ComplianceService, registerComplianceRoutes } from './modules/compliance/index.js';
 import {
+  BulkActionService,
   CrmListService,
   CrmRecordService,
   CrmService,
   CrmTimelineService,
+  SavedViewService,
   registerCrmRoutes,
 } from './modules/crm/index.js';
 import { DashboardService, registerDashboardRoutes } from './modules/dashboard/index.js';
@@ -215,9 +217,11 @@ export function createAppServer(
   const lists = new CrmListService(db);
   const records = new CrmRecordService(db);
   const timeline = new CrmTimelineService(db);
+  const savedViews = new SavedViewService(db);
+  const bulk = new BulkActionService(db, (userId) => auth.resolveSessionUser(userId), logger);
   const notifications = new NotificationService(db);
   const router = new Router();
-  registerCrmRoutes(router, { crm, lists, records, timeline });
+  registerCrmRoutes(router, { crm, lists, records, timeline, savedViews, bulk });
   registerComplianceRoutes(router, compliance);
   registerIntakeRoutes(router, intake);
   const admin = new AdminService(db);

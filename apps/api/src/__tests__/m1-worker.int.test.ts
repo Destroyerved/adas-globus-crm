@@ -285,6 +285,7 @@ describe('the worker on pg-boss', () => {
         `SELECT name FROM pgboss.queue WHERE name NOT LIKE '\\_\\_pgboss\\_\\_%' ORDER BY name`,
       );
       expect(queues.rows.map((q) => q.name)).toEqual([
+        'bulk.execute',
         'deals.idle',
         'duplicates.scan',
         'export.build',

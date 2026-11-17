@@ -9,3 +9,4 @@ export * from './merges.js';
 export * from './exports.js';
 export * from './compliance.js';
 export * from './intake.js';
+export * from './views-and-bulk.js';

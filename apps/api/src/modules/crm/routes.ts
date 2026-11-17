@@ -1,13 +1,15 @@
 import { type Router } from '../../platform/http/router.js';
 import { parseListRequest } from '../../platform/list/index.js';
 import { type CrmService } from './index.js';
+import { BulkActionService } from './bulk.js';
 import { CrmListService, LEAD_LIST, TASK_LIST } from './lists.js';
 import { CrmRecordService } from './records.js';
+import { SavedViewService } from './saved-views.js';
 import { CrmTimelineService } from './timeline.js';
 
 /**
- * HTTP routes for companies, contacts, leads, deals, tasks, notes, tags, activities and
- * timelines (PRD 6.7). Controllers stay thin: parse, call the service, return JSON.
+ * HTTP routes for companies, contacts, leads, deals, tasks, notes, tags, activities, saved views,
+ * bulk actions and timelines (PRD 6.7). Controllers stay thin: parse, call the service, return JSON.
  */
 export function registerCrmRoutes(
   router: Router,
@@ -16,9 +18,11 @@ export function registerCrmRoutes(
     lists: CrmListService;
     records: CrmRecordService;
     timeline: CrmTimelineService;
+    savedViews?: SavedViewService;
+    bulk?: BulkActionService;
   },
 ): void {
-  const { crm, lists, records, timeline } = services;
+  const { crm, lists, records, timeline, savedViews, bulk } = services;
 
   // ---- Leads (PRD 4.5)
   router.get('/api/v1/leads', async (ctx) => {
@@ -33,6 +37,12 @@ export function registerCrmRoutes(
   router.post('/api/v1/leads/convert', async (ctx) => {
     ctx.json(200, await crm.convertLead(ctx.user, (await ctx.body()) as never));
   });
+  if (bulk) {
+    router.post('/api/v1/leads/bulk', async (ctx) => {
+      const res = await bulk.submit(ctx.user, 'lead', await ctx.body(), ctx.ip);
+      ctx.json(res.background ? 202 : 200, res);
+    });
+  }
   router.post('/api/v1/leads/:id/convert', async (ctx) => {
     const body = await ctx.body();
     ctx.json(200, await crm.convertLead(ctx.user, { ...body, leadId: ctx.params['id'] } as never));
@@ -57,6 +67,12 @@ export function registerCrmRoutes(
   router.post('/api/v1/contacts', async (ctx) => {
     ctx.json(201, await crm.createContact(ctx.user, (await ctx.body()) as never));
   });
+  if (bulk) {
+    router.post('/api/v1/contacts/bulk', async (ctx) => {
+      const res = await bulk.submit(ctx.user, 'contact', await ctx.body(), ctx.ip);
+      ctx.json(res.background ? 202 : 200, res);
+    });
+  }
   router.get('/api/v1/contacts/:id', async (ctx) => {
     ctx.json(200, await timeline.contactProfile(ctx.user, ctx.params['id'] ?? ''));
   });
@@ -78,6 +94,12 @@ export function registerCrmRoutes(
     const result = await crm.createOrFindCompany(ctx.user, (await ctx.body()) as never);
     ctx.json(result.created ? 201 : 200, result);
   });
+  if (bulk) {
+    router.post('/api/v1/companies/bulk', async (ctx) => {
+      const res = await bulk.submit(ctx.user, 'company', await ctx.body(), ctx.ip);
+      ctx.json(res.background ? 202 : 200, res);
+    });
+  }
   router.get('/api/v1/companies/:id', async (ctx) => {
     ctx.json(200, await crm.getCompanyProfile(ctx.user, ctx.params['id'] ?? ''));
   });
@@ -95,6 +117,12 @@ export function registerCrmRoutes(
   router.post('/api/v1/deals', async (ctx) => {
     ctx.json(201, await crm.createDeal(ctx.user, (await ctx.body()) as never));
   });
+  if (bulk) {
+    router.post('/api/v1/deals/bulk', async (ctx) => {
+      const res = await bulk.submit(ctx.user, 'deal', await ctx.body(), ctx.ip);
+      ctx.json(res.background ? 202 : 200, res);
+    });
+  }
   router.get('/api/v1/deals/:id', async (ctx) => {
     ctx.json(200, await timeline.dealProfile(ctx.user, ctx.params['id'] ?? ''));
   });
@@ -182,6 +210,36 @@ export function registerCrmRoutes(
   router.get('/api/v1/reference-lists', async (ctx) => {
     ctx.json(200, await timeline.referenceLists());
   });
+
+  // ---- Saved views (PRD 4.8) & bulk job progress (PRD 6.7)
+  if (savedViews) {
+    router.get('/api/v1/saved-views', async (ctx) => {
+      ctx.json(200, await savedViews.list(ctx.user, ctx.query.get('entity') ?? ''));
+    });
+    router.post('/api/v1/saved-views', async (ctx) => {
+      ctx.json(201, await savedViews.create(ctx.user, await ctx.body(), ctx.ip));
+    });
+    router.patch('/api/v1/saved-views/:id', async (ctx) => {
+      ctx.json(
+        200,
+        await savedViews.update(ctx.user, ctx.params['id'] ?? '', await ctx.body(), ctx.ip),
+      );
+    });
+    router.delete('/api/v1/saved-views/:id', async (ctx) => {
+      ctx.json(200, await savedViews.remove(ctx.user, ctx.params['id'] ?? '', ctx.ip));
+    });
+  }
+  if (bulk) {
+    router.get('/api/v1/bulk-jobs/:id', async (ctx) => {
+      ctx.json(200, await bulk.getJob(ctx.user, ctx.params['id'] ?? ''));
+    });
+  }
 }
 
-export { CrmListService, CrmRecordService, CrmTimelineService };
+export {
+  BulkActionService,
+  CrmListService,
+  CrmRecordService,
+  CrmTimelineService,
+  SavedViewService,
+};

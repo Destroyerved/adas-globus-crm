@@ -4,7 +4,7 @@ import { type FileStorage } from './platform/files/index.js';
 import { JobRunner, type PeriodicJob } from './platform/jobs/index.js';
 import { OutboxDispatcher } from './platform/outbox/index.js';
 import { AuthAndUsersService } from './modules/auth/index.js';
-import { CrmJobs, CrmListService } from './modules/crm/index.js';
+import { BulkActionService, CrmJobs, CrmListService } from './modules/crm/index.js';
 import { DuplicateService } from './modules/duplicates/index.js';
 import { ExportService } from './modules/exports/index.js';
 import { ImportProcessor } from './modules/imports/index.js';
@@ -24,6 +24,7 @@ export const JOB_QUEUES = [
   'import.process',
   'duplicates.scan',
   'export.build',
+  'bulk.execute',
 ] as const;
 
 /**
@@ -69,10 +70,12 @@ export function buildWorker(
   imports: ImportProcessor;
   duplicates: DuplicateService;
   exports: ExportService;
+  bulk: BulkActionService;
   jobs: PeriodicJob[];
 } {
   const crm = new CrmJobs(db);
   const auth = new AuthAndUsersService(db);
+  const bulk = new BulkActionService(db, (userId) => auth.resolveSessionUser(userId), logger);
   // Rows are worked as the person who started the import, with their current access.
   const imports = new ImportProcessor(
     db,
@@ -119,6 +122,14 @@ export function buildWorker(
       run: () => duplicates.scan({ budgetMs: 20_000 }),
     },
     { name: 'export.build', everySeconds: 2, run: () => exportService.processNext() },
+    {
+      name: 'bulk.execute',
+      everySeconds: 2,
+      run: async () => {
+        const res = await bulk.processNext();
+        return { worked: res.jobId ? 1 : 0 };
+      },
+    },
   ];
   return {
     runner: new JobRunner(db, logger, jobs, { install: options.install }),
@@ -127,6 +138,7 @@ export function buildWorker(
     imports,
     duplicates,
     exports: exportService,
+    bulk,
     jobs,
   };
 }

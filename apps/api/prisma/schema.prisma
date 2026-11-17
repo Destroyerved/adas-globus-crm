@@ -28,6 +28,8 @@
 //   public_rate_events, consent_records.inquiry_id, unsubscribe_tokens.token_sha256; ADR 0014)
 //   prisma/migrations/0013_api_tokens_and_security/migration.sql (api_tokens scope_level,
 //   capabilities, expires_at, last_used_ip, active-hash index; ADR 0015)
+//   prisma/migrations/0014_saved_views_and_bulk_jobs/migration.sql (saved_views team_id,
+//   params_json, sort_spec, columns_json, version, updated_at; bulk_jobs table and indexes)
 
 generator client {
   provider = "prisma-client-js"
@@ -506,4 +508,53 @@ model ApiToken {
 
   @@index([createdByUserId, createdAt(sort: Desc)])
   @@map("api_tokens")
+}
+
+// Saved views (PRD 4.8) and bulk action jobs (PRD 4.5, 6.7). Migration 0001 + 0014.
+model SavedView {
+  id          String   @id
+  entityType  String   @map("entity_type")
+  name        String
+  ownerUserId String   @map("owner_user_id")
+  teamId      String?  @map("team_id")
+  isShared    Boolean  @default(false) @map("is_shared")
+  filterJson  Json     @default("{}") @map("filter_json")
+  paramsJson  Json     @default("{}") @map("params_json")
+  sortField   String   @default("updated_at") @map("sort_field")
+  sortDir     String   @default("desc") @map("sort_dir")
+  sortSpec    String   @default("-updatedAt") @map("sort_spec")
+  columnsJson Json     @default("[]") @map("columns_json")
+  density     String   @default("comfortable")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([entityType, ownerUserId, createdAt(sort: Desc)])
+  @@map("saved_views")
+}
+
+model BulkJob {
+  id            String    @id
+  entity        String
+  action        String
+  status        String    @default("queued")
+  background    Boolean   @default(false)
+  selectionJson Json      @default("{}") @map("selection_json")
+  payloadJson   Json      @default("{}") @map("payload_json")
+  totalRows     Int       @default(0) @map("total_rows")
+  processedRows Int       @default(0) @map("processed_rows")
+  succeededRows Int       @default(0) @map("succeeded_rows")
+  skippedRows   Int       @default(0) @map("skipped_rows")
+  failureReason String?   @map("failure_reason")
+  heartbeatAt   DateTime? @map("heartbeat_at") @db.Timestamptz(6)
+  requestedBy   String    @map("requested_by")
+  teamId        String?   @map("team_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  @@index([requestedBy, createdAt(sort: Desc)])
+  @@index([teamId])
+  @@map("bulk_jobs")
 }
