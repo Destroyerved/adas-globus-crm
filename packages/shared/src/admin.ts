@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MarketSchema } from './enums.js';
+import { MarketSchema, ScopeSchema } from './enums.js';
 
 /**
  * Administration and dashboard request schemas (PRD 2.1, 2.2, 3.3, 3.4, 4.2, 4.17, 14).
@@ -270,3 +270,33 @@ export function dashboardPresetRange(
       return { from: date(y, 1, 1), to: today };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Scoped Service API Tokens (PRD 4.14, 6.7, 9)
+// ---------------------------------------------------------------------------
+
+export const CreateApiTokenInputSchema = z.object({
+  name: z.string().trim().min(2, 'Enter a descriptive token name.').max(120),
+  capabilities: z
+    .array(z.string().regex(/^[a-z]+\.[a-z_]+$/, 'Invalid capability key.'))
+    .min(1, 'Select at least one capability.')
+    .max(35),
+  scopeLevel: ScopeSchema.default('team'),
+  expiresInDays: z.number().int().min(1).max(365).nullable().optional(),
+});
+export type CreateApiTokenInput = z.infer<typeof CreateApiTokenInputSchema>;
+
+export const ApiTokenViewSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  tokenPrefix: z.string(),
+  capabilities: z.array(z.string()),
+  scopeLevel: ScopeSchema,
+  createdByUserId: z.string(),
+  createdByName: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  lastUsedAt: z.string().nullable(),
+  revokedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type ApiTokenView = z.infer<typeof ApiTokenViewSchema>;

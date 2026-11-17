@@ -127,7 +127,7 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [x] Settings store, file storage interface, in-app notifications (verified on PostgreSQL 17 and Playwright e2e)
 - [ ] Outbox and worker (pg-boss), dead-letter alert (worker verified on PostgreSQL 17; admin dead-letter notifications and retry UI still to build in Milestone 8)
 - [x] Host routing (`crm.` vs `go.`) (verified over TCP socket in `m4-intake-routing-unsubscribe.int.test.ts`)
-- [ ] Access JWT check (`CF_ACCESS_*` config exists; verification middleware lands in Milestone 2)
+- [x] Access JWT check (`CloudflareAccessVerifier` verified with RS256 JWKS in `security.test.ts` and `ms2-security-auth.int.test.ts`; ADR 0015)
 - [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (files exist; production fixes and server deploy pending)
 - [ ] Off-site backups and restore-drill script (`scripts/restore-drill.sh` is currently a stub; full encrypted backup & restore drill land in Milestone 10/14)
 - [ ] `scripts/deploy.sh` with smoke checks and rollback (currently a stub; full implementation lands in Milestone 10)
@@ -195,6 +195,8 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [ ] **Exit:** Apollo import deduplicates with Apollo IDs; n8n reacts to `deal.won`; scoring is configurable and explained
 
 ## Review log
+
+- **18 Nov 2026, Milestone 2: security and authentication hardening.** Added migration `0013_api_tokens_and_security`, ADR 0015, and [`docs/SECURITY.md`](SECURITY.md). Implemented `applySecurityHeaders` (`Content-Security-Policy`, `HSTS`, `X-Content-Type-Options`, `X-Frame-Options`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `X-Request-Id`), `CloudflareAccessVerifier` (RS256/ES256 JWKS verification of `Cf-Access-Jwt-Assertion` when `CF_ACCESS_ENFORCE=true`), `ApiTokenService` (`Bearer adas_pat_...` bounded by creator's live capabilities and `scope_level`), `PerUserRateLimiter` (`API_RATE_LIMIT_PER_MIN`), session fixation revocation across all sign-in endpoints, unauthenticated SPA serving order fix on standalone `api`, employee email redaction on non-admin `GET /api/v1/users`, SQL `scopeWhere` on `listSequences`/`listCampaigns`, internal `/api/docs` + `/api/docs.json`, and removal of dead prototype methods in `OutreachService`. Verified in `security.test.ts` and `ms2-security-auth.int.test.ts` on PostgreSQL 17.
 
 - **18 Nov 2026, Milestone 1: production repository audit and documentation reconciliation.** Completed a full technical audit in [`docs/PRODUCTION_AUDIT.md`](PRODUCTION_AUDIT.md) across frontend, backend, database migrations, background jobs, outreach, security headers, Docker/Cloudflare configs, deployer `.exe`, CI/CD, and installer/Electron desktop management requirements. Reconciled stale prototype descriptions in `PROGRESS.md` and `README.md`, removed the generated `ADAS-CRM-Deployer.exe` binary from Git tracking (`.gitignore` + `dist/deployer/` output), and fixed `scripts/build-deployer-exe.mjs` so non-Windows CI builds cleanly without requiring a tracked `.exe`.
 

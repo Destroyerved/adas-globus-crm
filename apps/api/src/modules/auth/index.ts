@@ -194,13 +194,27 @@ export class AuthAndUsersService {
     return { timezone: input.timezone };
   }
 
-  async listUsers(): Promise<Record<string, unknown>[]> {
+  async listUsers(viewer?: SessionUser): Promise<Record<string, unknown>[]> {
+    const canManageUsers = !viewer || (viewer.capabilities['users.manage'] ?? 'none') !== 'none';
+    if (canManageUsers) {
+      const res = await this.db.query(
+        `SELECT u.id, u.email, u.name, u.role_id, r.name AS role_name,
+                u.team_id, t.name AS team_name, u.market_focus, u.status, u.daily_send_cap
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         LEFT JOIN teams t ON t.id = u.team_id
+         ORDER BY u.name ASC`,
+      );
+      return res.rows;
+    }
+
     const res = await this.db.query(
-      `SELECT u.id, u.email, u.name, u.role_id, r.name AS role_name,
-              u.team_id, t.name AS team_name, u.market_focus, u.status, u.daily_send_cap
+      `SELECT u.id, ''::text AS email, u.name, u.role_id, r.name AS role_name,
+              u.team_id, t.name AS team_name, u.market_focus, u.status
        FROM users u
        JOIN roles r ON r.id = u.role_id
        LEFT JOIN teams t ON t.id = u.team_id
+       WHERE u.status = 'active'
        ORDER BY u.name ASC`,
     );
     return res.rows;
@@ -223,3 +237,9 @@ export {
   BREAK_GLASS_MAX_FAILURES,
   type BreakGlassSetup,
 } from './break-glass.js';
+export {
+  CloudflareAccessVerifier,
+  type CloudflareAccessClaims,
+  type CloudflareAccessOptions,
+} from './cloudflare-access.js';
+export { ApiTokenService } from './api-tokens.js';

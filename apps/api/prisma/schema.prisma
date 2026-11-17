@@ -26,6 +26,8 @@
 //   privacy_erasure immutability trigger, consent purpose/revocation columns; ADR 0013)
 //   prisma/migrations/0012_intake_routing_and_tokens/migration.sql (inquiries, routing_rules,
 //   public_rate_events, consent_records.inquiry_id, unsubscribe_tokens.token_sha256; ADR 0014)
+//   prisma/migrations/0013_api_tokens_and_security/migration.sql (api_tokens scope_level,
+//   capabilities, expires_at, last_used_ip, active-hash index; ADR 0015)
 
 generator client {
   provider = "prisma-client-js"
@@ -483,4 +485,25 @@ model PublicRateEvent {
   @@index([endpoint, ipSha256, createdAt(sort: Desc)])
   @@index([createdAt])
   @@map("public_rate_events")
+}
+
+// Service API tokens with explicit capability and scope ceiling (PRD 4.14, 9). Migration 0013.
+model ApiToken {
+  id              String    @id
+  name            String
+  tokenPrefix     String    @map("token_prefix")
+  tokenSha256     String    @unique @map("token_sha256")
+  scopes          Json      @default("[]")
+  scopeLevel      String    @default("team") @map("scope_level")
+  capabilities    Json      @default("[]")
+  createdByUserId String    @map("created_by_user_id")
+  expiresAt       DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt      DateTime? @map("last_used_at") @db.Timestamptz(6)
+  lastUsedIp      String?   @map("last_used_ip")
+  lastAuditedAt   DateTime? @map("last_audited_at") @db.Timestamptz(6)
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdByUserId, createdAt(sort: Desc)])
+  @@map("api_tokens")
 }

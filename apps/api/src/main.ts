@@ -4,14 +4,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ApiTokenService,
   AuthAndUsersService,
   BreakGlassService,
+  CloudflareAccessVerifier,
   CookieSigner,
   EntraSignIn,
   SessionService,
   readCookies,
   serializeCookie,
   sessionCookieName,
+  type CloudflareAccessOptions,
 } from './modules/auth/index.js';
 import { AdminService, registerAdminRoutes } from './modules/admin/index.js';
 import { ComplianceService, registerComplianceRoutes } from './modules/compliance/index.js';
@@ -46,6 +49,11 @@ import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
 import { MailpitTransport } from './platform/mail-transport/index.js';
 import { effectiveCapabilities, requireCapability } from './platform/scope/index.js';
+import {
+  PerUserRateLimiter,
+  applySecurityHeaders,
+  resolveRequestId,
+} from './platform/security/index.js';
 
 function serializeJson(data: unknown): string {
   return JSON.stringify(data, (_key, value) =>
@@ -157,13 +165,17 @@ button:focus-visible{outline:2px solid #015FA7;outline-offset:3px}
 </style></head><body><main class="card"><div class="brand">ADAS Globus Pro</div>${bodyHtml}</main></body></html>`;
 }
 
-function sendHtml(res: ServerResponse, status: number, html: string): void {
+function sendHtml(
+  res: ServerResponse,
+  status: number,
+  html: string,
+  production: boolean,
+  kind: 'public_html' | 'docs_html' = 'public_html',
+): void {
+  applySecurityHeaders(res, { production, kind });
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-    'X-Frame-Options': 'DENY',
   });
   res.end(html);
 }
@@ -176,12 +188,22 @@ export function createAppServer(
     secretBox?: SecretBox | null;
     /** Tests pass in-memory storage; otherwise FILE_STORAGE_LOCAL_PATH. */
     files?: FileStorage;
+    /** Optional Cloudflare Access JWKS loader override for offline integration tests. */
+    cfAccessJwksLoader?: CloudflareAccessOptions['jwksLoader'];
   } = {},
 ) {
   const logger = createLogger(env.LOG_LEVEL);
   const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
   const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV);
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
+  const apiTokens = new ApiTokenService(db, auth);
+  const cfAccess = new CloudflareAccessVerifier({
+    enforce: env.CF_ACCESS_ENFORCE,
+    teamDomain: env.CF_ACCESS_TEAM_DOMAIN,
+    audience: env.CF_ACCESS_AUD,
+    jwksLoader: options.cfAccessJwksLoader,
+  });
+  const userRateLimiter = new PerUserRateLimiter(env.API_RATE_LIMIT_PER_MIN);
   const compliance = new ComplianceService(db);
   const crm = new CrmService(db);
   const intake = new WebsiteIntakeService(db, {
@@ -229,6 +251,15 @@ export function createAppServer(
       await notifications.markRead(ctx.user, typeof body['id'] === 'string' ? body['id'] : null),
     );
   });
+  router.get('/api/v1/admin/api-tokens', async (ctx) => {
+    ctx.json(200, await apiTokens.listTokens(ctx.user));
+  });
+  router.post('/api/v1/admin/api-tokens', async (ctx) => {
+    ctx.json(201, await apiTokens.createToken(ctx.user, await ctx.body(), ctx.ip));
+  });
+  router.post('/api/v1/admin/api-tokens/:id/revoke', async (ctx) => {
+    ctx.json(200, await apiTokens.revokeToken(ctx.user, ctx.params['id'] ?? '', ctx.ip));
+  });
   const devLoginEnabled = isDevLoginEnabled(env);
   const production = env.NODE_ENV === 'production';
   const sessions = new SessionService(
@@ -268,11 +299,16 @@ export function createAppServer(
     .filter(Boolean);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const requestId = resolveRequestId(req);
+    res.setHeader('X-Request-Id', requestId);
     const method = req.method ?? 'GET';
     const rawUrl = req.url ?? '/';
     const parsedUrl = new URL(rawUrl, 'http://localhost:3000');
     const pathname = parsedUrl.pathname;
     const hostHeader = req.headers.host ?? 'crm.localhost:3000';
+
+    // Default strict API security headers on every response; SPA/HTML handlers override kind.
+    applySecurityHeaders(res, { production, kind: 'api' });
 
     // CORS: only the CRM web app (with credentials) and the marketing website (intake only).
     // Never reflect arbitrary origins (PRD §9).
@@ -343,6 +379,7 @@ export function createAppServer(
                 'Unsubscribed',
                 `<h1>You're <strong>unsubscribed</strong></h1><p>You won't receive any more emails from ADAS Globus Pro at this address. This takes effect immediately.</p>`,
               ),
+              production,
             );
             return;
           }
@@ -357,6 +394,7 @@ export function createAppServer(
                 ? `<h1>Already <strong>unsubscribed</strong></h1><p>${escapeHtml(info.maskedEmail)} won't receive any more emails from ADAS Globus Pro.</p>`
                 : `<h1>Unsubscribe from <strong>ADAS Globus Pro</strong> emails?</h1><p>Stop all emails to ${escapeHtml(info.maskedEmail)}.</p><form method="post" action="${escapeHtml(action)}"><button type="submit">Unsubscribe</button></form>`,
             ),
+            production,
           );
         } catch (err) {
           if (err instanceof DomainError && err.status === 404) {
@@ -367,6 +405,7 @@ export function createAppServer(
                 'Link not found',
                 `<h1>This link <strong>isn't valid</strong></h1><p>It may be incomplete. To stop emails from us, reply to any message with "unsubscribe" or write to info@adasglobuspro.com.</p>`,
               ),
+              production,
             );
             return;
           }
@@ -391,6 +430,47 @@ export function createAppServer(
         });
         res.end(serializeJson({ status: 'received' }));
         return;
+      }
+
+      // Cloudflare Access JWT defence-in-depth on internal `crm.` routes (PRD §6.5, §9)
+      if (hostCheck.target === 'crm') {
+        await cfAccess.verifyAssertion(req.headers['cf-access-jwt-assertion']);
+      }
+
+      // Serve static built SPA (`apps/web/dist`) on non-API GET requests before session auth
+      // so unauthenticated browsers on `crm.` load the sign-in screen cleanly (PRD §6.2 & §10.2).
+      if (method === 'GET' && !pathname.startsWith('/api/') && !pathname.startsWith('/c/')) {
+        const currentDir = path.dirname(fileURLToPath(import.meta.url));
+        const webDistDir = path.resolve(currentDir, '../../web/dist');
+        const indexHtmlPath = path.join(webDistDir, 'index.html');
+        if (existsSync(indexHtmlPath)) {
+          const safeRel = pathname.replace(/^\/+/, '');
+          const candidatePath = path.resolve(webDistDir, safeRel);
+          const isInsideDist = candidatePath.startsWith(webDistDir);
+          const targetFile =
+            isInsideDist &&
+            safeRel !== '' &&
+            existsSync(candidatePath) &&
+            statSync(candidatePath).isFile()
+              ? candidatePath
+              : indexHtmlPath;
+          const ext = path.extname(targetFile).toLowerCase();
+          const mimeMap: Record<string, string> = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'application/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.woff2': 'font/woff2',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.json': 'application/json; charset=utf-8',
+          };
+          applySecurityHeaders(res, { production, kind: 'spa' });
+          res.writeHead(200, {
+            'Content-Type': mimeMap[ext] ?? 'application/octet-stream',
+          });
+          res.end(readFileSync(targetFile));
+          return;
+        }
       }
 
       // ---- Sign-in, sessions and sign-out (PRD 6.6) ----
@@ -454,14 +534,26 @@ export function createAppServer(
           }
           const identity = await entra.finish(parsedUrl.search, JSON.parse(pendingRaw));
           const userId = await auth.findUserForEntraSignIn(identity);
+          // Session fixation protection: invalidate any pre-existing session cookie first.
+          await sessions.revoke(cookies[sessionCookieName(production)]);
           const token = await sessions.create(userId, req, 'microsoft');
           redirect(`${env.PUBLIC_WEB_URL}/`, [clearPending, sessionCookie(token)]);
         } catch (err) {
           const code = err instanceof DomainError ? err.code.toLowerCase() : 'sso_failed';
           logger.warn(
-            { code, err: err instanceof Error ? err.message : String(err) },
+            { requestId, code, err: err instanceof Error ? err.message : String(err) },
             'Microsoft sign-in failed',
           );
+          await db
+            .transaction((tx) =>
+              db.writeAuditLog(tx, {
+                action: 'auth.sso.failed',
+                entityType: 'session',
+                metadata: { code },
+                ipAddress: clientIpOf(req),
+              }),
+            )
+            .catch(() => undefined);
           redirect(`${env.PUBLIC_WEB_URL}/?screen=login&error=${encodeURIComponent(code)}`, [
             clearPending,
           ]);
@@ -474,6 +566,7 @@ export function createAppServer(
         if (!devLoginEnabled) throw new NotFoundDomainError('Route', pathname);
         const body = await readJsonBody(req);
         const userId = await auth.findUserForDevSignIn(String(body['userId'] ?? ''));
+        await sessions.revoke(cookies[sessionCookieName(production)]);
         const token = await sessions.create(userId, req, 'dev');
         sendJson(200, await auth.resolveSessionUser(userId), {
           'Set-Cookie': [sessionCookie(token)],
@@ -494,6 +587,7 @@ export function createAppServer(
         }
         const body = await readJsonBody(req);
         const userId = await breakGlass.signIn(body, clientIpOf(req) ?? 'unknown');
+        await sessions.revoke(cookies[sessionCookieName(production)]);
         const token = await sessions.create(userId, req, 'break_glass');
         sendJson(200, await auth.resolveSessionUser(userId), {
           'Set-Cookie': [sessionCookie(token)],
@@ -513,26 +607,78 @@ export function createAppServer(
         return;
       }
 
-      // Every other API route needs a signed-in session.
-      const userId = await sessions.resolve(cookies[sessionCookieName(production)]);
-      if (!userId) {
-        throw new DomainError({
-          status: 401,
-          code: 'UNAUTHENTICATED',
-          title: 'Sign-in required',
-          detail: 'Your session has ended. Sign in again.',
-        });
+      // Every other API route requires either a valid Bearer service token or a signed-in session.
+      const bearerAuth = await apiTokens.authenticateBearer(
+        req.headers.authorization,
+        clientIpOf(req),
+      );
+      let user: Awaited<ReturnType<typeof auth.resolveSessionUser>>;
+      let rateActorKey: string;
+      if (bearerAuth) {
+        user = bearerAuth.user;
+        rateActorKey = `tok:${bearerAuth.tokenId}`;
+      } else {
+        const userId = await sessions.resolve(cookies[sessionCookieName(production)]);
+        if (!userId) {
+          throw new DomainError({
+            status: 401,
+            code: 'UNAUTHENTICATED',
+            title: 'Sign-in required',
+            detail: 'Your session has ended. Sign in again.',
+          });
+        }
+        // Cross-site request forgery: cookie-authenticated writes must come from the CRM web app.
+        if (method !== 'GET' && method !== 'HEAD' && req.headers.origin !== webOrigin) {
+          throw new DomainError({
+            status: 403,
+            code: 'CSRF_ORIGIN_REJECTED',
+            title: 'Request blocked',
+            detail: 'This request did not come from the CRM web app.',
+          });
+        }
+        user = await auth.resolveSessionUser(userId);
+        rateActorKey = `usr:${user.id}`;
       }
-      // Cross-site request forgery: state-changing requests must come from the CRM web app.
-      if (method !== 'GET' && method !== 'HEAD' && req.headers.origin !== webOrigin) {
-        throw new DomainError({
-          status: 403,
-          code: 'CSRF_ORIGIN_REJECTED',
-          title: 'Request blocked',
-          detail: 'This request did not come from the CRM web app.',
-        });
+
+      const rateStatus = userRateLimiter.check(rateActorKey);
+      res.setHeader('X-RateLimit-Remaining', String(rateStatus.remaining));
+
+      // Internal OpenAPI documentation on `crm.` (PRD §6.7, AGENTS.md §6)
+      if (method === 'GET' && (pathname === '/api/docs' || pathname === '/api/docs.json')) {
+        const specPath = path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '../openapi.json',
+        );
+        const specText = existsSync(specPath) ? readFileSync(specPath, 'utf8') : '{}';
+        const wantsJson =
+          pathname === '/api/docs.json' ||
+          String(req.headers.accept ?? '').includes('application/json');
+        if (wantsJson) {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(specText);
+          return;
+        }
+        const specObj = JSON.parse(specText) as {
+          info?: { title?: string; version?: string };
+          paths?: Record<string, Record<string, { summary?: string }>>;
+        };
+        const rows = Object.entries(specObj.paths ?? {})
+          .flatMap(([p, methods]) =>
+            Object.entries(methods).map(
+              ([m, op]) =>
+                `<tr><td><code>${escapeHtml(m.toUpperCase())}</code></td><td><code>${escapeHtml(p)}</code></td><td>${escapeHtml(op.summary ?? '')}</td></tr>`,
+            ),
+          )
+          .join('');
+        sendHtml(
+          res,
+          200,
+          `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(specObj.info?.title ?? 'ADAS CRM API')} · OpenAPI</title><style>body{font:14px/1.5 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24px;color:#0F1B2A;background:#FBFCFB}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #DCE2E2}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #DCE2E2}code{font-weight:600;color:#005E6D}</style></head><body><h1>${escapeHtml(specObj.info?.title ?? 'ADAS CRM API')} (${escapeHtml(specObj.info?.version ?? '1.0.0')})</h1><p><a href="/api/docs.json">Download openapi.json</a></p><table><thead><tr><th>Method</th><th>Path</th><th>Summary</th></tr></thead><tbody>${rows}</tbody></table></body></html>`,
+          production,
+          'docs_html',
+        );
+        return;
       }
-      const user = await auth.resolveSessionUser(userId);
 
       const matched = router.match(method, pathname);
       if (matched) {
@@ -611,7 +757,7 @@ export function createAppServer(
 
       // Users
       if (method === 'GET' && pathname === '/api/v1/users') {
-        const items = await auth.listUsers();
+        const items = await auth.listUsers(user);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
         return;
@@ -637,7 +783,7 @@ export function createAppServer(
 
       if (method === 'GET' && pathname === '/api/v1/sequences') {
         requireCapability(user, 'sequences.read');
-        const items = await outreach.listSequences();
+        const items = await outreach.listSequences(user);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
         return;
@@ -662,7 +808,7 @@ export function createAppServer(
 
       if (method === 'GET' && pathname === '/api/v1/campaigns') {
         requireCapability(user, 'campaigns.read');
-        const items = await outreach.listCampaigns();
+        const items = await outreach.listCampaigns(user);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson({ items }));
         return;
@@ -689,43 +835,6 @@ export function createAppServer(
         return;
       }
 
-      // Serve static built SPA (`apps/web/dist`) on non-API GET requests (PRD §6.2 & §10.2)
-      if (method === 'GET' && !pathname.startsWith('/api/')) {
-        const currentDir = path.dirname(fileURLToPath(import.meta.url));
-        const webDistDir = path.resolve(currentDir, '../../web/dist');
-        const indexHtmlPath = path.join(webDistDir, 'index.html');
-        if (existsSync(indexHtmlPath)) {
-          const safeRel = pathname.replace(/^\/+/, '');
-          const candidatePath = path.resolve(webDistDir, safeRel);
-          const isInsideDist = candidatePath.startsWith(webDistDir);
-          const targetFile =
-            isInsideDist &&
-            safeRel !== '' &&
-            existsSync(candidatePath) &&
-            statSync(candidatePath).isFile()
-              ? candidatePath
-              : indexHtmlPath;
-          const ext = path.extname(targetFile).toLowerCase();
-          const mimeMap: Record<string, string> = {
-            '.html': 'text/html; charset=utf-8',
-            '.js': 'application/javascript; charset=utf-8',
-            '.css': 'text/css; charset=utf-8',
-            '.woff2': 'font/woff2',
-            '.svg': 'image/svg+xml',
-            '.png': 'image/png',
-            '.json': 'application/json; charset=utf-8',
-          };
-          res.setHeader('X-Content-Type-Options', 'nosniff');
-          res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-          res.setHeader('X-Frame-Options', 'DENY');
-          res.writeHead(200, {
-            'Content-Type': mimeMap[ext] ?? 'application/octet-stream',
-          });
-          res.end(readFileSync(targetFile));
-          return;
-        }
-      }
-
       res.writeHead(404, { 'Content-Type': 'application/problem+json; charset=utf-8' });
       res.end(
         serializeJson({
@@ -734,14 +843,20 @@ export function createAppServer(
           status: 404,
           code: 'route_not_found',
           detail: `No route matched ${method} ${pathname}`,
+          requestId,
         }),
       );
     } catch (err) {
-      const problem = toProblemDetails(err, pathname);
+      const problem = { ...toProblemDetails(err, pathname), requestId };
       if (problem.status >= 500) {
         // Log the cause; never echo database or internal messages to the client (AGENTS.md 5).
         logger.error(
-          { path: pathname, method, err: err instanceof Error ? err.message : String(err) },
+          {
+            requestId,
+            path: pathname,
+            method,
+            err: err instanceof Error ? err.message : String(err),
+          },
           'request failed',
         );
         problem.detail =
@@ -755,7 +870,7 @@ export function createAppServer(
         'Content-Type': 'application/problem+json; charset=utf-8',
       };
       if (problem.status === 429) {
-        headers['Retry-After'] = '600';
+        headers['Retry-After'] = pathname.startsWith('/api/v1/public/') ? '600' : '60';
       }
       res.writeHead(problem.status, headers);
       res.end(serializeJson(problem));
@@ -770,6 +885,8 @@ export function createAppServer(
     transport,
     services: {
       auth,
+      apiTokens,
+      cfAccess,
       breakGlass,
       compliance,
       crm,

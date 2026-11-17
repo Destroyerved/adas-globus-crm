@@ -876,6 +876,37 @@ const intakeAndRoutingPaths = {
       responses: ok('{ items, nextCursor, total }'),
     },
   },
+  '/admin/api-tokens': {
+    get: {
+      operationId: 'listApiTokens',
+      summary:
+        'List service API tokens with prefix, capability ceiling, scope level, expiry and last-used time (requires settings.manage — PRD 4.14, 9)',
+      responses: ok('{ items }'),
+    },
+    post: {
+      operationId: 'createApiToken',
+      summary:
+        'Create a scoped service API token bounded by the creator’s permissions; the secret token is returned once (audited — PRD 4.14, 9)',
+      responses: {
+        '201': { description: 'Created ({ token, secretToken })' },
+        '403': { description: 'Requires settings.manage' },
+        '422': { description: 'Capability or scope exceeds creator permissions' },
+      },
+    },
+  },
+  '/admin/api-tokens/{id}/revoke': {
+    post: {
+      operationId: 'revokeApiToken',
+      summary:
+        'Immediately revoke a service API token (requires settings.manage; audited — PRD 4.14, 9)',
+      parameters: idParam,
+      responses: {
+        '200': { description: 'Revoked' },
+        '403': { description: 'Requires settings.manage' },
+        '404': { description: 'Not found' },
+      },
+    },
+  },
 };
 
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
