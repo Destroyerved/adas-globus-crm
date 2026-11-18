@@ -137,7 +137,7 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [x] Reference lists seeded and admin-editable (PRD 3.4) (verified on PostgreSQL 17 and Playwright e2e)
 - [x] Notes, tags, custom fields, record history, basic timeline (verified on PostgreSQL 17 across all 8 custom field types + `custom.<key>` GIN filtering in `ms3b-crm-extensions.int.test.ts` and Playwright e2e `26-lead-convert-custom-scoring-*`; ADR 0017)
 - [x] Filter language, field registry, saved views (verified on PostgreSQL 17 in `ms3a-saved-views-bulk.int.test.ts` and Playwright e2e `25-saved-views-bulk-*`; ADR 0016)
-- [ ] Global search (trigram + full-text) (trigram search verified on 60k contacts on PostgreSQL 17; full-text notes/email subject index lands in Milestone 3/5)
+- [x] Global search (trigram + full-text) (accent-folded `public.immutable_unaccent` + stored `search_tsv` GIN indexes across `companies`, `contacts`, `leads`, `deals`, `notes`, and `email_threads` verified on PostgreSQL 17 in `ms9-fulltext-search.int.test.ts`, `pnpm db:plans` [93 scenarios, 0 flagged], and 20-VU concurrent HTTP load test on 60k contacts [search p95 226.5 ms < 300 ms budget, 0.000% errors in `docs/perf/load-test-postgres.md`]; ADR 0024)
 - [ ] Imports: upload, mapping, dry run, background run, error CSV, rollback (verified on PostgreSQL 17 and Playwright e2e, ADR 0008; 10,000-row XLSX < 5 min benchmark pending)
 - [x] Duplicate rules, review queue, merge with undo (verified on PostgreSQL 17 and Playwright e2e, ADR 0009; direct profile `"Merge with…"` drawer built in Milestone 3b, ADR 0017)
 - [x] Exports (permissioned, audited, background > 5,000 rows) (verified on PostgreSQL 17 and Playwright e2e, ADR 0010)

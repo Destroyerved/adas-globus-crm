@@ -394,6 +394,12 @@ function otherScenarios(terms: SearchTerms): Scenario[] {
         budgetMs: BUDGET.search,
         run: (s, p) => s.search.globalSearch(p[who], terms.contactName),
       },
+      {
+        group: 'Search',
+        name: `global search with notes and email threads (${label})`,
+        budgetMs: BUDGET.search,
+        run: (s, p) => s.search.globalSearch(p[who], terms.contactName, { includeExtended: true }),
+      },
     );
   }
   out.push({

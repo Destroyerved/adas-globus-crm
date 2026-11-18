@@ -557,6 +557,22 @@ export interface SearchResults {
     status: string;
   }[];
   deals: { id: string; name: string; stage_name: string; company_id?: string }[];
+  notes?: {
+    id: string;
+    entity_type: 'company' | 'contact' | 'lead' | 'deal';
+    entity_id: string;
+    snippet: string;
+    created_at: string;
+  }[];
+  emailThreads?: {
+    id: string;
+    subject: string;
+    snippet: string;
+    contact_id: string | null;
+    company_id: string | null;
+    deal_id: string | null;
+    lead_id: string | null;
+  }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -717,7 +733,8 @@ export const api = {
 
   listUsers: () => request<Items<UserRow>>('/users').then((r) => r.items),
   referenceLists: () => request<ReferenceLists>('/reference-lists'),
-  search: (q: string) => request<SearchResults>(`/search?q=${enc(q)}`),
+  search: (q: string, options?: { extended?: boolean }) =>
+    request<SearchResults>(`/search?q=${enc(q)}${options?.extended ? '&extended=1' : ''}`),
 
   // Leads
   listLeads: (params: ListParams = {}) => request<Page<LeadRow>>(`/leads${listQuery(params)}`),

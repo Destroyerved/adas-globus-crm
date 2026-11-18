@@ -14,6 +14,7 @@
     "openapi:generate": "tsx src/openapi.ts && prettier --write openapi.json",
     "db:seed": "tsx scripts/seed.ts",
     "db:plans": "tsx scripts/query-plans.ts",
+    "perf:load": "tsx scripts/load-test.ts",
     "break-glass": "tsx scripts/break-glass.ts",
     "start:e2e": "tsx src/e2e-server.ts"
   },

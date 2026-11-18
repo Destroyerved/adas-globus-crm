@@ -32,6 +32,11 @@
 //   params_json, sort_spec, columns_json, version, updated_at; bulk_jobs table and indexes)
 //   prisma/migrations/0015_custom_fields_scoring_and_conversion/migration.sql (custom_field_definitions
 //   money/url/archive/order, leads/deals custom_fields JSONB GIN indexes, scoring_rules defaults)
+//   prisma/migrations/0022_worker_heartbeats_and_backups/migration.sql (worker_heartbeats,
+//   backup_runs, outbox_events.retry_count)
+//   prisma/migrations/0023_fulltext_search_indexes/migration.sql (public.immutable_unaccent,
+//   generated search_tsv tsvector columns & GIN indexes on companies, contacts, leads, deals,
+//   notes and email_threads, plus idx_deals_name_trgm; PRD 6.10)
 
 generator client {
   provider = "prisma-client-js"
