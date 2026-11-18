@@ -37,5 +37,11 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
     },
+    {
+      command: 'pnpm --filter @adas/desktop preview',
+      url: 'http://127.0.0.1:5185',
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
   ],
 });

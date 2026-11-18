@@ -1,0 +1,33 @@
+{
+  "name": "@adas/server-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "production-dist": "./dist/index.js",
+      "default": "./src/index.ts"
+    }
+  },
+  "bin": {
+    "adas-agent": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/cli.ts serve",
+    "pair": "tsx src/cli.ts pair"
+  },
+  "dependencies": {
+    "@adas/installer": "workspace:*",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@adas/config": "workspace:*",
+    "@types/node": "^22.13.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

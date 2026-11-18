@@ -1,0 +1,12 @@
+{
+  "extends": "@adas/config/tsconfig.node.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/main/**/*.ts", "src/shared/**/*.ts", "src/preview-server.ts"],
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/renderer/**"]
+}
