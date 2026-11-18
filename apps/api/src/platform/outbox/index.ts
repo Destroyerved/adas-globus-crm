@@ -20,10 +20,22 @@ export interface OutboxEvent {
   createdAt: string;
 }
 
+export interface DeadLetterAlertInfo {
+  eventId: string;
+  eventType: string;
+  aggregateType: string;
+  aggregateId: string;
+  reason: string;
+  attempts: number;
+  retryCount: number;
+}
+
 export type OutboxHandler = (event: OutboxEvent, tx: DbTx) => Promise<void>;
+export type DeadLetterListener = (info: DeadLetterAlertInfo) => Promise<void>;
 
 export class OutboxDispatcher {
   private readonly handlers = new Map<string, OutboxHandler[]>();
+  private readonly deadLetterListeners: DeadLetterListener[] = [];
 
   constructor(
     private readonly db: DatabaseService,
@@ -34,6 +46,12 @@ export class OutboxDispatcher {
   /** Registers a handler for one event type, or '*' for every event. */
   on(eventType: string, handler: OutboxHandler): this {
     this.handlers.set(eventType, [...(this.handlers.get(eventType) ?? []), handler]);
+    return this;
+  }
+
+  /** Registers a listener invoked whenever an event exhausts retries and moves to `dead_letter`. */
+  onDeadLetter(listener: DeadLetterListener): this {
+    this.deadLetterListeners.push(listener);
     return this;
   }
 
@@ -96,18 +114,44 @@ export class OutboxDispatcher {
         // Only the error class and code are stored: messages can carry personal data.
         const code = (err as { code?: string }).code;
         const reason = `${(err as Error).name ?? 'Error'}${code ? ` ${code}` : ''}`;
-        const res = await this.db.query<{ status: string }>(
+        const res = await this.db.query<{
+          status: string;
+          event_type: string;
+          aggregate_type: string;
+          aggregate_id: string;
+          attempts: number;
+          retry_count: number;
+        }>(
           `UPDATE outbox_events
            SET attempts = attempts + 1, last_error = $2,
                status = CASE WHEN attempts + 1 >= $3 THEN 'dead_letter' ELSE 'pending' END,
                available_at = NOW() + make_interval(secs => LEAST(3600, POWER(2, attempts + 1)))
            WHERE id = $1 AND status = 'pending'
-           RETURNING status`,
+           RETURNING status, event_type, aggregate_type, aggregate_id, attempts, retry_count`,
           [id, reason, this.maxAttempts],
         );
-        if (res.rows[0]?.status === 'dead_letter') {
+        const updated = res.rows[0];
+        if (updated?.status === 'dead_letter') {
           result.deadLettered += 1;
           this.logger.error({ eventId: id, reason }, 'outbox event moved to dead letter');
+          for (const listener of this.deadLetterListeners) {
+            try {
+              await listener({
+                eventId: id,
+                eventType: updated.event_type,
+                aggregateType: updated.aggregate_type,
+                aggregateId: updated.aggregate_id,
+                reason,
+                attempts: updated.attempts,
+                retryCount: updated.retry_count,
+              });
+            } catch (notifyErr) {
+              this.logger.error(
+                { eventId: id, err: (notifyErr as Error).name },
+                'dead-letter alert listener failed',
+              );
+            }
+          }
         } else {
           result.retried += 1;
           this.logger.warn({ eventId: id, reason }, 'outbox event failed; will retry');

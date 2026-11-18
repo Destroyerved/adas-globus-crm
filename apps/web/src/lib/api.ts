@@ -91,6 +91,11 @@ import {
   type UpdateWebhookEndpointInput,
   type UpsertFxRateInput,
   type WithdrawConsentInput,
+  type BackupRunView,
+  type DeadLetterEventView,
+  type HealthCheckResponse,
+  type SystemHealthOverview,
+  type WorkerHeartbeatView,
 } from '@adas/shared';
 
 const MERGE_PATH: Record<MergeEntity, string> = { contact: 'contacts', company: 'companies' };
@@ -1341,6 +1346,25 @@ export const api = {
     ),
   testWebhook: (endpointId: string) =>
     post<WebhookDeliveryRow>(`/admin/webhooks/${enc(endpointId)}/test`, {}),
+
+  // Operational System Health & Dead-Letter Outbox Queue
+  getSystemHealthOverview: () => request<SystemHealthOverview>('/admin/system-health'),
+  retryDeadLetterEvent: (eventId: string) =>
+    post<{ id: string; status: 'pending'; retryCount: number }>(
+      `/admin/outbox/${enc(eventId)}/retry`,
+      {},
+    ),
+  retryAllDeadLetters: () => post<{ retriedCount: number }>('/admin/outbox/retry-all', {}),
+  purgeDeadLetterEvent: (eventId: string) =>
+    del<{ deleted: true; id: string }>(`/admin/outbox/${enc(eventId)}`),
+};
+
+export type {
+  BackupRunView,
+  DeadLetterEventView,
+  HealthCheckResponse,
+  SystemHealthOverview,
+  WorkerHeartbeatView,
 };
 
 export interface OutreachTemplateRow {

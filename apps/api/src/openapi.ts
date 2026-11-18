@@ -18,8 +18,20 @@ const openApiSpec = {
     '/healthz': {
       get: {
         operationId: 'getHealth',
-        summary: 'Service health check',
-        responses: { '200': { description: 'Healthy' } },
+        summary:
+          'Deep readiness & operational telemetry probe for PostgreSQL, outbox, worker heartbeats, backups and Graph subscriptions (PRD 10.6)',
+        parameters: [
+          {
+            name: 'strict',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['0', '1', 'true', 'false'] },
+          },
+        ],
+        responses: {
+          '200': { description: 'PostgreSQL reachable (status ok or degraded)' },
+          '503': { description: 'PostgreSQL unreachable, or strict=1 and status is degraded' },
+        },
       },
     },
     '/auth/config': {
@@ -1639,6 +1651,47 @@ const integrationsAndWebhooksPaths: Record<string, Record<string, unknown>> = {
   },
 };
 
+const systemHealthPaths: Record<string, Record<string, unknown>> = {
+  '/admin/system-health': {
+    get: {
+      operationId: 'getSystemHealthOverview',
+      summary:
+        'Operational telemetry for PostgreSQL, worker heartbeats, outbox queues, dead-letter events and backup runs (PRD 6.9, 10.6)',
+      responses: ok('System health overview'),
+    },
+  },
+  '/admin/outbox/retry-all': {
+    post: {
+      operationId: 'retryAllDeadLetterOutboxEvents',
+      summary: 'Re-queue all dead-letter outbox events for worker dispatch (PRD 6.9, 9)',
+      responses: ok('Count of retried events'),
+    },
+  },
+  '/admin/outbox/{id}/retry': {
+    post: {
+      operationId: 'retryDeadLetterOutboxEvent',
+      summary: 'Re-queue one dead-letter outbox event and record an audit entry (PRD 6.9, 9)',
+      parameters: idParam,
+      responses: {
+        ...ok('Event re-queued'),
+        '404': { description: 'Dead-letter event not found' },
+      },
+    },
+  },
+  '/admin/outbox/{id}': {
+    delete: {
+      operationId: 'purgeDeadLetterOutboxEvent',
+      summary:
+        'Permanently dismiss an unrecoverable dead-letter outbox event and record an audit entry (PRD 6.9, 9)',
+      parameters: idParam,
+      responses: {
+        ...ok('Dead-letter event purged'),
+        '404': { description: 'Dead-letter event not found' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
@@ -1651,6 +1704,7 @@ for (const [path, methods] of Object.entries({
   ...inboxAndGraphPaths,
   ...sequencesAndCampaignsPaths,
   ...integrationsAndWebhooksPaths,
+  ...systemHealthPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

@@ -36,6 +36,7 @@ import { DataQualityService } from './modules/data-quality/index.js';
 import { ImportService, registerImportRoutes } from './modules/imports/index.js';
 import { DuplicateService, registerDuplicateRoutes } from './modules/duplicates/index.js';
 import { ExportService, registerExportRoutes } from './modules/exports/index.js';
+import { HealthService, registerHealthRoutes } from './modules/health/index.js';
 import { InboxService, registerInboxRoutes } from './modules/inbox/index.js';
 import { WebsiteIntakeService, registerIntakeRoutes } from './modules/intake/index.js';
 import { IntelligenceService, registerIntelligenceRoutes } from './modules/intelligence/index.js';
@@ -314,6 +315,12 @@ export function createAppServer(
   registerIntakeRoutes(router, intake);
   registerOutreachRoutes(router, outreach);
   registerIntelligenceRoutes(router, intelligence);
+  const health = new HealthService(db, {
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+    devLoginEnabled: isDevLoginEnabled(env),
+  });
+  registerHealthRoutes(router, health);
   const admin = new AdminService(db);
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
@@ -437,15 +444,14 @@ export function createAppServer(
         method === 'GET' &&
         (pathname === '/healthz' || pathname === '/api/v1/healthz' || pathname === '/api/v1/health')
       ) {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(
-          serializeJson({
-            status: 'ok',
-            service: 'adas-crm-api',
-            mailLive: env.MAIL_LIVE,
-            devLoginEnabled: isDevLoginEnabled(env),
-          }),
-        );
+        const strictParam = parsedUrl.searchParams.get('strict');
+        const strict = strictParam === '1' || strictParam === 'true';
+        const readiness = await health.checkReadiness({ strict });
+        res.writeHead(readiness.httpStatus, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(serializeJson(readiness.body));
         return;
       }
 
@@ -1150,6 +1156,7 @@ export function createAppServer(
       notifications,
       admin,
       dashboard,
+      health,
       imports,
       duplicates,
       exports: exportService,
@@ -1188,5 +1195,29 @@ if (isMainModule) {
     server.listen(env.PORT, () => {
       logger.info({ port: env.PORT, env: env.NODE_ENV }, 'ADAS CRM API listening');
     });
+
+    let shuttingDown = false;
+    const shutdown = async (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logger.info({ signal }, 'API server draining in-flight HTTP requests');
+      const forceTimer = setTimeout(() => {
+        logger.error({ signal }, 'API graceful shutdown timed out; forcing exit');
+        process.exit(1);
+      }, 15_000);
+      forceTimer.unref();
+
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+      await db.close().catch((err: Error) => {
+        logger.error({ err: err.message }, 'error closing database pool');
+      });
+      clearTimeout(forceTimer);
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
   })();
 }

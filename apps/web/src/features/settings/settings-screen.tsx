@@ -11,6 +11,7 @@ import { RolesTab } from './roles-tab.js';
 import { RoutingTab } from './routing-tab.js';
 import { ScoringTab } from './scoring-tab.js';
 import { SuppressionsTab } from './suppressions-tab.js';
+import { SystemHealthTab } from './system-health-tab.js';
 import { TeamsTab } from './teams-tab.js';
 import { UsersTab } from './users-tab.js';
 import { WebhooksTab } from './webhooks-tab.js';
@@ -28,6 +29,7 @@ type TabId =
   | 'lists'
   | 'integrations'
   | 'webhooks'
+  | 'system-health'
   | 'suppressions'
   | 'audit';
 
@@ -43,6 +45,7 @@ const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'lists', label: 'Lists', capability: 'settings.manage' },
   { id: 'integrations', label: 'Integrations', capability: 'settings.manage' },
   { id: 'webhooks', label: 'Webhooks', capability: 'settings.manage' },
+  { id: 'system-health', label: 'System health', capability: 'settings.manage' },
   { id: 'suppressions', label: 'Suppressions', capability: 'compliance.manage' },
   { id: 'audit', label: 'Audit log', capability: 'audit.read' },
   { id: 'preferences', label: 'Your preferences', capability: null },
@@ -97,6 +100,7 @@ export function SettingsScreen({ onOpenLead }: { onOpenLead?: (leadId: string) =
         {active?.id === 'lists' && <ListsTab />}
         {active?.id === 'integrations' && <IntegrationsTab />}
         {active?.id === 'webhooks' && <WebhooksTab />}
+        {active?.id === 'system-health' && <SystemHealthTab />}
         {active?.id === 'suppressions' && <SuppressionsTab />}
         {active?.id === 'audit' && <AuditTab />}
         {active?.id === 'preferences' && <PreferencesTab />}

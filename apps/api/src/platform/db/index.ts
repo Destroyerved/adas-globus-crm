@@ -175,7 +175,9 @@ export class DatabaseService {
       : createPgliteDriver;
     return new DatabaseService(factory, async (driver) => {
       if (testUrl) {
-        await driver.exec('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+        await driver.exec(
+          'DROP SCHEMA IF EXISTS pgboss CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;',
+        );
       }
       for (const migration of readMigrations()) {
         await driver.exec(migration.sql);
