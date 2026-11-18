@@ -30,6 +30,7 @@ import {
   registerCrmRoutes,
 } from './modules/crm/index.js';
 import { DashboardService, registerDashboardRoutes } from './modules/dashboard/index.js';
+import { ReportsService, registerReportRoutes } from './modules/reports/index.js';
 import { NotificationService } from './modules/notifications/index.js';
 import { DataQualityService } from './modules/data-quality/index.js';
 import { ImportService, registerImportRoutes } from './modules/imports/index.js';
@@ -241,6 +242,8 @@ export function createAppServer(
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
   registerDashboardRoutes(router, dashboard);
+  const reports = new ReportsService(db);
+  registerReportRoutes(router, reports);
   const files =
     options.files ?? new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH));
   const imports = new ImportService(db, files);

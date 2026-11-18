@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { type UseQueryResult } from '@tanstack/react-query';
-import { formatNumber } from '@adas/shared';
+import { formatNumber, type DeltaChip } from '@adas/shared';
 import { Panel } from '@/components/ui/panel.js';
 import { ErrorState, LoadingState } from '@/components/ui/state-views.js';
 import { type WidgetResult } from '@/lib/api.js';
@@ -44,6 +44,33 @@ export interface Kpi {
   /** Where the number comes from; the tile opens it. */
   onOpen?: () => void;
   tone?: 'danger' | 'warning';
+  /** Change vs the previous period (DESIGN 6.7: ▲/▼ arrow + signed value + tone, never colour alone). */
+  delta?: DeltaChip | null;
+}
+
+const DELTA_STYLE: Record<DeltaChip['tone'], string> = {
+  success: 'bg-success-bg text-success',
+  danger: 'bg-danger-bg text-danger',
+  neutral: 'bg-neutral-bg text-neutral',
+};
+
+const DELTA_ARROW: Record<DeltaChip['direction'], string> = {
+  up: '▲',
+  down: '▼',
+  flat: '—',
+};
+
+export function DeltaBadge({ delta }: { delta: DeltaChip }) {
+  return (
+    <span
+      data-testid="kpi-delta"
+      className={`inline-flex items-center gap-[4px] mt-[4px] px-[7px] h-[20px] rounded-pill text-[11.5px] font-semibold tabular-nums ${DELTA_STYLE[delta.tone]}`}
+    >
+      <span aria-hidden="true">{DELTA_ARROW[delta.direction]}</span>
+      <span>{delta.text}</span>
+      <span className="sr-only"> vs previous period</span>
+    </span>
+  );
 }
 
 /**
@@ -64,6 +91,7 @@ export function KpiRow({ items }: { items: Kpi[] }) {
                 {k.value}
               </span>
               <span className="block mt-[2px] text-[13px] text-ink-2 line-clamp-2">{k.label}</span>
+              {k.delta && <DeltaBadge delta={k.delta} />}
               {k.onOpen && <span className="sr-only">, open the list</span>}
             </>
           );

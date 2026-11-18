@@ -1118,6 +1118,40 @@ const crmExtensionsPaths = {
       responses: ok('Deleted'),
     },
   },
+  '/dashboard/summary': {
+    get: {
+      operationId: 'dashboardSummary',
+      summary:
+        'Portfolio & funnel summary KPIs with previous-period deltas in the viewer time zone (PRD 4.2, 14)',
+      responses: ok('DashboardSummaryView'),
+    },
+  },
+  '/reports/options': {
+    get: {
+      operationId: 'reportOptions',
+      summary:
+        'Filter options (teams, owners, reporting currency, default date range, export capability) for standard reports (PRD 4.15)',
+      responses: ok('ReportFilterOptions'),
+    },
+  },
+  '/reports/{id}': {
+    get: {
+      operationId: 'runReport',
+      summary:
+        'Run a standard CRM report with date range, market, team and owner filters and FX conversion (PRD 4.15, 14)',
+      parameters: idParam,
+      responses: ok('ReportResultView'),
+    },
+  },
+  '/reports/{id}/export.csv': {
+    get: {
+      operationId: 'exportReportCsv',
+      summary:
+        'Download a standard CRM report as UTF-8 CSV (requires reports.read and exports.run; audited in audit_logs — PRD 4.15, 9)',
+      parameters: idParam,
+      responses: { '200': { description: 'text/csv attachment' } },
+    },
+  },
 };
 
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;

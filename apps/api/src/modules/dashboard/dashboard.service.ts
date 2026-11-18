@@ -2,8 +2,10 @@ import {
   DashboardQuerySchema,
   DashboardWidgetIdSchema,
   LeadSystemStatusSchema,
+  previousPeriodRange,
   type Currency,
   type DashboardQuery,
+  type DashboardSummaryView,
   type DashboardWidgetId,
   type SessionUser,
   type UserRoleName,
@@ -130,6 +132,129 @@ export class DashboardService {
     };
   }
 
+  /**
+   * Portfolio & funnel KPI strip with previous-period deltas (PRD 4.2, 14; DESIGN 6.7).
+   * Respects `companies.read`, `contacts.read`, and `leads.read` scopes in SQL.
+   */
+  async summary(user: SessionUser, query: URLSearchParams): Promise<DashboardSummaryView> {
+    const cur = await this.period(user, {
+      from: query.get('from') ?? '',
+      to: query.get('to') ?? '',
+      market: query.get('market') || undefined,
+    });
+    const prevRange = previousPeriodRange(cur.from, cur.to);
+    const prev = await this.period(user, {
+      from: prevRange.from,
+      to: prevRange.to,
+      market: cur.market,
+    });
+
+    let totalCompanies: number | null = null;
+    let newCompanies: number | null = null;
+    let previousNewCompanies: number | null = null;
+    if (getCapabilityScope(user, 'companies.read') !== 'none') {
+      const q = new Sql();
+      const scope = q.scope(user, 'companies.read', 'c');
+      const market = cur.market ? `AND c.market = ${q.p(cur.market)}` : '';
+      const cStart = q.p(cur.start);
+      const cEnd = q.p(cur.end);
+      const pStart = q.p(prev.start);
+      const pEnd = q.p(prev.end);
+      const res = await this.db.query<{ total: number; cur_new: number; prev_new: number }>(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE c.created_at >= ${cStart}::timestamptz AND c.created_at < ${cEnd}::timestamptz)::int AS cur_new,
+                COUNT(*) FILTER (WHERE c.created_at >= ${pStart}::timestamptz AND c.created_at < ${pEnd}::timestamptz)::int AS prev_new
+         FROM companies c
+         WHERE c.deleted_at IS NULL AND ${scope} ${market}`,
+        q.params,
+      );
+      totalCompanies = res.rows[0]?.total ?? 0;
+      newCompanies = res.rows[0]?.cur_new ?? 0;
+      previousNewCompanies = res.rows[0]?.prev_new ?? 0;
+    }
+
+    let totalContacts: number | null = null;
+    let newContacts: number | null = null;
+    let previousNewContacts: number | null = null;
+    if (getCapabilityScope(user, 'contacts.read') !== 'none') {
+      const q = new Sql();
+      const scope = q.scope(user, 'contacts.read', 'ct');
+      const market = cur.market ? `AND ct.market = ${q.p(cur.market)}` : '';
+      const cStart = q.p(cur.start);
+      const cEnd = q.p(cur.end);
+      const pStart = q.p(prev.start);
+      const pEnd = q.p(prev.end);
+      const res = await this.db.query<{ total: number; cur_new: number; prev_new: number }>(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE ct.created_at >= ${cStart}::timestamptz AND ct.created_at < ${cEnd}::timestamptz)::int AS cur_new,
+                COUNT(*) FILTER (WHERE ct.created_at >= ${pStart}::timestamptz AND ct.created_at < ${pEnd}::timestamptz)::int AS prev_new
+         FROM contacts ct
+         WHERE ct.deleted_at IS NULL AND ${scope} ${market}`,
+        q.params,
+      );
+      totalContacts = res.rows[0]?.total ?? 0;
+      newContacts = res.rows[0]?.cur_new ?? 0;
+      previousNewContacts = res.rows[0]?.prev_new ?? 0;
+    }
+
+    let newLeads: number | null = null;
+    let previousNewLeads: number | null = null;
+    let leadConversionRate: number | null = null;
+    let previousLeadConversionRate: number | null = null;
+    if (getCapabilityScope(user, 'leads.read') !== 'none') {
+      const q = new Sql();
+      const scope = q.scope(user, 'leads.read', 'l');
+      const market = cur.market ? `AND l.market = ${q.p(cur.market)}` : '';
+      const cStart = q.p(cur.start);
+      const cEnd = q.p(cur.end);
+      const pStart = q.p(prev.start);
+      const pEnd = q.p(prev.end);
+      const qualCond = `(l.status_category = 'qualified' OR l.status = 'Converted' OR l.converted_deal_id IS NOT NULL)`;
+      const res = await this.db.query<{
+        cur_new: number;
+        cur_qual: number;
+        prev_new: number;
+        prev_qual: number;
+      }>(
+        `SELECT COUNT(*) FILTER (WHERE l.created_at >= ${cStart}::timestamptz AND l.created_at < ${cEnd}::timestamptz)::int AS cur_new,
+                COUNT(*) FILTER (WHERE l.created_at >= ${cStart}::timestamptz AND l.created_at < ${cEnd}::timestamptz AND ${qualCond})::int AS cur_qual,
+                COUNT(*) FILTER (WHERE l.created_at >= ${pStart}::timestamptz AND l.created_at < ${pEnd}::timestamptz)::int AS prev_new,
+                COUNT(*) FILTER (WHERE l.created_at >= ${pStart}::timestamptz AND l.created_at < ${pEnd}::timestamptz AND ${qualCond})::int AS prev_qual
+         FROM leads l
+         WHERE l.deleted_at IS NULL AND ${scope} ${market}`,
+        q.params,
+      );
+      const row = res.rows[0];
+      newLeads = row?.cur_new ?? 0;
+      previousNewLeads = row?.prev_new ?? 0;
+      leadConversionRate = ratio(row?.cur_qual ?? 0, newLeads);
+      previousLeadConversionRate = ratio(row?.prev_qual ?? 0, previousNewLeads);
+    }
+
+    return {
+      period: {
+        from: cur.from,
+        to: cur.to,
+        previousFrom: prev.from,
+        previousTo: prev.to,
+        market: cur.market ?? null,
+        start: cur.start,
+        end: cur.end,
+      },
+      generatedAt: new Date().toISOString(),
+      totalCompanies,
+      newCompanies,
+      previousNewCompanies,
+      totalContacts,
+      newContacts,
+      previousNewContacts,
+      newLeads,
+      previousNewLeads,
+      leadConversionRate,
+      previousLeadConversionRate,
+    };
+  }
+
   async widget(user: SessionUser, rawId: string, query: URLSearchParams) {
     const parsedId = DashboardWidgetIdSchema.safeParse(rawId);
     if (!parsedId.success) throw new NotFoundDomainError('Widget', rawId);
@@ -143,13 +268,21 @@ export class DashboardService {
       to: query.get('to') ?? '',
       market: query.get('market') || undefined,
     });
-    const data = await this.compute(user, id, period);
+    const prevRange = previousPeriodRange(period.from, period.to);
+    const prevPeriod = await this.period(user, {
+      from: prevRange.from,
+      to: prevRange.to,
+      market: period.market,
+    });
+    const data = await this.computeWithPrevious(user, id, period, prevPeriod);
     return {
       id,
       // start and end are the UTC instants of the period, so links open the same records.
       period: {
         from: period.from,
         to: period.to,
+        previousFrom: prevPeriod.from,
+        previousTo: prevPeriod.to,
         market: period.market ?? null,
         start: period.start,
         end: period.end,
@@ -157,6 +290,27 @@ export class DashboardService {
       generatedAt: new Date().toISOString(),
       data,
     };
+  }
+
+  private async computeWithPrevious(
+    user: SessionUser,
+    id: DashboardWidgetId,
+    period: Period,
+    prevPeriod: Period,
+  ): Promise<unknown> {
+    const current = (await this.compute(user, id, period)) as Record<string, unknown>;
+    if (
+      id === 'won_lost' ||
+      id === 'trial_to_win' ||
+      id === 'sla_breaches' ||
+      id === 'leads_by_source_market' ||
+      id === 'activity_summary' ||
+      id === 'outreach_performance'
+    ) {
+      const previous = await this.compute(user, id, prevPeriod);
+      return { ...current, previous };
+    }
+    return current;
   }
 
   private async period(user: SessionUser, raw: Record<string, unknown>): Promise<Period> {

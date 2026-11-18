@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowRight, Building2, Contact, Handshake, Search, UserPlus, X } from 'lucide-react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useDebounced } from '@/features/shared/list-kit.js';
+import { can, useDebounced, useMe } from '@/features/shared/list-kit.js';
 import { api } from '@/lib/api.js';
 
 interface CommandPaletteItem {
@@ -13,6 +13,7 @@ interface CommandPaletteItem {
   shortcut?: string;
   targetScreen?: AppScreenId;
   targetId?: string;
+  capability?: string;
 }
 
 const NAVIGATION_ITEMS: CommandPaletteItem[] = [
@@ -65,6 +66,15 @@ const NAVIGATION_ITEMS: CommandPaletteItem[] = [
     targetScreen: 'tasks',
   },
   {
+    id: 'nav_reports',
+    group: 'NAVIGATION',
+    label: 'Reports',
+    meta: 'Go to standard reports and analytics',
+    shortcut: 'G R',
+    targetScreen: 'reports',
+    capability: 'reports.read',
+  },
+  {
     id: 'nav_settings',
     group: 'NAVIGATION',
     label: 'Settings',
@@ -102,6 +112,7 @@ export interface CommandPaletteProps {
 const GROUP_ORDER: Array<CommandPaletteItem['group']> = ['RECORDS', 'ACTIONS', 'NAVIGATION'];
 
 export function CommandPalette({ open, onClose, onSelectScreen }: CommandPaletteProps) {
+  const me = useMe();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -157,14 +168,17 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
   }, [search.data, debounced]);
 
   const filteredItems = useMemo(() => {
+    const allowedNav = NAVIGATION_ITEMS.filter(
+      (item) => !item.capability || can(me, item.capability),
+    );
     const q = query.trim().toLowerCase();
     const nav = q
-      ? NAVIGATION_ITEMS.filter(
+      ? allowedNav.filter(
           (item) => item.label.toLowerCase().includes(q) || item.meta.toLowerCase().includes(q),
         )
-      : NAVIGATION_ITEMS;
+      : allowedNav;
     return [...recordItems, ...nav];
-  }, [query, recordItems]);
+  }, [me, query, recordItems]);
 
   // Reset and focus before the browser paints, so keys typed straight after opening land in
   // the search box instead of the page (or being cleared by a later reset).
