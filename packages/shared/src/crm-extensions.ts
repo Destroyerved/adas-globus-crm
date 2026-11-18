@@ -211,3 +211,99 @@ export const SetPrimaryContactPhoneInputSchema = z
   })
   .strict();
 export type SetPrimaryContactPhoneInput = z.input<typeof SetPrimaryContactPhoneInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Deal stakeholder contacts (PRD 4.6, 7.3)
+// ---------------------------------------------------------------------------
+
+export interface DealContactView {
+  id: string;
+  dealId: string;
+  contactId: string;
+  fullName: string;
+  title: string | null;
+  primaryEmail: string;
+  role: string;
+  createdAt: string;
+}
+
+export const AddDealContactInputSchema = z
+  .object({
+    contactId: z.string().trim().min(1, 'Choose a contact.').max(80),
+    role: z.string().trim().min(1, 'Choose a role.').max(80).default('Decision maker'),
+  })
+  .strict();
+export type AddDealContactInput = z.input<typeof AddDealContactInputSchema>;
+
+export const UpdateDealContactInputSchema = z
+  .object({
+    role: z.string().trim().min(1, 'Choose a role.').max(80),
+  })
+  .strict();
+export type UpdateDealContactInput = z.input<typeof UpdateDealContactInputSchema>;
+
+// ---------------------------------------------------------------------------
+// FX rates administration (PRD 4.6, 4.15, 4.17, 14 — integer rate_scaled, never floats)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a decimal exchange rate text ("0.735" or "1.360544") into an integer scaled by 1,000,000
+ * without floating-point arithmetic. Returns null if invalid or <= 0.
+ */
+export function parseFxRateScaled(text: string): bigint | null {
+  const cleaned = text.trim();
+  const match = /^(\d{1,6})(?:\.(\d{1,6}))?$/.exec(cleaned);
+  if (!match) return null;
+  const whole = BigInt(match[1] ?? '0');
+  const frac = BigInt((match[2] ?? '').padEnd(6, '0') || '0');
+  const scaled = whole * 1_000_000n + frac;
+  return scaled > 0n ? scaled : null;
+}
+
+/**
+ * Format an integer rate scaled by 1,000,000 ("735000" -> "0.7350", "1360544" -> "1.360544").
+ */
+export function formatFxRateScaled(scaledInput: bigint | string): string {
+  const scaled = typeof scaledInput === 'bigint' ? scaledInput : BigInt(scaledInput || '0');
+  const whole = scaled / 1_000_000n;
+  const fracRaw = (scaled % 1_000_000n).toString().padStart(6, '0');
+  const trimmedFrac = fracRaw.replace(/0+$/, '');
+  const minFour = trimmedFrac.padEnd(4, '0');
+  return `${whole.toString()}.${minFour}`;
+}
+
+export interface FxRateView {
+  id: string;
+  fromCurrency: z.infer<typeof CurrencySchema>;
+  toCurrency: z.infer<typeof CurrencySchema>;
+  rateScaled: string;
+  effectiveDate: string;
+  createdAt: string;
+}
+
+export const UpsertFxRateInputSchema = z
+  .object({
+    fromCurrency: CurrencySchema,
+    toCurrency: CurrencySchema,
+    rateText: z
+      .string()
+      .trim()
+      .refine((v) => parseFxRateScaled(v) !== null, {
+        message: 'Enter a positive rate with up to 6 decimal places (for example 0.7350).',
+      }),
+    effectiveDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD date format.'),
+  })
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.fromCurrency === val.toCurrency) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['toCurrency'],
+        message: 'Choose two different currencies.',
+      });
+    }
+  });
+export type UpsertFxRateInput = z.input<typeof UpsertFxRateInputSchema>;

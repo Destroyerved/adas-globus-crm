@@ -1,6 +1,7 @@
 import {
   type AddContactEmailInput,
   type AddContactPhoneInput,
+  type AddDealContactInput,
   type AddSuppressedDomainInput,
   type AddSuppressionInput,
   type BulkActionInput,
@@ -11,9 +12,11 @@ import {
   type CreateScoringRuleInput,
   type Currency,
   type CustomFieldDefinitionView,
+  type DealContactView,
   type DuplicateCandidateView,
   type ExportCreateInput,
   type ExportView,
+  type FxRateView,
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
@@ -28,6 +31,7 @@ import {
   type MergeView,
   type PrivacyEraseInput,
   type RecordConsentInput,
+  type RecurrenceRule,
   type RemoveSuppressedDomainInput,
   type RoutingRuleView,
   type SavedView,
@@ -39,9 +43,11 @@ import {
   type SetPrimaryContactPhoneInput,
   type SuppressionStateFilter,
   type UpdateCustomFieldInput,
+  type UpdateDealContactInput,
   type UpdateRoutingRuleInput,
   type UpdateSavedViewInput,
   type UpdateScoringRuleInput,
+  type UpsertFxRateInput,
   type WithdrawConsentInput,
 } from '@adas/shared';
 
@@ -330,6 +336,9 @@ export interface TaskRow {
   status: string;
   due_at: string;
   reminder_at?: string | null;
+  recurrence_rule?: RecurrenceRule | null;
+  parent_task_id?: string | null;
+  next_task_id?: string | null;
   completed_at?: string | null;
   outcome?: string | null;
   assignee_user_id: string;
@@ -459,6 +468,7 @@ export interface DealProfile {
   deal: DealRow;
   company: { id: string; name: string; market: Market } | null;
   primaryContact: { id: string; full_name: string; title: string | null } | null;
+  dealContacts?: DealContactView[];
   tasks: TaskRow[];
   stages: StageRow[];
 }
@@ -724,6 +734,15 @@ export const api = {
   listDeals: (params: ListParams = {}) => request<Page<DealRow>>(`/deals${listQuery(params)}`),
   getDeal: (dealId: string) => request<DealProfile>(`/deals/${enc(dealId)}`),
   updateDeal: (dealId: string, input: Patch) => patch<DealRow>(`/deals/${enc(dealId)}`, input),
+  addDealContact: (dealId: string, input: AddDealContactInput) =>
+    post<{ dealContacts: DealContactView[] }>(`/deals/${enc(dealId)}/contacts`, input),
+  updateDealContact: (dealId: string, contactId: string, input: UpdateDealContactInput) =>
+    patch<{ dealContacts: DealContactView[] }>(
+      `/deals/${enc(dealId)}/contacts/${enc(contactId)}`,
+      input,
+    ),
+  removeDealContact: (dealId: string, contactId: string) =>
+    del<{ dealContacts: DealContactView[] }>(`/deals/${enc(dealId)}/contacts/${enc(contactId)}`),
   moveDealStage: (
     dealId: string,
     input: {
@@ -759,6 +778,7 @@ export const api = {
     leadId?: string | null;
     dealId?: string | null;
     reminderAt?: string | null;
+    recurrenceRule?: RecurrenceRule | null;
   }) => createWithKey<TaskRow>('/tasks', input),
   updateTask: (taskId: string, input: Patch) => patch<TaskRow>(`/tasks/${enc(taskId)}`, input),
   completeTask: (taskId: string, outcome?: string) =>
@@ -1029,6 +1049,14 @@ export const api = {
     del<{ id: string; deleted: true }>(`/admin/scoring-rules/${enc(ruleId)}`),
   recalculateScores: () =>
     post<{ leadsUpdated: number; contactsUpdated: number }>('/admin/scoring-rules/recalculate', {}),
+
+  // FX rates (PRD 4.15, 4.17, 14)
+  listFxRates: () =>
+    request<{ reportingCurrency: Currency; items: FxRateView[] }>('/admin/fx-rates'),
+  upsertFxRate: (input: UpsertFxRateInput) =>
+    createWithKey<{ rate: FxRateView }>('/admin/fx-rates', input),
+  deleteFxRate: (rateId: string) =>
+    del<{ id: string; deleted: true }>(`/admin/fx-rates/${enc(rateId)}`),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

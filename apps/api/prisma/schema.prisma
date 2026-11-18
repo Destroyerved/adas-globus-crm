@@ -597,3 +597,67 @@ model ScoringRule {
 
   @@map("scoring_rules")
 }
+
+// Deal stakeholder contacts, recurring tasks and FX rates (PRD 4.6, 4.7, 4.17). Migration 0001 + 0016.
+model DealContact {
+  id              String   @id
+  dealId          String   @map("deal_id")
+  contactId       String   @map("contact_id")
+  role            String   @default("Decision maker")
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([dealId, contactId])
+  @@index([dealId])
+  @@index([contactId])
+  @@map("deal_contacts")
+}
+
+model Task {
+  id                String    @id
+  title             String
+  taskType          String    @default("follow_up") @map("task_type")
+  priority          String    @default("normal")
+  status            String    @default("open")
+  dueAt             DateTime  @map("due_at") @db.Timestamptz(6)
+  reminderAt        DateTime? @map("reminder_at") @db.Timestamptz(6)
+  reminderSentAt    DateTime? @map("reminder_sent_at") @db.Timestamptz(6)
+  overdueNotifiedAt DateTime? @map("overdue_notified_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+  completedByUserId String?   @map("completed_by_user_id")
+  outcome           String?
+  recurrenceRule    String?   @map("recurrence_rule")
+  parentTaskId      String?   @map("parent_task_id")
+  slaDeadlineAt     DateTime? @map("sla_deadline_at") @db.Timestamptz(6)
+  slaWarnedAt       DateTime? @map("sla_warned_at") @db.Timestamptz(6)
+  slaBreached       Boolean   @default(false) @map("sla_breached")
+  assigneeUserId    String    @map("assignee_user_id")
+  teamId            String?   @map("team_id")
+  leadId            String?   @map("lead_id")
+  companyId         String?   @map("company_id")
+  contactId         String?   @map("contact_id")
+  dealId            String?   @map("deal_id")
+  createdByUserId   String?   @map("created_by_user_id")
+  version           Int       @default(1)
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([assigneeUserId, dueAt])
+  @@index([teamId])
+  @@index([dealId])
+  @@map("tasks")
+}
+
+model FxRate {
+  id              String   @id
+  fromCurrency    String   @map("from_currency")
+  toCurrency      String   @map("to_currency")
+  rateScaled      BigInt   @map("rate_scaled")
+  effectiveDate   String   @map("effective_date")
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([fromCurrency, toCurrency, effectiveDate])
+  @@map("fx_rates")
+}

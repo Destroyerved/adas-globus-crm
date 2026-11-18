@@ -11,7 +11,11 @@ import {
   UpdateStageInputSchema,
   UpdateTeamInputSchema,
   UpdateUserInputSchema,
+  UpsertFxRateInputSchema,
+  parseFxRateScaled,
   settingValueSchema,
+  type Currency,
+  type FxRateView,
   type SessionUser,
   type UserRoleName,
 } from '@adas/shared';
@@ -820,6 +824,173 @@ export class AdminService {
       `SELECT DISTINCT action FROM audit_logs ORDER BY action`,
     );
     return { items: res.rows.map((r) => r.action) };
+  }
+
+  async listFxRates(
+    actor: SessionUser,
+  ): Promise<{ reportingCurrency: Currency; items: FxRateView[] }> {
+    requireCapability(actor, 'settings.manage');
+    const [ratesRes, repRes] = await Promise.all([
+      this.db.query<{
+        id: string;
+        from_currency: Currency;
+        to_currency: Currency;
+        rate_scaled: string | number;
+        effective_date: string;
+        created_at: Date | string;
+      }>(
+        `SELECT id, from_currency, to_currency, rate_scaled::text AS rate_scaled, effective_date, created_at
+         FROM fx_rates
+         WHERE from_currency <> to_currency
+         ORDER BY effective_date DESC, from_currency ASC`,
+      ),
+      this.db.query<{ value_json: unknown }>(
+        `SELECT value_json FROM settings WHERE key = 'reporting.currency'`,
+      ),
+    ]);
+    const reportingCurrency: Currency = repRes.rows[0]?.value_json === 'CAD' ? 'CAD' : 'USD';
+    return {
+      reportingCurrency,
+      items: ratesRes.rows.map((r) => ({
+        id: r.id,
+        fromCurrency: r.from_currency,
+        toCurrency: r.to_currency,
+        rateScaled: String(r.rate_scaled),
+        effectiveDate: r.effective_date,
+        createdAt:
+          r.created_at instanceof Date
+            ? r.created_at.toISOString()
+            : new Date(String(r.created_at)).toISOString(),
+      })),
+    };
+  }
+
+  async upsertFxRate(
+    actor: SessionUser,
+    raw: unknown,
+    ip: string | null,
+  ): Promise<{ rate: FxRateView }> {
+    requireCapability(actor, 'settings.manage');
+    const input = UpsertFxRateInputSchema.parse(raw);
+    const scaled = parseFxRateScaled(input.rateText);
+    if (scaled === null) {
+      throw new ValidationDomainError('Enter a valid positive exchange rate.', {
+        rateText: ['Enter a positive rate with up to 6 decimal places.'],
+      });
+    }
+    const reciprocalScaled = (1_000_000_000_000n + scaled / 2n) / scaled;
+
+    return this.db.transaction(async (tx) => {
+      const id = `fx_${randomUUID()}`;
+      const res = await tx.query<{
+        id: string;
+        from_currency: Currency;
+        to_currency: Currency;
+        rate_scaled: string;
+        effective_date: string;
+        created_at: Date | string;
+      }>(
+        `INSERT INTO fx_rates (id, from_currency, to_currency, rate_scaled, effective_date, created_by_user_id)
+         VALUES ($1, $2, $3, $4::bigint, $5, $6)
+         ON CONFLICT (from_currency, to_currency, effective_date)
+         DO UPDATE SET rate_scaled = EXCLUDED.rate_scaled, created_by_user_id = EXCLUDED.created_by_user_id
+         RETURNING id, from_currency, to_currency, rate_scaled::text AS rate_scaled, effective_date, created_at`,
+        [
+          id,
+          input.fromCurrency,
+          input.toCurrency,
+          scaled.toString(),
+          input.effectiveDate,
+          actor.id,
+        ],
+      );
+      const saved = res.rows[0];
+      if (!saved) throw new NotFoundDomainError('FX rate', id);
+
+      if (reciprocalScaled > 0n) {
+        await tx.query(
+          `INSERT INTO fx_rates (id, from_currency, to_currency, rate_scaled, effective_date, created_by_user_id)
+           VALUES ($1, $2, $3, $4::bigint, $5, $6)
+           ON CONFLICT (from_currency, to_currency, effective_date) DO NOTHING`,
+          [
+            `fx_${randomUUID()}`,
+            input.toCurrency,
+            input.fromCurrency,
+            reciprocalScaled.toString(),
+            input.effectiveDate,
+            actor.id,
+          ],
+        );
+      }
+
+      await this.audit(tx, actor, ip, 'fx_rate.upserted', 'fx_rate', saved.id, {
+        fromCurrency: input.fromCurrency,
+        toCurrency: input.toCurrency,
+        rateScaled: scaled.toString(),
+        effectiveDate: input.effectiveDate,
+      });
+
+      return {
+        rate: {
+          id: saved.id,
+          fromCurrency: saved.from_currency,
+          toCurrency: saved.to_currency,
+          rateScaled: saved.rate_scaled,
+          effectiveDate: saved.effective_date,
+          createdAt:
+            saved.created_at instanceof Date
+              ? saved.created_at.toISOString()
+              : new Date(String(saved.created_at)).toISOString(),
+        },
+      };
+    });
+  }
+
+  async deleteFxRate(
+    actor: SessionUser,
+    rateId: string,
+    ip: string | null,
+  ): Promise<{ id: string; deleted: true }> {
+    requireCapability(actor, 'settings.manage');
+    return this.db.transaction(async (tx) => {
+      const existing = await tx.query<{
+        id: string;
+        from_currency: Currency;
+        to_currency: Currency;
+        effective_date: string;
+      }>(
+        `SELECT id, from_currency, to_currency, effective_date
+         FROM fx_rates WHERE id = $1 FOR UPDATE`,
+        [rateId],
+      );
+      const row = existing.rows[0];
+      if (!row) throw new NotFoundDomainError('FX rate', rateId);
+      if (row.from_currency === row.to_currency) {
+        throw new ValidationDomainError('Base 1:1 currency rows cannot be deleted.');
+      }
+
+      const remaining = await tx.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM fx_rates
+         WHERE from_currency = $1 AND to_currency = $2 AND id <> $3`,
+        [row.from_currency, row.to_currency, rateId],
+      );
+      if ((remaining.rows[0]?.n ?? 0) === 0) {
+        throw new DomainError({
+          status: 409,
+          code: 'FX_LAST_RATE',
+          title: 'Cannot remove last exchange rate',
+          detail: `Keep at least one ${row.from_currency} → ${row.to_currency} exchange rate so pipeline and revenue conversions stay accurate.`,
+        });
+      }
+
+      await tx.query(`DELETE FROM fx_rates WHERE id = $1`, [rateId]);
+      await this.audit(tx, actor, ip, 'fx_rate.deleted', 'fx_rate', rateId, {
+        fromCurrency: row.from_currency,
+        toCurrency: row.to_currency,
+        effectiveDate: row.effective_date,
+      });
+      return { id: rateId, deleted: true as const };
+    });
   }
 
   private async audit(

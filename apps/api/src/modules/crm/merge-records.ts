@@ -245,6 +245,8 @@ export interface MergeSnapshot {
   stoppedForDoNotContact: string[];
   listsMoved: string[];
   listsDropped: { listId: string; addedAt: string }[];
+  dealContactsMoved?: string[];
+  dealContactsDropped?: { dealId: string; role: string; createdAt: string }[];
   tagsAdded: string[];
   candidatesRepointed: { id: string; side: 'left' | 'right' }[];
   candidatesClosed: string[];
@@ -697,6 +699,8 @@ export class MergeWriter {
     let stoppedForDoNotContact: string[] = [];
     let listsMoved: string[] = [];
     const listsDropped: { listId: string; addedAt: string }[] = [];
+    let dealContactsMoved: string[] = [];
+    const dealContactsDropped: { dealId: string; role: string; createdAt: string }[] = [];
     if (entity === 'contact') {
       await this.syncPrimaryFlags(tx, [keptId]);
       if (next['do_not_contact'] === true) {
@@ -730,6 +734,29 @@ export class MergeWriter {
         [keptId, mergedId],
       );
       listsMoved = lists.rows.map((r) => r.list_id);
+
+      const droppedDc = await tx.query<{
+        deal_id: string;
+        role: string;
+        created_at: Date | string;
+      }>(
+        `DELETE FROM deal_contacts
+         WHERE contact_id = $2 AND deal_id IN (SELECT deal_id FROM deal_contacts WHERE contact_id = $1)
+         RETURNING deal_id, role, created_at`,
+        [keptId, mergedId],
+      );
+      for (const row of droppedDc.rows) {
+        dealContactsDropped.push({
+          dealId: row.deal_id,
+          role: row.role,
+          createdAt: String(plain(row.created_at)),
+        });
+      }
+      const movedDc = await tx.query<{ deal_id: string }>(
+        `UPDATE deal_contacts SET contact_id = $1 WHERE contact_id = $2 RETURNING deal_id`,
+        [keptId, mergedId],
+      );
+      dealContactsMoved = movedDc.rows.map((r) => r.deal_id);
     }
 
     const tags = await tx.query<{ tag_id: string }>(
@@ -773,6 +800,8 @@ export class MergeWriter {
       stoppedForDoNotContact,
       listsMoved,
       listsDropped,
+      dealContactsMoved,
+      dealContactsDropped,
       tagsAdded,
       candidatesRepointed: repointed,
       candidatesClosed: closed,
@@ -1064,6 +1093,20 @@ export class MergeWriter {
             dropped.listId,
           ]);
         }
+      }
+      if ((snap.dealContactsMoved ?? []).length > 0) {
+        await tx.query(
+          `UPDATE deal_contacts SET contact_id = $1 WHERE contact_id = $2 AND deal_id = ANY($3::text[])`,
+          [mergedId, keptId, snap.dealContactsMoved],
+        );
+      }
+      for (const dropped of snap.dealContactsDropped ?? []) {
+        await tx.query(
+          `INSERT INTO deal_contacts (id, deal_id, contact_id, role, created_at)
+           SELECT $1, id, $3, $4, $5::timestamptz FROM deals WHERE id = $2
+           ON CONFLICT DO NOTHING`,
+          [`dc_${randomUUID()}`, dropped.dealId, mergedId, dropped.role, dropped.createdAt],
+        );
       }
     }
 

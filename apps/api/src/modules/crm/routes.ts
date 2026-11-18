@@ -226,6 +226,30 @@ export function registerCrmRoutes(
   router.get('/api/v1/deals/:id', async (ctx) => {
     ctx.json(200, await timeline.dealProfile(ctx.user, ctx.params['id'] ?? ''));
   });
+  router.post('/api/v1/deals/:id/contacts', async (ctx) => {
+    ctx.json(201, await records.addDealContact(ctx.user, ctx.params['id'] ?? '', await ctx.body()));
+  });
+  router.patch('/api/v1/deals/:id/contacts/:contactId', async (ctx) => {
+    ctx.json(
+      200,
+      await records.updateDealContact(
+        ctx.user,
+        ctx.params['id'] ?? '',
+        ctx.params['contactId'] ?? '',
+        await ctx.body(),
+      ),
+    );
+  });
+  router.delete('/api/v1/deals/:id/contacts/:contactId', async (ctx) => {
+    ctx.json(
+      200,
+      await records.removeDealContact(
+        ctx.user,
+        ctx.params['id'] ?? '',
+        ctx.params['contactId'] ?? '',
+      ),
+    );
+  });
   router.patch('/api/v1/deals/:id', async (ctx) => {
     ctx.json(200, await records.updateDeal(ctx.user, ctx.params['id'] ?? '', await ctx.body()));
   });

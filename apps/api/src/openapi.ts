@@ -1076,6 +1076,48 @@ const crmExtensionsPaths = {
       responses: ok('Deleted'),
     },
   },
+  '/deals/{id}/contacts': {
+    post: {
+      operationId: 'addDealContact',
+      summary: 'Attach a stakeholder contact and role to a deal (PRD 4.6)',
+      parameters: idParam,
+      responses: { '201': { description: '{ dealContacts }' } },
+    },
+  },
+  '/deals/{id}/contacts/{contactId}': {
+    patch: {
+      operationId: 'updateDealContactRole',
+      summary: 'Update a stakeholder contact role on a deal (PRD 4.6)',
+      responses: ok('{ dealContacts }'),
+    },
+    delete: {
+      operationId: 'removeDealContact',
+      summary: 'Remove a stakeholder contact from a deal (PRD 4.6)',
+      responses: ok('{ dealContacts }'),
+    },
+  },
+  '/admin/fx-rates': {
+    get: {
+      operationId: 'listFxRates',
+      summary:
+        'List stored currency exchange rates and reporting currency (requires settings.manage — PRD 4.17, 14)',
+      responses: ok('{ reportingCurrency, items }'),
+    },
+    post: {
+      operationId: 'upsertFxRate',
+      summary: 'Add or update a currency exchange rate (requires settings.manage — PRD 4.17, 14)',
+      responses: { '201': { description: '{ rate }' } },
+    },
+  },
+  '/admin/fx-rates/{id}': {
+    delete: {
+      operationId: 'deleteFxRate',
+      summary:
+        'Remove a currency exchange rate if at least one rate remains for the pair (PRD 4.17)',
+      parameters: idParam,
+      responses: ok('Deleted'),
+    },
+  },
 };
 
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
