@@ -435,7 +435,14 @@ export class CrmTimelineService {
         ),
         this.db.query(
           `SELECT d.id, d.name, d.stage_name, d.stage_category, d.monthly_value_minor, d.currency, d.updated_at
-           FROM deals d WHERE d.primary_contact_id = $1 AND d.deleted_at IS NULL AND ${dealScope.sql}
+           FROM deals d
+           WHERE (
+             d.primary_contact_id = $1
+             OR EXISTS (
+               SELECT 1 FROM deal_contacts dc WHERE dc.deal_id = d.id AND dc.contact_id = $1
+             )
+           )
+           AND d.deleted_at IS NULL AND ${dealScope.sql}
            ORDER BY d.updated_at DESC`,
           [contactId, ...dealScope.params],
         ),
@@ -521,7 +528,8 @@ export class CrmTimelineService {
 
   async dealProfile(user: SessionUser, dealId: string): Promise<Row> {
     const deal = await requireRecord<Row>(this.db, user, 'deal', dealId, 'read');
-    const [tags, tasks, company, contact, stages] = await Promise.all([
+    const contactScope = scopeWhere(user, 'contacts.read', { alias: 'c', startParamIndex: 2 });
+    const [tags, tasks, company, contact, dealContactsRes, stages] = await Promise.all([
       this.tagsFor('deal', dealId),
       this.openTasksFor(user, 'deal_id', dealId),
       this.db.query(`SELECT id, name, market, domain FROM companies WHERE id = $1`, [
@@ -532,8 +540,25 @@ export class CrmTimelineService {
             deal['primary_contact_id'],
           ])
         : Promise.resolve({ rows: [] as Row[] }),
+      this.db.query<{
+        id: string;
+        deal_id: string;
+        contact_id: string;
+        full_name: string;
+        title: string | null;
+        primary_email: string;
+        role: string;
+        created_at: Date | string;
+      }>(
+        `SELECT dc.id, dc.deal_id, dc.contact_id, c.full_name, c.title, c.primary_email, dc.role, dc.created_at
+         FROM deal_contacts dc
+         JOIN contacts c ON c.id = dc.contact_id
+         WHERE dc.deal_id = $1 AND c.deleted_at IS NULL AND ${contactScope.sql}
+         ORDER BY dc.created_at ASC`,
+        [dealId, ...contactScope.params],
+      ),
       this.db.query(
-        `SELECT id, name, category, probability, stage_order, required_fields
+        `SELECT id, name, category, probability, stage_order, required_fields, is_trial
          FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY stage_order`,
         [deal['pipeline_id']],
       ),
@@ -542,6 +567,19 @@ export class CrmTimelineService {
       deal: { ...deal, tags },
       company: company.rows[0] ?? null,
       primaryContact: contact.rows[0] ?? null,
+      dealContacts: dealContactsRes.rows.map((r) => ({
+        id: r.id,
+        dealId: r.deal_id,
+        contactId: r.contact_id,
+        fullName: r.full_name,
+        title: r.title,
+        primaryEmail: r.primary_email,
+        role: r.role,
+        createdAt:
+          r.created_at instanceof Date
+            ? r.created_at.toISOString()
+            : new Date(String(r.created_at)).toISOString(),
+      })),
       tasks,
       stages: stages.rows,
     };

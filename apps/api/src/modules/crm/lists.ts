@@ -1,6 +1,6 @@
 import type { ExportEntity, SessionUser } from '@adas/shared';
 import { type DatabaseService } from '../../platform/db/index.js';
-import { ValidationDomainError } from '../../platform/errors/index.js';
+import { ForbiddenScopeError, ValidationDomainError } from '../../platform/errors/index.js';
 import {
   SqlParams,
   ilikeAny,
@@ -10,7 +10,7 @@ import {
   type ListSpec,
   type Page,
 } from '../../platform/list/index.js';
-import { scopeWhere } from '../../platform/scope/index.js';
+import { getCapabilityScope, scopeWhere } from '../../platform/scope/index.js';
 import { EXPORT_SPECS, exportHeader } from './export-columns.js';
 
 /**
@@ -254,6 +254,7 @@ export const TASK_LIST: ListSpec = {
 /** Task views (PRD 4.7). "Today" and "upcoming" use the assignee's time zone. */
 const TASK_VIEWS: Record<string, string> = {
   open: `t.status = 'open'`,
+  team: `t.status = 'open'`,
   // "Today" in any time zone lies within two days of now: that part can use the due-date
   // index, and the exact per-person check then runs on a handful of rows.
   today: `t.status = 'open' AND t.due_at > NOW() - INTERVAL '2 days' AND t.due_at < NOW() + INTERVAL '2 days'
@@ -328,10 +329,17 @@ export class CrmListService {
       ? { ...baseSpec, select: `${baseSpec.select}, ${options.extraSelect}` }
       : baseSpec;
     if (entity === 'tasks') {
-      const view = TASK_VIEWS[options.taskView ?? 'open'];
+      const taskViewKey = options.taskView ?? 'open';
+      if (taskViewKey === 'team') {
+        const readScope = getCapabilityScope(user, 'tasks.read');
+        if (readScope !== 'team' && readScope !== 'all') {
+          throw new ForbiddenScopeError('tasks.read');
+        }
+      }
+      const view = TASK_VIEWS[taskViewKey];
       if (!view) {
         throw new ValidationDomainError('Unknown task view.', {
-          view: ['Use open, today, overdue, upcoming, done or all.'],
+          view: ['Use open, team, today, overdue, upcoming, done or all.'],
         });
       }
       spec = { ...spec, where: [...spec.where, view] };
@@ -416,7 +424,7 @@ export class CrmListService {
 
     const [stages, totals, cards] = await Promise.all([
       this.db.query(
-        `SELECT id, name, category, probability, stage_order, required_fields, idle_days
+        `SELECT id, name, category, probability, stage_order, required_fields, idle_days, is_trial
          FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY stage_order`,
         [pipelineId],
       ),
@@ -431,7 +439,8 @@ export class CrmListService {
            SELECT d.id, d.name, d.stage_id, d.stage_name, d.stage_category, d.company_id,
                   d.primary_contact_id, d.monthly_value_minor, d.currency, d.fte_count,
                   d.probability, d.expected_close_date, d.owner_user_id, d.version,
-                  d.updated_at, d.trial_ends_at, d.closed_at, d.last_activity_at,
+                  d.updated_at, d.trial_ends_at, d.trial_candidate_role, d.contract_start_date,
+                  d.closed_at, d.last_activity_at,
                   cmp.name AS company_name, cmp.market AS company_market,
                   (d.stage_category = 'open' AND d.last_activity_at < NOW() - make_interval(days => s.idle_days)) AS is_idle,
                   FLOOR(EXTRACT(EPOCH FROM (NOW() - d.last_activity_at)) / 86400)::int AS idle_days,

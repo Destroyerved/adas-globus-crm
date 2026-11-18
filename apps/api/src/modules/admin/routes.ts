@@ -60,6 +60,16 @@ export function registerAdminRoutes(router: Router, admin: AdminService): void {
     ),
   );
 
+  router.get('/api/v1/admin/fx-rates', async (ctx) =>
+    ctx.json(200, await admin.listFxRates(ctx.user)),
+  );
+  router.post('/api/v1/admin/fx-rates', async (ctx) =>
+    ctx.json(201, await admin.upsertFxRate(ctx.user, await ctx.body(), ctx.ip)),
+  );
+  router.delete('/api/v1/admin/fx-rates/:id', async (ctx) =>
+    ctx.json(200, await admin.deleteFxRate(ctx.user, id(ctx.params), ctx.ip)),
+  );
+
   router.get('/api/v1/audit-logs', async (ctx) =>
     ctx.json(200, await admin.listAuditLogs(ctx.user, ctx.query)),
   );

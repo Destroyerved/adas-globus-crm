@@ -21,12 +21,13 @@ import {
 import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
 import { StageMover } from './stage-mover.js';
+import { DealContactsPanel } from './deal-contacts-panel.js';
 
 function money(minor: string | undefined, currency: Currency, perMonth = false): string {
   return formatMoney({ amountMinor: BigInt(minor ?? '0'), currency }, { perMonth });
 }
 
-/** Deal page (PRD 3.3, 4.6): stage, value, contract terms, tasks and the timeline. */
+/** Deal page (PRD 3.3, 4.6): stage, value, contract terms, stakeholder contacts, tasks and timeline. */
 export function DealProfileScreen({
   dealId,
   onBack,
@@ -65,7 +66,7 @@ export function DealProfileScreen({
   }
   if (!profile.isSuccess) return <ProfileStatus back={back} query={profile} />;
 
-  const { deal, company, primaryContact, tasks, stages } = profile.data;
+  const { deal, company, primaryContact, dealContacts = [], tasks, stages } = profile.data;
   const canWrite = can(me, 'deals.write');
   const tone =
     deal.stage_category === 'won' ? 'success' : deal.stage_category === 'lost' ? 'danger' : 'brand';
@@ -201,24 +202,15 @@ export function DealProfileScreen({
                 />
               </Panel>
             )}
-            <Panel title="Primary contact" padded>
-              {primaryContact ? (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => onOpenContact(primaryContact.id)}
-                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
-                  >
-                    {primaryContact.full_name}
-                  </button>
-                  {primaryContact.title && (
-                    <div className="text-[13px] text-ink-3">{primaryContact.title}</div>
-                  )}
-                </div>
-              ) : (
-                <p className="m-0 text-[14px] text-ink-2">No primary contact.</p>
-              )}
-            </Panel>
+            <DealContactsPanel
+              dealId={deal.id}
+              companyId={deal.company_id}
+              primaryContact={primaryContact}
+              dealContacts={dealContacts}
+              canWrite={canWrite}
+              onOpenContact={onOpenContact}
+              onChanged={() => void refresh()}
+            />
             <Panel title="Tags" padded>
               <TagEditor
                 entityType="deal"

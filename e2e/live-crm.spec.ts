@@ -1050,3 +1050,150 @@ test('custom fields, explainable scoring, interactive lead conversion drawer and
     page.getByTestId('contact-channels-panel').getByText('c.bennett@bennettadvisory.example'),
   ).toBeVisible();
 });
+
+test('currencies settings, keyboard Kanban drag-and-drop, deal stakeholders, recurring tasks and tasks calendar work end-to-end', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+
+  // 1. Settings → Currencies: save a new effective exchange rate and verify reload persistence.
+  await page.goto('/?screen=settings&tab=currencies');
+  await expect(page.getByTestId('settings-currencies-tab')).toBeVisible();
+  await page.getByLabel('Exchange rate').fill('0.7385');
+  await page.getByLabel('Effective date').fill('2026-11-18');
+  await page.getByRole('button', { name: 'Save exchange rate' }).click();
+  await expect(page.getByText('1 CAD = 0.7385 USD')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('1 CAD = 0.7385 USD')).toBeVisible();
+
+  // 2. Switch to synthetic Sales Manager (Maya Lin) so all screens and screenshots show synthetic users only.
+  await signInAs(page, 'usr_mgr_1');
+
+  // Create a US lead, convert it to a deal, and add a second stakeholder contact on the same firm.
+  await page.goto('/?screen=leads');
+  await page.getByRole('button', { name: 'New lead' }).click();
+  await page.getByLabel('Full name').fill('Marcus Sterling');
+  await page.getByLabel('Work email').fill('marcus@sterlingtax-e2e.example');
+  await page.getByLabel(/^Firm/).fill('Sterling Tax Group CPA');
+  await page.getByRole('button', { name: 'Save lead' }).click();
+  await expect(page.getByText('Added Marcus Sterling as a new lead.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Convert Marcus Sterling to a deal' }).click();
+  await expect(page.getByText('Converted Marcus Sterling.')).toBeVisible();
+
+  // Add a second contact so we can link them as a stakeholder on the deal.
+  await page.goto('/?screen=contacts');
+  await page.getByRole('button', { name: 'New contact' }).click();
+  await page.getByLabel('First name').fill('Rachel');
+  await page.getByLabel('Last name').fill('Sterling');
+  await page.getByLabel('Work email').fill('rachel@sterlingtax-e2e.example');
+  await page.getByRole('button', { name: 'Save contact' }).click();
+  await expect(page.getByText('Added Rachel Sterling.')).toBeVisible();
+
+  // 3. Deals Kanban: verify collapsed Won/Lost zones and move deal via keyboard drag-and-drop!
+  await page.goto('/?screen=deals');
+  await expect(page.getByTestId('deals-kanban-screen')).toBeVisible();
+  await expect(page.getByRole('region', { name: /^Won,/ })).toHaveAttribute(
+    'data-collapsed',
+    'true',
+  );
+  await expect(page.getByRole('region', { name: /^Lost,/ })).toHaveAttribute(
+    'data-collapsed',
+    'true',
+  );
+
+  const sterlingCard = page.locator('li', { hasText: 'Sterling Tax Group CPA' });
+  await expect(sterlingCard).toBeVisible();
+  const dragHandle = sterlingCard.getByRole('button', { name: /^Drag / });
+  await dragHandle.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByTestId('kanban-keyboard-banner')).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Space');
+
+  // If the next stage requires gate details, fill them; otherwise the quick move completes directly.
+  const gateDialog = page.getByTestId('stage-gate-dialog');
+  if ((await gateDialog.count()) > 0) {
+    const trialInput = gateDialog.getByLabel('Trial candidate role');
+    if ((await trialInput.count()) > 0) {
+      await trialInput.fill('Audit senior');
+    }
+    await gateDialog.getByRole('button', { name: /^Move to / }).click();
+  }
+  await expect(page.getByText(/Moved .* to /)).toBeVisible();
+
+  // Open the deal profile and add Rachel Sterling as a stakeholder contact.
+  await page
+    .locator('li', { hasText: 'Sterling Tax Group CPA' })
+    .getByRole('button', { name: /^Sterling Tax Group CPA/ })
+    .click();
+  await expect(page.getByTestId('deal-profile-screen')).toBeVisible();
+  await expect(page.getByTestId('deal-contacts-panel')).toBeVisible();
+  await page.getByRole('button', { name: 'Add person' }).click();
+  await page.getByLabel('Find contact').fill('Rachel Sterling');
+  await page
+    .getByLabel('Person')
+    .selectOption({ label: 'Rachel Sterling (rachel@sterlingtax-e2e.example)' });
+  await page.getByLabel('Role on this deal').selectOption('Reviewer');
+  await page.getByRole('button', { name: 'Add stakeholder' }).click();
+  await expect(page.getByTestId('deal-contacts-panel').getByText('Rachel Sterling')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId('deal-contacts-panel').getByText('Rachel Sterling')).toBeVisible();
+
+  // 4. Tasks: create a recurring weekly task, inspect Team tasks & Calendar at 1440px and 375px, then complete!
+  await page.goto('/?screen=tasks');
+  await expect(page.getByTestId('tasks-screen')).toBeVisible();
+  await page.getByRole('button', { name: 'New task' }).click();
+  const nowLocal = new Date(Date.now() + 3_600_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dueLocalStr = `${nowLocal.getFullYear()}-${pad(nowLocal.getMonth() + 1)}-${pad(nowLocal.getDate())}T${pad(nowLocal.getHours())}:${pad(nowLocal.getMinutes())}`;
+  await page.getByLabel('Task', { exact: true }).fill('Sterling weekly staffing sync');
+  await page.getByLabel('Due', { exact: true }).fill(dueLocalStr);
+  await page.getByLabel(/^Repeats/).selectOption('weekly');
+  await page.getByRole('button', { name: 'Save task' }).click();
+  await expect(page.getByText('Sterling weekly staffing sync')).toBeVisible();
+  await expect(page.getByText('Every week').first()).toBeVisible();
+
+  // Manager Team tasks tab
+  await page.getByRole('tab', { name: 'Team tasks' }).click();
+  await expect(page.getByTestId('team-tasks-summary')).toBeVisible();
+
+  // Switch to Calendar display and run axe + overflow + screenshots at 1440px and 375px
+  while ((await page.getByRole('button', { name: 'Dismiss' }).count()) > 0) {
+    await page.getByRole('button', { name: 'Dismiss' }).first().click();
+  }
+  await page
+    .getByRole('group', { name: 'Tasks display' })
+    .getByRole('button', { name: 'Calendar' })
+    .click();
+  await expect(page.getByTestId('tasks-calendar')).toBeVisible();
+  await expect(
+    page.getByTestId('tasks-calendar').getByText('Sterling weekly staffing sync').first(),
+  ).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `27-deals-kanban-tasks-calendar-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Switch back to List, mark the recurring task done, and verify the next weekly occurrence is spawned!
+  await page
+    .getByRole('group', { name: 'Tasks display' })
+    .getByRole('button', { name: 'List' })
+    .click();
+  await page.getByRole('tab', { name: 'Open' }).click();
+  await page.getByRole('button', { name: 'Mark "Sterling weekly staffing sync" done' }).click();
+  await expect(
+    page.getByText('Marked "Sterling weekly staffing sync" done and scheduled the next task.'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Sterling weekly staffing sync', exact: true }),
+  ).toBeVisible();
+});

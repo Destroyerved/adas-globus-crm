@@ -51,7 +51,7 @@ export const SEED_SQL: readonly string[] = [
         ('fx_usd_cad_2026', 'USD', 'CAD', 1351351, '2026-01-01'),
         ('fx_usd_usd_2026', 'USD', 'USD', 1000000, '2026-01-01'),
         ('fx_cad_cad_2026', 'CAD', 'CAD', 1000000, '2026-01-01')
-      ON CONFLICT (id) DO NOTHING;
+      ON CONFLICT DO NOTHING;
 
       INSERT INTO pipelines (id, name, is_default) VALUES
         ('pipeline_new_business', 'New Business', TRUE),

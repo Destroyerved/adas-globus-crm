@@ -33,6 +33,8 @@ import {
   normalizePhone,
 } from '../../platform/normalize/index.js';
 import { requireCapability, scopeWhere } from '../../platform/scope/index.js';
+import { addNotification } from '../notifications/index.js';
+import { resolveAssignee } from './access.js';
 import { LeadScoringService } from './scoring.js';
 
 export class CrmService {
@@ -1297,28 +1299,60 @@ export class CrmService {
     const input = CreateTaskInputSchema.parse(rawInput);
     const id = `tsk_${randomUUID()}`;
 
-    const res = await this.db.query(
-      `INSERT INTO tasks (
-         id, title, task_type, priority, status, due_at,
-         assignee_user_id, team_id, lead_id, company_id, contact_id, deal_id, created_by_user_id
-       ) VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING *`,
-      [
-        id,
-        input.title.trim(),
-        input.taskType,
-        input.priority,
-        input.dueAt,
-        input.assigneeUserId ?? user.id,
-        user.teamId ?? 'team_us',
-        input.leadId ?? null,
-        input.companyId ?? null,
-        input.contactId ?? null,
-        input.dealId ?? null,
-        user.id,
-      ],
-    );
-    return res.rows[0] ?? { id };
+    return this.db.transaction(async (tx) => {
+      let assigneeId = user.id;
+      let teamId = user.teamId ?? 'team_us';
+      if (input.assigneeUserId && input.assigneeUserId !== user.id) {
+        const target = await resolveAssignee(tx, user, input.assigneeUserId, 'tasks.write');
+        assigneeId = target.id;
+        teamId = target.team_id ?? teamId;
+      }
+
+      const res = await tx.query<Record<string, unknown>>(
+        `INSERT INTO tasks (
+           id, title, task_type, priority, status, due_at, reminder_at, recurrence_rule,
+           assignee_user_id, team_id, lead_id, company_id, contact_id, deal_id, created_by_user_id
+         ) VALUES ($1, $2, $3, $4, 'open', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [
+          id,
+          input.title.trim(),
+          input.taskType,
+          input.priority,
+          input.dueAt,
+          input.reminderAt ?? null,
+          input.recurrenceRule ?? null,
+          assigneeId,
+          teamId,
+          input.leadId ?? null,
+          input.companyId ?? null,
+          input.contactId ?? null,
+          input.dealId ?? null,
+          user.id,
+        ],
+      );
+      const created = res.rows[0] ?? { id };
+
+      if (assigneeId !== user.id) {
+        await addNotification(tx, {
+          userId: assigneeId,
+          kind: 'assignment',
+          title: 'Task assigned to you',
+          body: `${user.name} assigned you "${input.title.trim()}".`,
+          entityType: 'task',
+          entityId: id,
+        });
+      }
+
+      await this.db.addOutboxEvent(tx, {
+        eventType: 'task.created',
+        aggregateType: 'task',
+        aggregateId: id,
+        payload: { taskId: id, assigneeUserId: assigneeId },
+      });
+
+      return created;
+    });
   }
 
   async completeTask(user: SessionUser, taskId: string): Promise<Record<string, unknown>> {

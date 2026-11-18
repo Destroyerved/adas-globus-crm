@@ -2,19 +2,25 @@ import { randomUUID } from 'node:crypto';
 import {
   AddContactEmailInputSchema,
   AddContactPhoneInputSchema,
+  AddDealContactInputSchema,
   CompleteTaskInputSchema,
   RecordEntityTypeSchema,
   SetPrimaryContactEmailInputSchema,
   SetPrimaryContactPhoneInputSchema,
   UpdateCompanyInputSchema,
   UpdateContactInputSchema,
+  UpdateDealContactInputSchema,
   UpdateDealInputSchema,
   UpdateLeadInputSchema,
   UpdateTaskInputSchema,
+  type DealContactView,
   type LeadSystemStatus,
+  type Market,
+  type RecurrenceRule,
   type SessionUser,
 } from '@adas/shared';
-import { sha256Hex, type DatabaseService } from '../../platform/db/index.js';
+import { nextRecurringDueAt } from '../../platform/calendar/index.js';
+import { sha256Hex, type DatabaseService, type DbTx } from '../../platform/db/index.js';
 import {
   DomainError,
   NotFoundDomainError,
@@ -1082,6 +1088,143 @@ export class CrmRecordService {
     });
   }
 
+  private async queryDealContacts(
+    q: Pick<DbTx, 'query'>,
+    dealId: string,
+  ): Promise<DealContactView[]> {
+    const res = await q.query<{
+      id: string;
+      deal_id: string;
+      contact_id: string;
+      full_name: string;
+      title: string | null;
+      primary_email: string;
+      role: string;
+      created_at: Date | string;
+    }>(
+      `SELECT dc.id, dc.deal_id, dc.contact_id, c.full_name, c.title, c.primary_email, dc.role, dc.created_at
+       FROM deal_contacts dc
+       JOIN contacts c ON c.id = dc.contact_id
+       WHERE dc.deal_id = $1 AND c.deleted_at IS NULL
+       ORDER BY dc.created_at ASC`,
+      [dealId],
+    );
+    return res.rows.map((r) => ({
+      id: r.id,
+      dealId: r.deal_id,
+      contactId: r.contact_id,
+      fullName: r.full_name,
+      title: r.title,
+      primaryEmail: r.primary_email,
+      role: r.role,
+      createdAt:
+        r.created_at instanceof Date
+          ? r.created_at.toISOString()
+          : new Date(String(r.created_at)).toISOString(),
+    }));
+  }
+
+  async addDealContact(
+    user: SessionUser,
+    dealId: string,
+    raw: unknown,
+  ): Promise<{ dealContacts: DealContactView[] }> {
+    const input = AddDealContactInputSchema.parse(raw);
+    return this.db.transaction(async (tx) => {
+      await requireRecord(tx, user, 'deal', dealId, 'write', { forUpdate: true });
+      const contact = await requireRecord<Row>(tx, user, 'contact', input.contactId, 'read');
+      const allowedRoles = await referenceList(tx, 'deal_contact_roles');
+      if (allowedRoles.length > 0 && !allowedRoles.includes(input.role)) {
+        throw new ValidationDomainError('Choose a role from the list.', {
+          role: [`Choose one of: ${allowedRoles.join(', ')}.`],
+        });
+      }
+
+      await tx.query(
+        `INSERT INTO deal_contacts (id, deal_id, contact_id, role, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (deal_id, contact_id)
+         DO UPDATE SET role = EXCLUDED.role`,
+        [`dc_${randomUUID()}`, dealId, input.contactId, input.role, user.id],
+      );
+      await this.db.writeRecordHistory(tx, {
+        entityType: 'deal',
+        entityId: dealId,
+        fieldName: 'deal_contacts',
+        oldValue: null,
+        newValue: { contactId: input.contactId, name: contact['full_name'], role: input.role },
+        changedByUserId: user.id,
+      });
+      await this.db.addOutboxEvent(tx, {
+        eventType: 'deal.updated',
+        aggregateType: 'deal',
+        aggregateId: dealId,
+        payload: { dealId, addedContactId: input.contactId, role: input.role },
+      });
+      return { dealContacts: await this.queryDealContacts(tx, dealId) };
+    });
+  }
+
+  async updateDealContact(
+    user: SessionUser,
+    dealId: string,
+    contactId: string,
+    raw: unknown,
+  ): Promise<{ dealContacts: DealContactView[] }> {
+    const input = UpdateDealContactInputSchema.parse(raw);
+    return this.db.transaction(async (tx) => {
+      await requireRecord(tx, user, 'deal', dealId, 'write', { forUpdate: true });
+      const allowedRoles = await referenceList(tx, 'deal_contact_roles');
+      if (allowedRoles.length > 0 && !allowedRoles.includes(input.role)) {
+        throw new ValidationDomainError('Choose a role from the list.', {
+          role: [`Choose one of: ${allowedRoles.join(', ')}.`],
+        });
+      }
+      const res = await tx.query(
+        `UPDATE deal_contacts SET role = $3 WHERE deal_id = $1 AND contact_id = $2 RETURNING id`,
+        [dealId, contactId, input.role],
+      );
+      if (res.rowCount === 0) {
+        throw new NotFoundDomainError('Deal contact', `${dealId}:${contactId}`);
+      }
+      await this.db.writeRecordHistory(tx, {
+        entityType: 'deal',
+        entityId: dealId,
+        fieldName: 'deal_contacts',
+        oldValue: { contactId },
+        newValue: { contactId, role: input.role },
+        changedByUserId: user.id,
+      });
+      return { dealContacts: await this.queryDealContacts(tx, dealId) };
+    });
+  }
+
+  async removeDealContact(
+    user: SessionUser,
+    dealId: string,
+    contactId: string,
+  ): Promise<{ dealContacts: DealContactView[] }> {
+    return this.db.transaction(async (tx) => {
+      await requireRecord(tx, user, 'deal', dealId, 'write', { forUpdate: true });
+      const res = await tx.query(
+        `DELETE FROM deal_contacts WHERE deal_id = $1 AND contact_id = $2 RETURNING role`,
+        [dealId, contactId],
+      );
+      if (res.rowCount === 0) {
+        throw new NotFoundDomainError('Deal contact', `${dealId}:${contactId}`);
+      }
+      await this.db.writeRecordHistory(tx, {
+        entityType: 'deal',
+        entityId: dealId,
+        fieldName: 'deal_contacts',
+        oldValue: { contactId, role: res.rows[0]?.role ?? null },
+        newValue: null,
+        changedByUserId: user.id,
+      });
+      return { dealContacts: await this.queryDealContacts(tx, dealId) };
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Tasks (PRD 4.7)
   // -------------------------------------------------------------------------
@@ -1129,7 +1272,7 @@ export class CrmRecordService {
       const updated = await tx.query<Row>(
         `UPDATE tasks SET
            title = $3, task_type = $4, priority = $5, due_at = $6, reminder_at = $7,
-           assignee_user_id = $8, team_id = $9, status = $10,
+           assignee_user_id = $8, team_id = $9, status = $10, recurrence_rule = $13,
            completed_at = CASE WHEN $10 = 'open' THEN NULL ELSE completed_at END,
            completed_by_user_id = CASE WHEN $10 = 'open' THEN NULL ELSE completed_by_user_id END,
            reminder_sent_at = CASE WHEN $11 THEN NULL ELSE reminder_sent_at END,
@@ -1150,6 +1293,7 @@ export class CrmRecordService {
           input.status ?? cur['status'],
           reminderChanged || dueChanged,
           dueChanged,
+          input.recurrenceRule === undefined ? cur['recurrence_rule'] : input.recurrenceRule,
         ],
       );
       const next = updated.rows[0];
@@ -1161,7 +1305,16 @@ export class CrmRecordService {
         taskId,
         cur,
         next,
-        ['title', 'task_type', 'priority', 'due_at', 'reminder_at', 'assignee_user_id', 'status'],
+        [
+          'title',
+          'task_type',
+          'priority',
+          'due_at',
+          'reminder_at',
+          'recurrence_rule',
+          'assignee_user_id',
+          'status',
+        ],
         user.id,
       );
       if (newAssigneeName && assignee !== user.id) {
@@ -1178,12 +1331,21 @@ export class CrmRecordService {
     });
   }
 
-  /** Completing a task logs an activity, with the outcome note as its body (PRD 3.1, 4.7). */
+  /**
+   * Completing a task logs an activity (with the outcome note as its body) and, if the task carries
+   * a recurrence rule, spawns the next open occurrence idempotently (PRD 3.1, 4.7).
+   */
   async completeTask(user: SessionUser, taskId: string, raw: unknown): Promise<Row> {
     const input = CompleteTaskInputSchema.parse(raw ?? {});
     return this.db.transaction(async (tx) => {
       const cur = await this.requireTask(tx, user, taskId, 'write');
-      if (cur['status'] === 'completed') return cur;
+      if (cur['status'] === 'completed') {
+        const existingChild = await tx.query<{ id: string }>(
+          `SELECT id FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL LIMIT 1`,
+          [taskId],
+        );
+        return { ...cur, next_task_id: existingChild.rows[0]?.id ?? null };
+      }
       const res = await tx.query<Row>(
         `UPDATE tasks SET status = 'completed', completed_at = NOW(), completed_by_user_id = $2,
            outcome = $3, version = version + 1, updated_at = NOW()
@@ -1219,13 +1381,82 @@ export class CrmRecordService {
           await tx.query(`UPDATE deals SET last_activity_at = NOW() WHERE id = $1`, [links.dealId]);
         }
       }
+
+      let nextTaskId: string | null = null;
+      const recurrence = (cur['recurrence_rule'] as RecurrenceRule | null) ?? null;
+      if (recurrence) {
+        const existingChild = await tx.query<{ id: string }>(
+          `SELECT id FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL LIMIT 1`,
+          [taskId],
+        );
+        if (existingChild.rows[0]) {
+          nextTaskId = existingChild.rows[0].id;
+        } else {
+          const assigneeMeta = await tx.query<{ timezone: string; market_focus: Market }>(
+            `SELECT timezone, market_focus FROM users WHERE id = $1`,
+            [cur['assignee_user_id']],
+          );
+          const assigneeTz = assigneeMeta.rows[0]?.timezone ?? user.timezone ?? 'UTC';
+          const assigneeMarket = assigneeMeta.rows[0]?.market_focus ?? 'US';
+          const prevDue =
+            cur['due_at'] instanceof Date ? cur['due_at'] : new Date(String(cur['due_at']));
+          const nextDue = nextRecurringDueAt(prevDue, recurrence, assigneeTz, assigneeMarket);
+
+          let nextReminder: string | null = null;
+          if (cur['reminder_at']) {
+            const prevRem =
+              cur['reminder_at'] instanceof Date
+                ? cur['reminder_at']
+                : new Date(String(cur['reminder_at']));
+            const leadOffsetMs = prevDue.getTime() - prevRem.getTime();
+            nextReminder = new Date(nextDue.getTime() - leadOffsetMs).toISOString();
+          }
+
+          nextTaskId = `tsk_${randomUUID()}`;
+          await tx.query(
+            `INSERT INTO tasks (
+               id, title, task_type, priority, status, due_at, reminder_at,
+               recurrence_rule, parent_task_id,
+               assignee_user_id, team_id, lead_id, company_id, contact_id, deal_id, created_by_user_id
+             ) VALUES (
+               $1, $2, $3, $4, 'open', $5, $6,
+               $7, $8,
+               $9, $10, $11, $12, $13, $14, $15
+             )`,
+            [
+              nextTaskId,
+              cur['title'],
+              cur['task_type'],
+              cur['priority'],
+              nextDue.toISOString(),
+              nextReminder,
+              recurrence,
+              taskId,
+              cur['assignee_user_id'],
+              cur['team_id'] ?? null,
+              links.leadId,
+              links.companyId,
+              links.contactId,
+              links.dealId,
+              user.id,
+            ],
+          );
+          await this.db.addOutboxEvent(tx, {
+            eventType: 'task.created',
+            aggregateType: 'task',
+            aggregateId: nextTaskId,
+            payload: { taskId: nextTaskId, parentTaskId: taskId, recurrenceRule: recurrence },
+          });
+        }
+      }
+
       await this.db.addOutboxEvent(tx, {
         eventType: 'task.completed',
         aggregateType: 'task',
         aggregateId: taskId,
-        payload: { taskId },
+        payload: { taskId, nextTaskId },
       });
-      return done;
+      return { ...done, next_task_id: nextTaskId };
     });
   }
 

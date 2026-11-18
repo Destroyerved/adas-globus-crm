@@ -257,6 +257,16 @@ export const TaskTypeSchema = z.enum([
 ]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 
+export const RECURRENCE_RULES = [
+  'daily',
+  'business_days',
+  'weekly',
+  'biweekly',
+  'monthly',
+] as const;
+export const RecurrenceRuleSchema = z.enum(RECURRENCE_RULES);
+export type RecurrenceRule = z.infer<typeof RecurrenceRuleSchema>;
+
 export const CreateTaskInputSchema = z.object({
   title: z.string().min(1).max(240),
   taskType: TaskTypeSchema.default('follow_up'),
@@ -268,6 +278,7 @@ export const CreateTaskInputSchema = z.object({
   contactId: z.string().optional().nullable(),
   dealId: z.string().optional().nullable(),
   reminderAt: z.string().datetime().optional().nullable(),
+  recurrenceRule: RecurrenceRuleSchema.optional().nullable(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;
 
@@ -348,6 +359,7 @@ export const UpdateTaskInputSchema = z.object({
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   dueAt: z.string().datetime().optional(),
   reminderAt: z.string().datetime().nullable().optional(),
+  recurrenceRule: RecurrenceRuleSchema.nullable().optional(),
   assigneeUserId: z.string().optional(),
   status: z.enum(['open', 'cancelled']).optional(),
 });
