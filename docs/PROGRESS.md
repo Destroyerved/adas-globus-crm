@@ -123,7 +123,7 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [x] Users, teams, roles, capabilities with own/team/all scope and `scopeWhere` (verified on PostgreSQL 17 and Playwright e2e)
 - [x] Audit log (append-only grants and triggers proven on PostgreSQL 17; admin viewer verified in e2e)
 - [x] Settings store, file storage interface, in-app notifications (verified on PostgreSQL 17 and Playwright e2e)
-- [ ] Outbox and worker (pg-boss), dead-letter alert (worker verified on PostgreSQL 17; admin dead-letter notifications and retry UI still to build in Milestone 8)
+- [x] Outbox and worker (pg-boss), dead-letter alert (verified on PostgreSQL 17 in `m1-worker.int.test.ts` and `ms8-worker-health-deadletter.int.test.ts`, plus Playwright e2e `33-system-health-*`: `worker_heartbeats`, graceful SIGTERM drain, deep `/healthz` readiness, PII-free Admin dead-letter notifications, and audited retry/dismiss UI; ADR 0023)
 - [x] Host routing (`crm.` vs `go.`) (verified over TCP socket in `m4-intake-routing-unsubscribe.int.test.ts`)
 - [x] Access JWT check (`CloudflareAccessVerifier` verified with RS256 JWKS in `security.test.ts` and `ms2-security-auth.int.test.ts`; ADR 0015)
 - [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (files exist; production fixes and server deploy pending)

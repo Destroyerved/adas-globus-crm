@@ -1471,3 +1471,27 @@ test('settings integrations and webhooks manage Apollo credit caps, one-time sco
   await page.reload();
   await expect(page.getByText('Partner Onboarding Hook')).toBeVisible();
 });
+
+test('settings system health shows live PostgreSQL, worker, outbox and backup telemetry and passes axe at 1440px and 375px', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+  await page.goto('/?screen=settings&tab=system-health');
+  await expect(page.getByTestId('settings-system-health-tab')).toBeVisible();
+  await expect(page.getByText('Readiness & runtime telemetry')).toBeVisible();
+  await expect(page.getByText('Connected')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('Worker processes')).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `33-system-health-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+});

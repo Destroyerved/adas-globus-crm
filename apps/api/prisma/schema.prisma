@@ -1131,3 +1131,60 @@ model BookingEvent {
   @@map("booking_events")
 }
 
+// Operational reliability: Outbox events, Background Worker Heartbeats & Backup Runs
+// (PRD 6.9, 10.5, 10.6, 11 Phase 1). Migrations 0001, 0005 & 0022_worker_heartbeats_and_backups.
+model OutboxEvent {
+  id            String    @id
+  eventType     String    @map("event_type")
+  aggregateType String    @map("aggregate_type")
+  aggregateId   String    @map("aggregate_id")
+  payload       Json      @default("{}")
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  retryCount    Int       @default(0) @map("retry_count") // migration 0022
+  lastError     String?   @map("last_error")
+  availableAt   DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("outbox_events")
+}
+
+model WorkerHeartbeat {
+  workerId             String    @id @map("worker_id")
+  hostname             String
+  pid                  Int
+  status               String    @default("running")
+  activeJobs           Int       @default(0) @map("active_jobs")
+  startedAt            DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  lastHeartbeatAt      DateTime  @default(now()) @map("last_heartbeat_at") @db.Timestamptz(6)
+  lastJobName          String?   @map("last_job_name")
+  lastJobAt            DateTime? @map("last_job_at") @db.Timestamptz(6)
+  lastOutboxDispatchAt DateTime? @map("last_outbox_dispatch_at") @db.Timestamptz(6)
+  stoppedAt            DateTime? @map("stopped_at") @db.Timestamptz(6)
+
+  @@index([lastHeartbeatAt(sort: Desc)])
+  @@map("worker_heartbeats")
+}
+
+model BackupRun {
+  id             String    @id
+  kind           String
+  status         String
+  artifactKey    String?   @map("artifact_key")
+  sizeBytes      BigInt?   @map("size_bytes")
+  checksumSha256 String?   @map("checksum_sha256")
+  encrypted      Boolean   @default(true)
+  offsiteSynced  Boolean   @default(false) @map("offsite_synced")
+  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  durationMs     Int?      @map("duration_ms")
+  errorCode      String?   @map("error_code")
+  details        Json      @default("{}")
+
+  @@index([kind, status, completedAt(sort: Desc)])
+  @@map("backup_runs")
+}
+
+
