@@ -372,6 +372,11 @@ body {
   animation: adas-fade-in 200ms var(--ease-out);
 }
 
+/* Selected rows (--tint) promote --ink-3 meta text to --ink-2 so contrast exceeds 4.5:1 (7.1:1). */
+tr.row-selected .text-ink-3 {
+  color: var(--ink-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

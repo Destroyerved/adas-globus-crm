@@ -15,10 +15,8 @@ import {
   PageHeader,
   SearchBox,
   fieldError,
-  rowClass,
   str,
   tableClass,
-  tdClass,
   thClass,
   theadRowClass,
   useUserNames,
@@ -35,6 +33,20 @@ import {
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import {
+  SavedViewsBar,
+  densityRowClass,
+  densityTdClass,
+  useTableDensity,
+} from '@/features/shared/saved-views-bar.js';
+import {
+  BulkActionBar,
+  BulkSelectAllBanner,
+  BulkSelectHeaderCell,
+  BulkSelectRowCell,
+  canUseBulkActions,
+  useBulkSelection,
+} from '@/features/shared/bulk-action-bar.js';
 
 export const ACCOUNT_STATUS_LABEL: Record<string, string> = {
   prospect: 'Prospect',
@@ -56,6 +68,7 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
   const ownerName = useUserNames();
   const [state, setState] = useUrlState(DEFAULTS);
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
+  const [density, setDensity] = useTableDensity('company');
   const [formOpen, setFormOpen] = useState(false);
 
   const filter = allOf([
@@ -67,6 +80,9 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
     ['companies', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listCompanies({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
+  const canBulk = canUseBulkActions(me, 'company');
+  const selection = useBulkSelection(items, JSON.stringify({ q: state.q, filter }));
+  const cellClass = densityTdClass(density);
 
   const createCompany = useMutation({
     mutationFn: api.createCompany,
@@ -144,6 +160,20 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
         </CreateForm>
       )}
 
+      <SavedViewsBar
+        entity="company"
+        state={state}
+        defaults={DEFAULTS}
+        filter={filter}
+        sort={state.sort}
+        density={density}
+        onChangeDensity={setDensity}
+        onApplyView={({ params, sort }) => {
+          setSearch(params['q'] ?? '');
+          setState({ ...params, sort });
+        }}
+      />
+
       <Toolbar>
         <SearchBox value={search} onChange={setSearch} label="Search name or domain" />
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-[8px]">
@@ -201,15 +231,24 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
           />
         }
       >
+        {canBulk && (
+          <BulkSelectAllBanner
+            selection={selection}
+            loadedCount={items.length}
+            total={total}
+            noun="companies"
+          />
+        )}
         <table className={tableClass}>
           <thead>
             <tr className={theadRowClass}>
+              {canBulk && <BulkSelectHeaderCell selection={selection} noun="companies" />}
               <SortHeader
                 label="Company"
                 field="name"
                 sort={state.sort}
                 onSort={(sort) => setState({ sort })}
-                className="pl-[16px]"
+                className={canBulk ? '' : 'pl-[16px]'}
               />
               <th scope="col" className={thClass}>
                 Market
@@ -239,46 +278,79 @@ export function CompaniesScreen({ onOpenCompany }: { onOpenCompany: (id: string)
             </tr>
           </thead>
           <tbody>
-            {items.map((c) => (
-              <tr key={c.id} className={rowClass}>
-                <td className={`${tdClass} pl-[16px] min-w-[220px]`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenCompany(c.id)}
-                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
-                  >
-                    {c.name}
-                  </button>
-                  <div className="text-[13px] text-ink-3">{c.domain ?? 'No website'}</div>
-                </td>
-                <td className={tdClass}>
-                  <MarketBadge market={c.market} />
-                </td>
-                <td className={`${tdClass} text-ink-2`}>
-                  {[c.city, c.state_province].filter(Boolean).join(', ') || '—'}
-                </td>
-                <td className={tdClass}>
-                  <StatusBadge tone={accountStatusTone(c.account_status)}>
-                    {ACCOUNT_STATUS_LABEL[c.account_status] ?? c.account_status}
-                  </StatusBadge>
-                </td>
-                <td className={`${tdClass} text-right tabular-nums text-ink-2`}>
-                  {formatNumber(c.contact_count ?? 0)}
-                </td>
-                <td className={`${tdClass} text-right tabular-nums text-ink-2`}>
-                  {formatNumber(c.open_deal_count ?? 0)}
-                </td>
-                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
-                  {ownerName(c.owner_user_id)}
-                </td>
-                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
-                  {formatRelative(c.updated_at)}
-                </td>
-              </tr>
-            ))}
+            {items.map((c) => {
+              const selected = canBulk && selection.isSelected(c.id);
+              return (
+                <tr key={c.id} className={densityRowClass(density, selected)}>
+                  {canBulk && (
+                    <BulkSelectRowCell
+                      id={c.id}
+                      label={c.name}
+                      selection={selection}
+                      density={density}
+                    />
+                  )}
+                  <td className={`${cellClass} ${canBulk ? '' : 'pl-[16px]'} min-w-[220px]`}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCompany(c.id)}
+                      className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
+                    >
+                      {c.name}
+                    </button>
+                    <div className="text-[13px] text-ink-3">{c.domain ?? 'No website'}</div>
+                    {c.tags && c.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-[4px] mt-[2px]">
+                        {c.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-block px-[6px] py-[1px] rounded-pill bg-bg-alt text-[11.5px] text-ink-2"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className={cellClass}>
+                    <MarketBadge market={c.market} />
+                  </td>
+                  <td className={`${cellClass} text-ink-2`}>
+                    {[c.city, c.state_province].filter(Boolean).join(', ') || '—'}
+                  </td>
+                  <td className={cellClass}>
+                    <StatusBadge tone={accountStatusTone(c.account_status)}>
+                      {ACCOUNT_STATUS_LABEL[c.account_status] ?? c.account_status}
+                    </StatusBadge>
+                  </td>
+                  <td className={`${cellClass} text-right tabular-nums text-ink-2`}>
+                    {formatNumber(c.contact_count ?? 0)}
+                  </td>
+                  <td className={`${cellClass} text-right tabular-nums text-ink-2`}>
+                    {formatNumber(c.open_deal_count ?? 0)}
+                  </td>
+                  <td className={`${cellClass} text-ink-2 whitespace-nowrap`}>
+                    {ownerName(c.owner_user_id)}
+                  </td>
+                  <td className={`${cellClass} text-ink-3 whitespace-nowrap`}>
+                    {formatRelative(c.updated_at)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </DataPanel>
+
+      {canBulk && (
+        <BulkActionBar
+          entity="company"
+          selection={selection}
+          total={total}
+          q={state.q}
+          filter={filter}
+        />
+      )}
     </div>
   );
 }

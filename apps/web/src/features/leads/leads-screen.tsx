@@ -16,10 +16,8 @@ import {
   SearchBox,
   errorMessage,
   fieldError,
-  rowClass,
   str,
   tableClass,
-  tdClass,
   thClass,
   theadRowClass,
   useUserNames,
@@ -39,6 +37,20 @@ import {
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import {
+  SavedViewsBar,
+  densityRowClass,
+  densityTdClass,
+  useTableDensity,
+} from '@/features/shared/saved-views-bar.js';
+import {
+  BulkActionBar,
+  BulkSelectAllBanner,
+  BulkSelectHeaderCell,
+  BulkSelectRowCell,
+  canUseBulkActions,
+  useBulkSelection,
+} from '@/features/shared/bulk-action-bar.js';
 import { viewerTimeZone } from '@/features/records/timeline.js';
 import { ExportButton } from '@/features/exports/export-button.js';
 
@@ -71,6 +83,7 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
   const ownerName = useUserNames();
   const [state, setState] = useUrlState(DEFAULTS);
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
+  const [density, setDensity] = useTableDensity('lead');
   const [formOpen, setFormOpen] = useState(false);
   const created = rangeParam(state.created);
 
@@ -87,6 +100,9 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
     ['leads', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listLeads({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
+  const canBulk = canUseBulkActions(me, 'lead');
+  const selection = useBulkSelection(items, JSON.stringify({ q: state.q, filter }));
+  const cellClass = densityTdClass(density);
 
   const refreshRecords = () =>
     Promise.all(
@@ -191,6 +207,20 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
         </CreateForm>
       )}
 
+      <SavedViewsBar
+        entity="lead"
+        state={state}
+        defaults={DEFAULTS}
+        filter={filter}
+        sort={state.sort}
+        density={density}
+        onChangeDensity={setDensity}
+        onApplyView={({ params, sort }) => {
+          setSearch(params['q'] ?? '');
+          setState({ ...params, sort });
+        }}
+      />
+
       <Toolbar>
         <SearchBox value={search} onChange={setSearch} label="Search name, email or firm" />
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-[8px]">
@@ -271,15 +301,24 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
           />
         }
       >
+        {canBulk && (
+          <BulkSelectAllBanner
+            selection={selection}
+            loadedCount={items.length}
+            total={total}
+            noun="leads"
+          />
+        )}
         <table className={tableClass}>
           <thead>
             <tr className={theadRowClass}>
+              {canBulk && <BulkSelectHeaderCell selection={selection} noun="leads" />}
               <SortHeader
                 label="Name · Firm"
                 field="name"
                 sort={state.sort}
                 onSort={(sort) => setState({ sort })}
-                className="pl-[16px]"
+                className={canBulk ? '' : 'pl-[16px]'}
               />
               <th scope="col" className={thClass}>
                 Market
@@ -316,57 +355,90 @@ export function LeadsScreen({ onOpenLead }: { onOpenLead: (leadId: string) => vo
             </tr>
           </thead>
           <tbody>
-            {items.map((lead) => (
-              <tr key={lead.id} className={rowClass}>
-                <td className={`${tdClass} pl-[16px] min-w-[240px]`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenLead(lead.id)}
-                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
-                  >
-                    {lead.full_name}
-                    {lead.firm_name ? ` · ${lead.firm_name}` : ''}
-                  </button>
-                  <div className="text-[13px] text-ink-3">{lead.email}</div>
-                </td>
-                <td className={tdClass}>
-                  <MarketBadge market={lead.market} />
-                </td>
-                <td className={tdClass}>
-                  <StatusBadge tone={LEAD_STATUS_TONE[lead.status] ?? 'neutral'}>
-                    {lead.status}
-                  </StatusBadge>
-                </td>
-                <td className={`${tdClass} text-ink-2`}>{lead.source}</td>
-                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
-                  {ownerName(lead.owner_user_id)}
-                </td>
-                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
-                  {lead.last_contacted_at ? formatRelative(lead.last_contacted_at) : 'Never'}
-                </td>
-                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
-                  {formatRelative(lead.created_at)}
-                </td>
-                <td className={`${tdClass} text-right pr-[16px]`}>
-                  {lead.status_category !== 'closed' &&
-                    lead.status !== 'Converted' &&
-                    can(me, 'leads.write') && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={convertLead.isPending}
-                        onClick={() => convertLead.mutate(lead)}
-                        aria-label={`Convert ${lead.full_name} to a deal`}
-                      >
-                        Convert
-                      </Button>
+            {items.map((lead) => {
+              const selected = canBulk && selection.isSelected(lead.id);
+              return (
+                <tr key={lead.id} className={densityRowClass(density, selected)}>
+                  {canBulk && (
+                    <BulkSelectRowCell
+                      id={lead.id}
+                      label={lead.full_name}
+                      selection={selection}
+                      density={density}
+                    />
+                  )}
+                  <td className={`${cellClass} ${canBulk ? '' : 'pl-[16px]'} min-w-[240px]`}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenLead(lead.id)}
+                      className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
+                    >
+                      {lead.full_name}
+                      {lead.firm_name ? ` · ${lead.firm_name}` : ''}
+                    </button>
+                    <div className="text-[13px] text-ink-3">{lead.email}</div>
+                    {lead.tags && lead.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-[4px] mt-[2px]">
+                        {lead.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-block px-[6px] py-[1px] rounded-pill bg-bg-alt text-[11.5px] text-ink-2"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
                     )}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className={cellClass}>
+                    <MarketBadge market={lead.market} />
+                  </td>
+                  <td className={cellClass}>
+                    <StatusBadge tone={LEAD_STATUS_TONE[lead.status] ?? 'neutral'}>
+                      {lead.status}
+                    </StatusBadge>
+                  </td>
+                  <td className={`${cellClass} text-ink-2`}>{lead.source}</td>
+                  <td className={`${cellClass} text-ink-2 whitespace-nowrap`}>
+                    {ownerName(lead.owner_user_id)}
+                  </td>
+                  <td className={`${cellClass} text-ink-3 whitespace-nowrap`}>
+                    {lead.last_contacted_at ? formatRelative(lead.last_contacted_at) : 'Never'}
+                  </td>
+                  <td className={`${cellClass} text-ink-3 whitespace-nowrap`}>
+                    {formatRelative(lead.created_at)}
+                  </td>
+                  <td className={`${cellClass} text-right pr-[16px]`}>
+                    {lead.status_category !== 'closed' &&
+                      lead.status !== 'Converted' &&
+                      can(me, 'leads.write') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={convertLead.isPending}
+                          onClick={() => convertLead.mutate(lead)}
+                          aria-label={`Convert ${lead.full_name} to a deal`}
+                        >
+                          Convert
+                        </Button>
+                      )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </DataPanel>
+
+      {canBulk && (
+        <BulkActionBar
+          entity="lead"
+          selection={selection}
+          total={total}
+          q={state.q}
+          filter={filter}
+        />
+      )}
     </div>
   );
 }

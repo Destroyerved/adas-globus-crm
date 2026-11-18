@@ -11,9 +11,7 @@ import {
   PageHeader,
   SearchBox,
   errorMessage,
-  rowClass,
   tableClass,
-  tdClass,
   thClass,
   theadRowClass,
   useUserNames,
@@ -33,6 +31,20 @@ import {
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import {
+  SavedViewsBar,
+  densityRowClass,
+  densityTdClass,
+  useTableDensity,
+} from '@/features/shared/saved-views-bar.js';
+import {
+  BulkActionBar,
+  BulkSelectAllBanner,
+  BulkSelectHeaderCell,
+  BulkSelectRowCell,
+  canUseBulkActions,
+  useBulkSelection,
+} from '@/features/shared/bulk-action-bar.js';
 import { viewerTimeZone } from '@/features/records/timeline.js';
 import { ExportButton } from '@/features/exports/export-button.js';
 import { StageMover } from './stage-mover.js';
@@ -165,6 +177,7 @@ export function DealsKanbanScreen({
           stages={pipeline.stages}
           state={state}
           setState={setState}
+          onSetSearch={setSearch}
           filtered={filtered}
           onClear={clearFilters}
           onOpenDeal={onOpenDeal}
@@ -358,6 +371,7 @@ function DealList({
   stages,
   state,
   setState,
+  onSetSearch,
   filtered,
   onClear,
   onOpenDeal,
@@ -366,11 +380,14 @@ function DealList({
   stages: StageRow[];
   state: typeof DEFAULTS;
   setState: (patch: Partial<typeof DEFAULTS>) => void;
+  onSetSearch: (q: string) => void;
   filtered: boolean;
   onClear: () => void;
   onOpenDeal: (id: string) => void;
 }) {
+  const me = useMe();
   const ownerName = useUserNames();
+  const [density, setDensity] = useTableDensity('deal');
   const closed = rangeParam(state.closed);
   const filter = allOf([
     pipelineId !== null && { field: 'pipelineId', op: 'eq', value: pipelineId },
@@ -384,6 +401,10 @@ function DealList({
     ['deals', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listDeals({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
+  const canBulk = canUseBulkActions(me, 'deal');
+  const selection = useBulkSelection(items, JSON.stringify({ q: state.q, filter }));
+  const cellClass = densityTdClass(density);
+
   const listFiltered =
     filtered ||
     state.stage !== '' ||
@@ -422,6 +443,21 @@ function DealList({
 
   return (
     <div className="space-y-[8px]">
+      <SavedViewsBar
+        entity="deal"
+        state={state}
+        defaults={DEFAULTS}
+        excludeParamKeys={['sort', 'view']}
+        filter={filter}
+        sort={state.sort}
+        density={density}
+        onChangeDensity={setDensity}
+        onApplyView={({ params, sort }) => {
+          onSetSearch(params['q'] ?? '');
+          setState({ ...params, sort, view: 'list' });
+        }}
+      />
+
       <div className="flex flex-col sm:flex-row sm:items-center gap-[8px]">
         <Select
           aria-label="Stage"
@@ -463,15 +499,24 @@ function DealList({
           />
         }
       >
+        {canBulk && (
+          <BulkSelectAllBanner
+            selection={selection}
+            loadedCount={items.length}
+            total={total}
+            noun="deals"
+          />
+        )}
         <table className={tableClass}>
           <thead>
             <tr className={theadRowClass}>
+              {canBulk && <BulkSelectHeaderCell selection={selection} noun="deals" />}
               <SortHeader
                 label="Deal"
                 field="name"
                 sort={state.sort}
                 onSort={(sort) => setState({ sort })}
-                className="pl-[16px]"
+                className={canBulk ? '' : 'pl-[16px]'}
               />
               <th scope="col" className={thClass}>
                 Stage
@@ -496,45 +541,78 @@ function DealList({
             </tr>
           </thead>
           <tbody>
-            {items.map((d) => (
-              <tr key={d.id} className={rowClass}>
-                <td className={`${tdClass} pl-[16px] min-w-[220px]`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenDeal(d.id)}
-                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
-                  >
-                    {d.name}
-                  </button>
-                  <div className="text-[13px] text-ink-3">{d.company_name}</div>
-                </td>
-                <td className={tdClass}>
-                  <StatusBadge
-                    tone={
-                      d.stage_category === 'won'
-                        ? 'success'
-                        : d.stage_category === 'lost'
-                          ? 'danger'
-                          : 'brand'
-                    }
-                  >
-                    {d.stage_name}
-                  </StatusBadge>
-                </td>
-                <td className={`${tdClass} text-right tabular-nums whitespace-nowrap`}>
-                  {monthly(d.monthly_value_minor, d.currency)}
-                </td>
-                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
-                  {d.expected_close_date ? formatDate(d.expected_close_date) : '—'}
-                </td>
-                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
-                  {ownerName(d.owner_user_id)}
-                </td>
-              </tr>
-            ))}
+            {items.map((d) => {
+              const selected = canBulk && selection.isSelected(d.id);
+              return (
+                <tr key={d.id} className={densityRowClass(density, selected)}>
+                  {canBulk && (
+                    <BulkSelectRowCell
+                      id={d.id}
+                      label={d.name}
+                      selection={selection}
+                      density={density}
+                    />
+                  )}
+                  <td className={`${cellClass} ${canBulk ? '' : 'pl-[16px]'} min-w-[220px]`}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenDeal(d.id)}
+                      className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
+                    >
+                      {d.name}
+                    </button>
+                    <div className="text-[13px] text-ink-3">{d.company_name}</div>
+                    {d.tags && d.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-[4px] mt-[2px]">
+                        {d.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-block px-[6px] py-[1px] rounded-pill bg-bg-alt text-[11.5px] text-ink-2"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className={cellClass}>
+                    <StatusBadge
+                      tone={
+                        d.stage_category === 'won'
+                          ? 'success'
+                          : d.stage_category === 'lost'
+                            ? 'danger'
+                            : 'brand'
+                      }
+                    >
+                      {d.stage_name}
+                    </StatusBadge>
+                  </td>
+                  <td className={`${cellClass} text-right tabular-nums whitespace-nowrap`}>
+                    {monthly(d.monthly_value_minor, d.currency)}
+                  </td>
+                  <td className={`${cellClass} text-ink-2 whitespace-nowrap`}>
+                    {d.expected_close_date ? formatDate(d.expected_close_date) : '—'}
+                  </td>
+                  <td className={`${cellClass} text-ink-2 whitespace-nowrap`}>
+                    {ownerName(d.owner_user_id)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </DataPanel>
+
+      {canBulk && (
+        <BulkActionBar
+          entity="deal"
+          selection={selection}
+          total={total}
+          q={state.q}
+          filter={filter}
+        />
+      )}
     </div>
   );
 }

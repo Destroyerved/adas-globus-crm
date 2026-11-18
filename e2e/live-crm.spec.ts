@@ -860,3 +860,102 @@ test('website inquiry routing rules persist, route live inquiries, notify the ow
   await expect(page.getByRole('heading', { name: 'Mathieu Pelletier' })).toBeVisible();
   await expect(page.getByText('Reply to website inquiry: Mathieu Pelletier')).toBeVisible();
 });
+
+test('saved views, row density and the floating bulk-action bar persist across reloads and pass axe at 1440px and 375px', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?screen=leads');
+
+  // Create two dedicated US leads for bulk selection so previous serial tests do not collide.
+  for (const [name, email, firm] of [
+    ['Nora Vance', 'nora.vance@vancecpa.example.com', 'Vance Tax Partners'],
+    ['Owen Mercer', 'owen.mercer@mercercpa.example.com', 'Mercer Advisory CPA'],
+  ] as const) {
+    await page.getByRole('button', { name: 'New lead' }).click();
+    await page.getByLabel('Full name').fill(name);
+    await page.getByLabel('Work email').fill(email);
+    await page.getByLabel(/^Firm/).fill(firm);
+    await page.getByRole('button', { name: 'Save lead' }).click();
+    await expect(page.getByText(`Added ${name} as a new lead.`)).toBeVisible();
+  }
+
+  // Toggle compact density and verify it survives a reload.
+  await page.getByRole('button', { name: 'Compact' }).click();
+  await expect(page.getByRole('button', { name: 'Compact' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  // Dismiss creation toasts so mobile screenshot shows the floating bulk bar unobstructed.
+  while ((await page.getByRole('button', { name: 'Dismiss' }).count()) > 0) {
+    await page.getByRole('button', { name: 'Dismiss' }).first().click();
+  }
+
+  // Select both leads and verify the floating navy bulk-action bar appears.
+  await page.getByRole('checkbox', { name: 'Select Nora Vance' }).check();
+  await page.getByRole('checkbox', { name: 'Select Owen Mercer' }).check();
+  const bulkBar = page.getByTestId('bulk-action-bar-lead');
+  await expect(bulkBar).toContainText('2 selected');
+
+  // Capture screenshots and run axe + overflow checks with rows selected and bulk bar visible!
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `25-saved-views-bulk-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Bulk add tag.
+  await bulkBar.getByRole('button', { name: 'Add tag' }).click();
+  const tagDialog = page.getByRole('dialog', { name: 'Add tag to 2 leads' });
+  await tagDialog.getByLabel('Tag').fill('priority-q4');
+  await tagDialog.getByRole('button', { name: 'Add tag' }).click();
+  await expect(tagDialog).toHaveCount(0);
+  await expect(page.getByText('priority-q4').first()).toBeVisible();
+
+  // Bulk status update to Qualified.
+  await page.getByRole('checkbox', { name: 'Select Nora Vance' }).check();
+  await page.getByRole('checkbox', { name: 'Select Owen Mercer' }).check();
+  await bulkBar.getByRole('button', { name: 'Change status' }).click();
+  const statusDialog = page.getByRole('dialog', { name: 'Change status for 2 leads' });
+  await statusDialog.getByLabel('Lead status').selectOption('Qualified');
+  await statusDialog.getByRole('button', { name: 'Update status' }).click();
+  await expect(statusDialog).toHaveCount(0);
+
+  // Filter to Status = Qualified, save a team-shared view, reset to All, then re-apply the saved view.
+  await page.getByLabel('Status', { exact: true }).selectOption('Qualified');
+  await page.getByRole('button', { name: 'Save view' }).click();
+  const saveDialog = page.getByRole('dialog', { name: 'Save current view' });
+  await saveDialog.getByLabel('View name').fill('US Qualified');
+  await saveDialog.getByLabel('Share this view with my team').check();
+  await saveDialog.getByRole('button', { name: 'Save view' }).click();
+  await expect(saveDialog).toHaveCount(0);
+  await expect(page.getByText('Saved view "US Qualified".')).toBeVisible();
+
+  await page
+    .getByRole('toolbar', { name: 'Saved views' })
+    .getByRole('button', { name: 'All' })
+    .click();
+  await expect(page.getByLabel('Status', { exact: true })).toHaveValue('open');
+
+  await page
+    .getByRole('toolbar', { name: 'Saved views' })
+    .getByRole('button', { name: /^US Qualified/ })
+    .click();
+  await expect(page.getByLabel('Status', { exact: true })).toHaveValue('Qualified');
+  await expect(page.getByText('Nora Vance · Vance Tax Partners')).toBeVisible();
+
+  // Reload to verify both the saved view and bulk edits persisted in PostgreSQL.
+  await page.reload();
+  await expect(
+    page
+      .getByRole('toolbar', { name: 'Saved views' })
+      .getByRole('button', { name: /^US Qualified/ }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('priority-q4').first()).toBeVisible();
+});

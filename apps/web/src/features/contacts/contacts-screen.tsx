@@ -15,10 +15,8 @@ import {
   PageHeader,
   SearchBox,
   fieldError,
-  rowClass,
   str,
   tableClass,
-  tdClass,
   thClass,
   theadRowClass,
   useUserNames,
@@ -35,6 +33,20 @@ import {
   useSearchText,
   useUrlState,
 } from '@/features/shared/list-kit.js';
+import {
+  SavedViewsBar,
+  densityRowClass,
+  densityTdClass,
+  useTableDensity,
+} from '@/features/shared/saved-views-bar.js';
+import {
+  BulkActionBar,
+  BulkSelectAllBanner,
+  BulkSelectHeaderCell,
+  BulkSelectRowCell,
+  canUseBulkActions,
+  useBulkSelection,
+} from '@/features/shared/bulk-action-bar.js';
 import { CompanyPicker, type PickedCompany } from '@/features/shared/company-picker.js';
 import { ExportButton } from '@/features/exports/export-button.js';
 
@@ -55,6 +67,7 @@ export function ContactsScreen({
   const ownerName = useUserNames();
   const [state, setState] = useUrlState(DEFAULTS);
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
+  const [density, setDensity] = useTableDensity('contact');
   const [formOpen, setFormOpen] = useState(false);
   const [company, setCompany] = useState<PickedCompany | null>(null);
 
@@ -68,6 +81,9 @@ export function ContactsScreen({
     ['contacts', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listContacts({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
+  const canBulk = canUseBulkActions(me, 'contact');
+  const selection = useBulkSelection(items, JSON.stringify({ q: state.q, filter }));
+  const cellClass = densityTdClass(density);
 
   const createContact = useMutation({
     mutationFn: api.createContact,
@@ -156,6 +172,20 @@ export function ContactsScreen({
         </CreateForm>
       )}
 
+      <SavedViewsBar
+        entity="contact"
+        state={state}
+        defaults={DEFAULTS}
+        filter={filter}
+        sort={state.sort}
+        density={density}
+        onChangeDensity={setDensity}
+        onApplyView={({ params, sort }) => {
+          setSearch(params['q'] ?? '');
+          setState({ ...params, sort });
+        }}
+      />
+
       <Toolbar>
         <SearchBox value={search} onChange={setSearch} label="Search name, email or company" />
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-[8px]">
@@ -210,15 +240,24 @@ export function ContactsScreen({
           />
         }
       >
+        {canBulk && (
+          <BulkSelectAllBanner
+            selection={selection}
+            loadedCount={items.length}
+            total={total}
+            noun="contacts"
+          />
+        )}
         <table className={tableClass}>
           <thead>
             <tr className={theadRowClass}>
+              {canBulk && <BulkSelectHeaderCell selection={selection} noun="contacts" />}
               <SortHeader
                 label="Name"
                 field="name"
                 sort={state.sort}
                 onSort={(sort) => setState({ sort })}
-                className="pl-[16px]"
+                className={canBulk ? '' : 'pl-[16px]'}
               />
               <SortHeader
                 label="Company"
@@ -245,63 +284,96 @@ export function ContactsScreen({
             </tr>
           </thead>
           <tbody>
-            {items.map((c) => (
-              <tr key={c.id} className={rowClass}>
-                <td className={`${tdClass} pl-[16px] min-w-[220px]`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenContact(c.id)}
-                    className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
-                  >
-                    {c.full_name}
-                  </button>
-                  <div className="text-[13px] text-ink-3">{c.title ?? ''}</div>
-                </td>
-                <td className={`${tdClass} text-ink-2`}>
-                  {c.company_id && c.company_name ? (
+            {items.map((c) => {
+              const selected = canBulk && selection.isSelected(c.id);
+              return (
+                <tr key={c.id} className={densityRowClass(density, selected)}>
+                  {canBulk && (
+                    <BulkSelectRowCell
+                      id={c.id}
+                      label={c.full_name}
+                      selection={selection}
+                      density={density}
+                    />
+                  )}
+                  <td className={`${cellClass} ${canBulk ? '' : 'pl-[16px]'} min-w-[220px]`}>
                     <button
                       type="button"
-                      onClick={() => onOpenCompany(c.company_id as string)}
-                      className="bg-transparent border-0 p-0 text-left text-ink-2 hover:underline cursor-pointer"
+                      onClick={() => onOpenContact(c.id)}
+                      className="bg-transparent border-0 p-0 text-left font-semibold text-ink hover:underline cursor-pointer"
                     >
-                      {c.company_name}
+                      {c.full_name}
                     </button>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className={tdClass}>
-                  <MarketBadge market={c.market} />
-                </td>
-                <td className={tdClass}>
-                  <div className="flex flex-wrap items-center gap-[6px]">
-                    <span className="text-ink-2">{c.primary_email}</span>
-                    {c.do_not_contact ? (
-                      <StatusBadge tone="danger">Do not contact</StatusBadge>
-                    ) : c.email_verification_status in VERIFICATION_TONE ? (
-                      <StatusBadge
-                        tone={
-                          VERIFICATION_TONE[
-                            c.email_verification_status as keyof typeof VERIFICATION_TONE
-                          ]
-                        }
+                    <div className="text-[13px] text-ink-3">{c.title ?? ''}</div>
+                    {c.tags && c.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-[4px] mt-[2px]">
+                        {c.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-block px-[6px] py-[1px] rounded-pill bg-bg-alt text-[11.5px] text-ink-2"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className={`${cellClass} text-ink-2`}>
+                    {c.company_id && c.company_name ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenCompany(c.company_id as string)}
+                        className="bg-transparent border-0 p-0 text-left text-ink-2 hover:underline cursor-pointer"
                       >
-                        {c.email_verification_status}
-                      </StatusBadge>
-                    ) : null}
-                  </div>
-                </td>
-                <td className={`${tdClass} text-ink-2 whitespace-nowrap`}>
-                  {ownerName(c.owner_user_id)}
-                </td>
-                <td className={`${tdClass} text-ink-3 whitespace-nowrap`}>
-                  {c.last_contacted_at ? formatRelative(c.last_contacted_at) : 'Never'}
-                </td>
-              </tr>
-            ))}
+                        {c.company_name}
+                      </button>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className={cellClass}>
+                    <MarketBadge market={c.market} />
+                  </td>
+                  <td className={cellClass}>
+                    <div className="flex flex-wrap items-center gap-[6px]">
+                      <span className="text-ink-2">{c.primary_email}</span>
+                      {c.do_not_contact ? (
+                        <StatusBadge tone="danger">Do not contact</StatusBadge>
+                      ) : c.email_verification_status in VERIFICATION_TONE ? (
+                        <StatusBadge
+                          tone={
+                            VERIFICATION_TONE[
+                              c.email_verification_status as keyof typeof VERIFICATION_TONE
+                            ]
+                          }
+                        >
+                          {c.email_verification_status}
+                        </StatusBadge>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className={`${cellClass} text-ink-2 whitespace-nowrap`}>
+                    {ownerName(c.owner_user_id)}
+                  </td>
+                  <td className={`${cellClass} text-ink-3 whitespace-nowrap`}>
+                    {c.last_contacted_at ? formatRelative(c.last_contacted_at) : 'Never'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </DataPanel>
+
+      {canBulk && (
+        <BulkActionBar
+          entity="contact"
+          selection={selection}
+          total={total}
+          q={state.q}
+          filter={filter}
+        />
+      )}
     </div>
   );
 }
