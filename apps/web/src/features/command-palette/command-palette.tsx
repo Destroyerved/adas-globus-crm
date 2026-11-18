@@ -1,5 +1,15 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { ArrowRight, Building2, Contact, Handshake, Search, UserPlus, X } from 'lucide-react';
+import {
+  ArrowRight,
+  Building2,
+  Contact,
+  FileText,
+  Handshake,
+  Mail,
+  Search,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { can, useDebounced, useMe } from '@/features/shared/list-kit.js';
 import { api } from '@/lib/api.js';
@@ -7,7 +17,7 @@ import { api } from '@/lib/api.js';
 interface CommandPaletteItem {
   id: string;
   group: 'RECORDS' | 'ACTIONS' | 'NAVIGATION';
-  kind?: 'company' | 'contact' | 'lead' | 'deal';
+  kind?: 'company' | 'contact' | 'lead' | 'deal' | 'note' | 'email';
   label: string;
   meta: string;
   shortcut?: string;
@@ -148,7 +158,7 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
   const debounced = useDebounced(query.trim(), 200);
   const search = useQuery({
     queryKey: ['search', debounced],
-    queryFn: () => api.search(debounced),
+    queryFn: () => api.search(debounced, { extended: true }),
     enabled: open && debounced.length >= 2,
     placeholderData: keepPreviousData,
   });
@@ -192,6 +202,28 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
         meta: `Deal · ${d.stage_name}`,
         targetScreen: 'deal' as const,
         targetId: d.id,
+      })),
+      ...(r.notes ?? []).map((n) => ({
+        id: `note_${n.id}`,
+        group: 'RECORDS' as const,
+        kind: 'note' as const,
+        label: n.snippet || 'Note',
+        meta: `Note on ${n.entity_type}`,
+        targetScreen: n.entity_type as AppScreenId,
+        targetId: n.entity_id,
+      })),
+      ...(r.emailThreads ?? []).map((t) => ({
+        id: `eth_${t.id}`,
+        group: 'RECORDS' as const,
+        kind: 'email' as const,
+        label: t.subject || 'Email thread',
+        meta: t.snippet ? `Email · ${t.snippet}` : 'Email thread',
+        targetScreen: (t.contact_id
+          ? 'contact'
+          : t.company_id
+            ? 'company'
+            : 'inbox') as AppScreenId,
+        targetId: t.contact_id ?? t.company_id ?? undefined,
       })),
     ];
   }, [search.data, debounced]);
@@ -269,6 +301,8 @@ export function CommandPalette({ open, onClose, onSelectScreen }: CommandPalette
     if (item.kind === 'deal') return <Handshake size={16} strokeWidth={1.6} aria-hidden="true" />;
     if (item.kind === 'contact') return <Contact size={16} strokeWidth={1.6} aria-hidden="true" />;
     if (item.kind === 'lead') return <UserPlus size={16} strokeWidth={1.6} aria-hidden="true" />;
+    if (item.kind === 'note') return <FileText size={16} strokeWidth={1.6} aria-hidden="true" />;
+    if (item.kind === 'email') return <Mail size={16} strokeWidth={1.6} aria-hidden="true" />;
     return <ArrowRight size={16} strokeWidth={1.6} aria-hidden="true" />;
   };
 

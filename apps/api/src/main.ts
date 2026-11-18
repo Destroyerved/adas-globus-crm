@@ -1073,7 +1073,8 @@ export function createAppServer(
       // Search
       if (method === 'GET' && pathname === '/api/v1/search') {
         const q = parsedUrl.searchParams.get('q') ?? '';
-        const results = await dataQuality.globalSearch(user, q);
+        const includeExtended = parsedUrl.searchParams.get('extended') === '1';
+        const results = await dataQuality.globalSearch(user, q, { includeExtended });
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(serializeJson(results));
         return;
