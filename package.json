@@ -21,6 +21,8 @@
     "backup:drill": "pnpm --filter @adas/api backup:drill",
     "db:local": "node scripts/local-db.mjs",
     "break-glass": "pnpm --filter @adas/api break-glass",
+    "installer": "pnpm --filter @adas/installer start",
+    "installer:wizard": "pnpm --filter @adas/installer wizard",
     "lint": "eslint . --max-warnings 0 && prettier --check \"**/*.{ts,tsx,mjs,json,css,md}\"",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,json,css,md}\"",
     "typecheck": "pnpm -r typecheck",
@@ -28,7 +30,7 @@
     "test:int": "vitest run --project integration",
     "test:e2e": "pnpm --filter @adas/web build && playwright test",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:int",
-    "build": "pnpm --filter @adas/shared build && pnpm --filter @adas/api build && pnpm --filter @adas/web build && node scripts/build-deployer-exe.mjs",
+    "build": "pnpm --filter @adas/shared build && pnpm --filter @adas/api build && pnpm --filter @adas/web build && pnpm --filter @adas/installer build && node scripts/build-deployer-exe.mjs",
     "build:exe": "node scripts/build-deployer-exe.mjs",
     "api:openapi": "pnpm --filter @adas/api openapi:generate"
   },

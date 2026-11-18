@@ -14,6 +14,9 @@ export default defineConfig({
             'packages/**/src/**/*.test.ts',
             'apps/api/src/**/*.test.ts',
             'apps/web/src/**/*.test.{ts,tsx}',
+            'apps/server-agent/src/**/*.test.ts',
+            'apps/desktop/src/**/*.test.{ts,tsx}',
+            'installer/src/**/*.test.ts',
           ],
           exclude: ['**/*.int.test.ts', '**/node_modules/**', '**/dist/**'],
           environment: 'node',
@@ -22,7 +25,12 @@ export default defineConfig({
       {
         test: {
           name: 'integration',
-          include: ['apps/api/src/**/*.int.test.ts', 'packages/**/src/**/*.int.test.ts'],
+          include: [
+            'apps/api/src/**/*.int.test.ts',
+            'apps/server-agent/src/**/*.int.test.ts',
+            'packages/**/src/**/*.int.test.ts',
+            'installer/src/**/*.int.test.ts',
+          ],
           exclude: ['**/node_modules/**', '**/dist/**'],
           environment: 'node',
           // Each file builds its own PGlite database (every migration plus the seed) on first
