@@ -12,6 +12,7 @@ import {
   type CreateScoringRuleInput,
   type Currency,
   type CustomFieldDefinitionView,
+  type DashboardSummaryView,
   type DealContactView,
   type DuplicateCandidateView,
   type ExportCreateInput,
@@ -33,6 +34,9 @@ import {
   type RecordConsentInput,
   type RecurrenceRule,
   type RemoveSuppressedDomainInput,
+  type ReportFilterOptions,
+  type ReportId,
+  type ReportResultView,
   type RoutingRuleView,
   type SavedView,
   type SavedViewEntity,
@@ -877,10 +881,36 @@ export const api = {
   },
   auditActions: () => request<Items<string>>('/audit-logs/actions').then((r) => r.items),
   dashboard: () => request<DashboardLayout>('/dashboard'),
+  dashboardSummary: (period: DashboardPeriod) => {
+    const search = new URLSearchParams({ from: period.from, to: period.to });
+    if (period.market) search.set('market', period.market);
+    return request<DashboardSummaryView>(`/dashboard/summary?${search.toString()}`);
+  },
   dashboardWidget: <T>(id: WidgetId, period: DashboardPeriod) => {
     const search = new URLSearchParams({ from: period.from, to: period.to });
     if (period.market) search.set('market', period.market);
     return request<WidgetResult<T>>(`/dashboard/widgets/${id}?${search.toString()}`);
+  },
+  reportOptions: () => request<ReportFilterOptions>('/reports/options'),
+  runReport: (
+    id: ReportId,
+    params: { from: string; to: string; market?: string; teamId?: string; ownerId?: string },
+  ) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to });
+    if (params.market) search.set('market', params.market);
+    if (params.teamId) search.set('teamId', params.teamId);
+    if (params.ownerId) search.set('ownerId', params.ownerId);
+    return request<ReportResultView>(`/reports/${enc(id)}?${search.toString()}`);
+  },
+  downloadReportCsv: (
+    id: ReportId,
+    params: { from: string; to: string; market?: string; teamId?: string; ownerId?: string },
+  ) => {
+    const search = new URLSearchParams({ from: params.from, to: params.to });
+    if (params.market) search.set('market', params.market);
+    if (params.teamId) search.set('teamId', params.teamId);
+    if (params.ownerId) search.set('ownerId', params.ownerId);
+    return download(`/reports/${enc(id)}/export.csv?${search.toString()}`);
   },
 
   // Imports (PRD 4.9). The file goes as the raw body; its name in a header, not the URL.

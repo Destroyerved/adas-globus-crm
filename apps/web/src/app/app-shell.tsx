@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  BarChart3,
   Building2,
   CheckSquare,
   GitMerge,
@@ -49,8 +50,8 @@ interface NavItem {
   capability?: string;
 }
 
-// Only modules that work end to end appear here (AGENTS.md section 3). Inbox, Outreach and
-// Reports return when their real connectors and data exist.
+// Only modules that work end to end appear here (AGENTS.md section 3). Inbox and Outreach
+// return when their real connectors exist.
 const WORK_ITEMS: NavItem[] = [
   {
     id: 'dashboard',
@@ -73,6 +74,15 @@ const WORK_ITEMS: NavItem[] = [
     label: 'Duplicates',
     icon: GitMerge,
     capability: 'duplicates.merge',
+  },
+];
+
+const GROW_ITEMS: NavItem[] = [
+  {
+    id: 'reports',
+    label: 'Reports',
+    icon: BarChart3,
+    capability: 'reports.read',
   },
 ];
 
@@ -121,6 +131,8 @@ export function AppShell({
   const gChordRef = useRef<boolean>(false);
   const me = useMe();
   const workItems = WORK_ITEMS.filter((item) => !item.capability || can(me, item.capability));
+  const growItems = GROW_ITEMS.filter((item) => !item.capability || can(me, item.capability));
+  const canReports = can(me, 'reports.read');
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -171,7 +183,7 @@ export function AppShell({
 
       if (gChordRef.current) {
         gChordRef.current = false;
-        // DESIGN 9.3 keyboard map: G then H (home), L, C, O, D, T
+        // DESIGN 9.3 keyboard map: G then H (home), L, C, O, D, T, R
         const targets: Record<string, AppScreenId> = {
           h: 'dashboard',
           l: 'leads',
@@ -179,6 +191,7 @@ export function AppShell({
           o: 'companies',
           d: 'deals',
           t: 'tasks',
+          ...(canReports ? { r: 'reports' } : {}),
         };
         const target = targets[event.key.toLowerCase()];
         if (target) {
@@ -190,7 +203,7 @@ export function AppShell({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onNavigate, onOpenCommandPalette]);
+  }, [onNavigate, onOpenCommandPalette, canReports]);
 
   const renderSidebarNavContent = (isCollapsedView: boolean) => (
     <div className="flex flex-col h-full justify-between p-[12px] text-sidebar-foreground select-none">
@@ -330,6 +343,48 @@ export function AppShell({
             })}
           </ul>
         </div>
+
+        {/* GROW group (PRD 4.1, DESIGN 5.1) */}
+        {growItems.length > 0 && (
+          <div>
+            {!isCollapsedView && (
+              <div className="px-[10px] mb-[6px] text-eyebrow text-sidebar-foreground opacity-85">
+                GROW
+              </div>
+            )}
+            <ul className="m-0 p-0 list-none space-y-[2px]">
+              {growItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeScreen === item.id;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      title={isCollapsedView ? item.label : undefined}
+                      onClick={() => {
+                        onNavigate(item.id);
+                        setMobileDrawerOpen(false);
+                      }}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`w-full h-[36px] px-[10px] rounded-[8px] flex items-center justify-between gap-[10px] cursor-pointer border-0 transition-colors duration-120 ${
+                        isActive
+                          ? 'bg-navy-2 text-primary-foreground font-semibold shadow-[inset_2px_0_0_0_var(--cyan)]'
+                          : 'bg-transparent text-sidebar-foreground font-medium hover:bg-navy-2 hover:text-primary-foreground'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-[10px] min-w-0">
+                        <Icon size={18} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
+                        {!isCollapsedView && (
+                          <span className="text-[14px] truncate">{item.label}</span>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Bottom utilities (DESIGN.md §5.1) */}

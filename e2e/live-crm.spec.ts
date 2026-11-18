@@ -1197,3 +1197,62 @@ test('currencies settings, keyboard Kanban drag-and-drop, deal stakeholders, rec
     page.getByRole('button', { name: 'Sterling weekly staffing sync', exact: true }),
   ).toBeVisible();
 });
+
+test('dashboard portfolio deltas and standalone standard reports with currency toggle, View as table and audited CSV export work end-to-end', async ({
+  page,
+}) => {
+  // Sign in as synthetic Sales Manager (Maya Lin) so all screens and screenshots use synthetic names only.
+  await signInAs(page, 'usr_mgr_1');
+
+  await page.goto('/?screen=dashboard');
+  await expect(page.getByTestId('dashboard-screen')).toBeVisible();
+  await expect(page.getByTestId('dashboard-summary-strip')).toBeVisible();
+  await expect(page.getByTestId('dashboard-summary-strip')).toContainText('Total companies');
+  await expect(page.getByTestId('dashboard-summary-strip')).toContainText('Total contacts');
+  await expect(page.getByTestId('dashboard-summary-strip')).toContainText('Lead conversion rate');
+  await expect(page.getByTestId('kpi-delta').first()).toBeVisible();
+
+  // Navigate to standalone Reports screen via "Open reports"
+  await page.getByRole('button', { name: 'Open reports' }).click();
+  await expect(page.getByTestId('reports-screen')).toBeVisible();
+
+  // Switch to Pipeline report, reveal original currencies, and check View as table toggle
+  await page.getByRole('tab', { name: 'Pipeline' }).click();
+  await expect(page.getByText('Pipeline by stage & owner')).toBeVisible();
+  await page.getByRole('button', { name: /Original currencies/ }).click();
+  await expect(page.getByTestId('report-currency-breakdown')).toBeVisible();
+
+  // Check axe + zero horizontal overflow + capture 1440px and 375px screenshots
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `28-reports-analytics-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Toggle "View as table" on the first chart and verify accessible table view
+  await page
+    .getByTestId('report-chart-by_stage')
+    .getByRole('button', { name: 'View as table' })
+    .click();
+  await expect(
+    page.getByTestId('report-chart-by_stage').getByRole('button', { name: 'View as chart' }),
+  ).toBeVisible();
+
+  // Switch through Won, lost & revenue and Activity & follow-ups tabs
+  await page.getByRole('tab', { name: 'Won, lost & revenue' }).click();
+  await expect(page.getByText('Won, lost & revenue').first()).toBeVisible();
+  await page.getByRole('tab', { name: 'Activity & follow-ups' }).click();
+  await expect(page.getByText('Activity & follow-up completion')).toBeVisible();
+
+  // Export CSV and verify file download
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toContain('adas-report-employee_activity');
+  await expect(page.getByText('Report exported as CSV.')).toBeVisible();
+});

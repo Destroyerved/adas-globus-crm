@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   calendarDateInZone,
+  computeDeltaChip,
   dashboardPresetRange,
   DASHBOARD_PRESETS,
   formatDate,
@@ -12,13 +13,14 @@ import {
   type Currency,
   type DashboardPreset,
 } from '@adas/shared';
-import { Callout } from '@/components/ui/panel.js';
+import { Button } from '@/components/ui/button.js';
+import { Callout, Panel } from '@/components/ui/panel.js';
 import { Input } from '@/components/ui/input.js';
 import { Select } from '@/components/ui/select.js';
 import { ErrorState, LoadingState } from '@/components/ui/state-views.js';
 import { api, type DashboardLayout, type DashboardPeriod, type WidgetId } from '@/lib/api.js';
 import { PageHeader, errorMessage } from '@/features/shared/live-kit.js';
-import { Toolbar, useUrlState } from '@/features/shared/list-kit.js';
+import { Toolbar, can, useMe, useUrlState } from '@/features/shared/list-kit.js';
 import { TASK_TYPE_LABEL } from '@/features/tasks/tasks-screen.js';
 import { type AppScreenId } from '@/features/command-palette/command-palette.js';
 import { BarList, KpiRow, MiniList, WidgetPanel, type Kpi } from './dashboard-kit.js';
@@ -51,6 +53,7 @@ const DEFAULTS = { period: 'this_month', from: '', to: '', market: '' };
  * blocks the others, and every number opens the list it counts.
  */
 export function DashboardScreen({ role, go }: { role: string; go: Go }) {
+  const me = useMe();
   const layout = useQuery({ queryKey: ['dashboard-layout'], queryFn: api.dashboard });
   const [state, setState] = useUrlState(DEFAULTS);
 
@@ -91,7 +94,17 @@ export function DashboardScreen({ role, go }: { role: string; go: Go }) {
 
   return (
     <div className="space-y-[16px]" data-testid="dashboard-screen">
-      <PageHeader kicker={ROLE_KICKER[role] ?? 'Overview'} title="Dashboard" />
+      <PageHeader
+        kicker={ROLE_KICKER[role] ?? 'Overview'}
+        title="Dashboard"
+        actions={
+          can(me, 'reports.read') ? (
+            <Button variant="link" onClick={() => go('reports', { period: state.period })}>
+              Open reports
+            </Button>
+          ) : undefined
+        }
+      />
       <Toolbar>
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-[8px]">
           <Select
@@ -149,6 +162,8 @@ export function DashboardScreen({ role, go }: { role: string; go: Go }) {
         </p>
       </Toolbar>
 
+      {!badRange && <PortfolioSummaryStrip period={period} go={go} />}
+
       {badRange ? (
         <Callout tone="warning">Choose a start date on or before the end date.</Callout>
       ) : layout.data.widgets.length === 0 ? (
@@ -163,6 +178,82 @@ export function DashboardScreen({ role, go }: { role: string; go: Go }) {
         </div>
       )}
     </div>
+  );
+}
+
+function PortfolioSummaryStrip({ period, go }: { period: DashboardPeriod; go: Go }) {
+  const summary = useQuery({
+    queryKey: ['dashboard-summary', period],
+    queryFn: () => api.dashboardSummary(period),
+    staleTime: 60_000,
+  });
+
+  if (summary.isPending) {
+    return (
+      <Panel data-testid="dashboard-summary-strip">
+        <LoadingState rows={2} />
+      </Panel>
+    );
+  }
+  if (summary.isError) {
+    return (
+      <Panel data-testid="dashboard-summary-strip">
+        <ErrorState message={errorMessage(summary.error)} onRetry={() => void summary.refetch()} />
+      </Panel>
+    );
+  }
+
+  const d = summary.data;
+  const items: Kpi[] = [];
+  const market: Record<string, string> = period.market ? { market: period.market } : {};
+
+  if (d.totalCompanies !== null) {
+    items.push({
+      label: 'Total companies',
+      value: formatNumber(d.totalCompanies),
+      delta: computeDeltaChip(d.newCompanies, d.previousNewCompanies, { kind: 'count' }),
+      onOpen: () => go('companies', market),
+    });
+  }
+  if (d.totalContacts !== null) {
+    items.push({
+      label: 'Total contacts',
+      value: formatNumber(d.totalContacts),
+      delta: computeDeltaChip(d.newContacts, d.previousNewContacts, { kind: 'count' }),
+      onOpen: () => go('contacts', market),
+    });
+  }
+  if (d.newLeads !== null) {
+    items.push({
+      label: 'New leads (period)',
+      value: formatNumber(d.newLeads),
+      delta: computeDeltaChip(d.newLeads, d.previousNewLeads, { kind: 'count' }),
+      onOpen: () =>
+        go('leads', {
+          status: 'all',
+          created: `${d.period.start},${d.period.end}`,
+          ...market,
+        }),
+    });
+    items.push({
+      label: 'Lead conversion rate',
+      value: formatPercent(d.leadConversionRate),
+      delta: computeDeltaChip(d.leadConversionRate, d.previousLeadConversionRate, { kind: 'rate' }),
+      onOpen: () =>
+        go('leads', {
+          status: 'all',
+          created: `${d.period.start},${d.period.end}`,
+          ...market,
+        }),
+    });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <Panel title="Portfolio & funnel snapshot" data-testid="dashboard-summary-strip">
+      <KpiRow items={items} />
+    </Panel>
   );
 }
 
@@ -448,7 +539,7 @@ function PipelineByStage({ id, period, layout, go }: WidgetProps) {
 }
 
 function WonLost({ id, period, go }: WidgetProps) {
-  const query = useWidget<{
+  interface WonLostData {
     currency: Currency;
     won: number;
     lost: number;
@@ -458,7 +549,15 @@ function WonLost({ id, period, go }: WidgetProps) {
     unconverted: { currency: Currency; amountMinor: string }[];
     averageCycleDays: number | null;
     lostReasons: { reason: string; count: number }[];
-  }>(id, period);
+    previous?: {
+      won: number;
+      lost: number;
+      winRate: number | null;
+      revenueWonMinor: string;
+      monthlyValueWonMinor: string;
+    };
+  }
+  const query = useWidget<WonLostData>(id, period);
   const closed = (outcome: 'won' | 'lost') => () =>
     go('deals', {
       view: 'list',
@@ -473,11 +572,48 @@ function WonLost({ id, period, go }: WidgetProps) {
         <>
           <KpiRow
             items={[
-              { label: 'Won', value: formatNumber(d.won), onOpen: closed('won') },
-              { label: 'Lost', value: formatNumber(d.lost), onOpen: closed('lost') },
-              { label: 'Win rate', value: formatPercent(d.winRate) },
-              { label: 'Revenue won', value: money(d.revenueWonMinor, d.currency) },
-              { label: 'Monthly value won', value: money(d.monthlyValueWonMinor, d.currency) },
+              {
+                label: 'Won',
+                value: formatNumber(d.won),
+                delta: computeDeltaChip(d.won, d.previous?.won, { kind: 'count' }),
+                onOpen: closed('won'),
+              },
+              {
+                label: 'Lost',
+                value: formatNumber(d.lost),
+                delta: computeDeltaChip(d.lost, d.previous?.lost, {
+                  kind: 'count',
+                  invertGood: true,
+                }),
+                onOpen: closed('lost'),
+              },
+              {
+                label: 'Win rate',
+                value: formatPercent(d.winRate),
+                delta: computeDeltaChip(d.winRate, d.previous?.winRate, { kind: 'rate' }),
+              },
+              {
+                label: 'Revenue won',
+                value: money(d.revenueWonMinor, d.currency),
+                delta: d.previous
+                  ? computeDeltaChip(
+                      BigInt(d.revenueWonMinor),
+                      BigInt(d.previous.revenueWonMinor),
+                      { kind: 'money' },
+                    )
+                  : null,
+              },
+              {
+                label: 'Monthly value won',
+                value: money(d.monthlyValueWonMinor, d.currency),
+                delta: d.previous
+                  ? computeDeltaChip(
+                      BigInt(d.monthlyValueWonMinor),
+                      BigInt(d.previous.monthlyValueWonMinor),
+                      { kind: 'money' },
+                    )
+                  : null,
+              },
               {
                 label: 'Average days to win',
                 value:
@@ -505,10 +641,13 @@ function WonLost({ id, period, go }: WidgetProps) {
 }
 
 function TrialToWin({ id, period }: WidgetProps) {
-  const query = useWidget<{ leftTrial: number; won: number; lost: number; rate: number | null }>(
-    id,
-    period,
-  );
+  const query = useWidget<{
+    leftTrial: number;
+    won: number;
+    lost: number;
+    rate: number | null;
+    previous?: { leftTrial: number; won: number; rate: number | null };
+  }>(id, period);
   return (
     <WidgetPanel title="Free trial to win" query={query}>
       {(d) =>
@@ -519,10 +658,22 @@ function TrialToWin({ id, period }: WidgetProps) {
         ) : (
           <KpiRow
             items={[
-              { label: 'Finished a trial', value: formatNumber(d.leftTrial) },
-              { label: 'Now won', value: formatNumber(d.won) },
+              {
+                label: 'Finished a trial',
+                value: formatNumber(d.leftTrial),
+                delta: computeDeltaChip(d.leftTrial, d.previous?.leftTrial, { kind: 'count' }),
+              },
+              {
+                label: 'Now won',
+                value: formatNumber(d.won),
+                delta: computeDeltaChip(d.won, d.previous?.won, { kind: 'count' }),
+              },
               { label: 'Now lost', value: formatNumber(d.lost) },
-              { label: 'Trial to win', value: formatPercent(d.rate) },
+              {
+                label: 'Trial to win',
+                value: formatPercent(d.rate),
+                delta: computeDeltaChip(d.rate, d.previous?.rate, { kind: 'rate' }),
+              },
             ]}
           />
         )
@@ -542,6 +693,7 @@ function SlaBreaches({ id, period, go }: WidgetProps) {
     metRate: number | null;
     medianFirstResponseMinutes: number | null;
     breachedByPerson: { userId: string; name: string; count: number }[];
+    previous?: { received: number; breached: number; metRate: number | null };
   }>(id, period);
   return (
     <WidgetPanel title="First reply to website inquiries" query={query}>
@@ -549,12 +701,24 @@ function SlaBreaches({ id, period, go }: WidgetProps) {
         <>
           <KpiRow
             items={[
-              { label: 'Received', value: formatNumber(d.received) },
-              { label: 'Replied on time', value: formatPercent(d.metRate) },
+              {
+                label: 'Received',
+                value: formatNumber(d.received),
+                delta: computeDeltaChip(d.received, d.previous?.received, { kind: 'count' }),
+              },
+              {
+                label: 'Replied on time',
+                value: formatPercent(d.metRate),
+                delta: computeDeltaChip(d.metRate, d.previous?.metRate, { kind: 'rate' }),
+              },
               {
                 label: 'Late',
                 value: formatNumber(d.breached),
                 tone: d.breached > 0 ? 'danger' : undefined,
+                delta: computeDeltaChip(d.breached, d.previous?.breached, {
+                  kind: 'count',
+                  invertGood: true,
+                }),
               },
               {
                 label: 'Still waiting',
@@ -616,6 +780,7 @@ function LeadsBySource({ id, period, go }: WidgetProps) {
     total: number;
     byMarket: Record<string, number>;
     rows: { source: string; total: number; byMarket: Record<string, number> }[];
+    previous?: { total: number; byMarket: Record<string, number> };
   }>(id, period);
   const created = `${query.data?.period.start ?? ''},${query.data?.period.end ?? ''}`;
   return (
@@ -625,6 +790,7 @@ function LeadsBySource({ id, period, go }: WidgetProps) {
           {
             label: 'New leads',
             value: formatNumber(d.total),
+            delta: computeDeltaChip(d.total, d.previous?.total, { kind: 'count' }),
             onOpen: () => go('leads', { status: 'all', created, ...marketParam(period) }),
           },
         ];
@@ -636,6 +802,9 @@ function LeadsBySource({ id, period, go }: WidgetProps) {
             kpis.push({
               label,
               value: formatNumber(d.byMarket[market] ?? 0),
+              delta: computeDeltaChip(d.byMarket[market] ?? 0, d.previous?.byMarket?.[market], {
+                kind: 'count',
+              }),
               onOpen: () => go('leads', { status: 'all', created, market }),
             });
           }
@@ -688,6 +857,7 @@ function ActivitySummary({ id, period }: WidgetProps) {
   const query = useWidget<{
     totals: Omit<ActivityRow, 'userId' | 'name' | 'total'>;
     rows: ActivityRow[];
+    previous?: { totals: Omit<ActivityRow, 'userId' | 'name' | 'total'> };
   }>(id, period);
   const th = 'text-right font-semibold py-[6px] px-[6px] whitespace-nowrap';
   const td = 'text-right py-[6px] px-[6px] tabular-nums';
@@ -697,11 +867,43 @@ function ActivitySummary({ id, period }: WidgetProps) {
         <>
           <KpiRow
             items={[
-              { label: 'Calls', value: formatNumber(d.totals.calls) },
-              { label: 'Meetings', value: formatNumber(d.totals.meetings) },
-              { label: 'Emails logged', value: formatNumber(d.totals.emails) },
-              { label: 'Tasks done', value: formatNumber(d.totals.tasksCompleted) },
-              { label: 'Deal moves', value: formatNumber(d.totals.dealsMoved) },
+              {
+                label: 'Calls',
+                value: formatNumber(d.totals.calls),
+                delta: computeDeltaChip(d.totals.calls, d.previous?.totals.calls, {
+                  kind: 'count',
+                }),
+              },
+              {
+                label: 'Meetings',
+                value: formatNumber(d.totals.meetings),
+                delta: computeDeltaChip(d.totals.meetings, d.previous?.totals.meetings, {
+                  kind: 'count',
+                }),
+              },
+              {
+                label: 'Emails logged',
+                value: formatNumber(d.totals.emails),
+                delta: computeDeltaChip(d.totals.emails, d.previous?.totals.emails, {
+                  kind: 'count',
+                }),
+              },
+              {
+                label: 'Tasks done',
+                value: formatNumber(d.totals.tasksCompleted),
+                delta: computeDeltaChip(
+                  d.totals.tasksCompleted,
+                  d.previous?.totals.tasksCompleted,
+                  { kind: 'count' },
+                ),
+              },
+              {
+                label: 'Deal moves',
+                value: formatNumber(d.totals.dealsMoved),
+                delta: computeDeltaChip(d.totals.dealsMoved, d.previous?.totals.dealsMoved, {
+                  kind: 'count',
+                }),
+              },
             ]}
           />
           {d.rows.length === 0 ? (
@@ -752,7 +954,7 @@ const SUPPRESSION_LABEL: Record<string, string> = {
 };
 
 function Outreach({ id, period }: WidgetProps) {
-  const query = useWidget<{
+  interface OutreachData {
     channels: {
       channel: string;
       sent: number;
@@ -769,19 +971,51 @@ function Outreach({ id, period }: WidgetProps) {
     unsubscribes: number;
     unsubscribeRate: number | null;
     suppressionsAdded: { reason: string; count: number }[];
-  }>(id, period);
+    previous?: {
+      channels: { sent: number }[];
+      sequenceReplyRate: number | null;
+      unsubscribes: number;
+      unsubscribeRate: number | null;
+    };
+  }
+  const query = useWidget<OutreachData>(id, period);
   return (
     <WidgetPanel title="Outreach performance" query={query} wide>
       {(d) => {
         const sent = d.channels.reduce((s, c) => s + c.sent, 0);
+        const prevSent = d.previous?.channels.reduce((s, c) => s + c.sent, 0);
         return (
           <>
             <KpiRow
               items={[
-                { label: 'Emails sent', value: formatNumber(sent) },
-                { label: 'Sequence reply rate', value: formatPercent(d.sequenceReplyRate, 1) },
-                { label: 'Unsubscribes', value: formatNumber(d.unsubscribes) },
-                { label: 'Unsubscribe rate', value: formatPercent(d.unsubscribeRate, 2) },
+                {
+                  label: 'Emails sent',
+                  value: formatNumber(sent),
+                  delta: computeDeltaChip(sent, prevSent, { kind: 'count' }),
+                },
+                {
+                  label: 'Sequence reply rate',
+                  value: formatPercent(d.sequenceReplyRate, 1),
+                  delta: computeDeltaChip(d.sequenceReplyRate, d.previous?.sequenceReplyRate, {
+                    kind: 'rate',
+                  }),
+                },
+                {
+                  label: 'Unsubscribes',
+                  value: formatNumber(d.unsubscribes),
+                  delta: computeDeltaChip(d.unsubscribes, d.previous?.unsubscribes, {
+                    kind: 'count',
+                    invertGood: true,
+                  }),
+                },
+                {
+                  label: 'Unsubscribe rate',
+                  value: formatPercent(d.unsubscribeRate, 2),
+                  delta: computeDeltaChip(d.unsubscribeRate, d.previous?.unsubscribeRate, {
+                    kind: 'rate',
+                    invertGood: true,
+                  }),
+                },
               ]}
             />
             <div className="mt-[16px] grid gap-[16px] md:grid-cols-2">

@@ -13,6 +13,7 @@ import { LeadProfileScreen } from '@/features/leads/lead-profile-screen.js';
 import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen.js';
 import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
+import { ReportsScreen } from '@/features/reports/reports-screen.js';
 import { SettingsScreen } from '@/features/settings/settings-screen.js';
 import { ImportsScreen } from '@/features/imports/imports-screen.js';
 import { DuplicatesScreen } from '@/features/duplicates/duplicates-screen.js';
@@ -39,10 +40,11 @@ const queryClient: QueryClient = new QueryClient({
   },
 });
 
-// Only screens that work on live data. Inbox, Outreach and Reports come back when their real
-// connectors and data exist (docs/PROGRESS.md, "Make it real").
+// Only screens that work on live data. Inbox and Outreach come back when their real connectors
+// exist (docs/PROGRESS.md, "Make it real").
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'dashboard',
+  'reports',
   'settings',
   'leads',
   'lead',
@@ -193,6 +195,7 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             go={(screen, { id, ...params } = {}) => navigateScreen(screen, id ?? null, params)}
           />
         )}
+        {activeScreen === 'reports' && <ReportsScreen />}
         {activeScreen === 'settings' && <SettingsScreen onOpenLead={openLead} />}
         {activeScreen === 'imports' && (
           <ImportsScreen
