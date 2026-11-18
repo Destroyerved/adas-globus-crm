@@ -291,6 +291,8 @@ describe('the worker on pg-boss', () => {
         'export.build',
         'housekeeping.purge',
         'import.process',
+        'mail.subscriptions.renew',
+        'mail.sync',
         'outbox.dispatch',
         'sla.check',
         'tasks.reminders',

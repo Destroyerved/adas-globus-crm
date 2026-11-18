@@ -12,3 +12,4 @@ export * from './intake.js';
 export * from './views-and-bulk.js';
 export * from './crm-extensions.js';
 export * from './reports.js';
+export * from './inbox.js';

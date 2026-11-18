@@ -198,6 +198,13 @@ export const SEED_SQL: readonly string[] = [
         ('msg_acme_2', 'thd_acme_1', 'graph_msg_002', 'inbound', 'jane.patel@acmetax.example.com', '["arjun@adasglobuspro.example.com"]'::jsonb, 'Re: 3-day UltraTax CS trial candidate resumes', 'Thanks Arjun — let us start the 3-day trial with Candidate A next Tuesday.', 'Thanks Arjun — let us start the 3-day trial with Candidate A next Tuesday at 9am CT.')
       ON CONFLICT (id) DO NOTHING;
 
+      INSERT INTO templates (
+        id, name, category, market, subject, body_text, variables, owner_user_id, shared
+      ) VALUES
+        ('tpl_inbox_trial_intro', '3-day CPA staffing trial introduction', 'inbox', 'US', '3-day risk-free tax & accounting pod trial for {{company_name|your firm}}', 'Hi {{first_name|there}}, would Tuesday or Thursday work for a 15-minute scope call regarding a 3-day risk-free trial for {{company_name|your firm}}?', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE),
+        ('tpl_inbox_ca_followup', 'Canada T1/T2 CaseWare & TaxCycle follow-up', 'inbox', 'CA', 'Following up on CaseWare & TaxCycle staffing for {{company_name|your practice}}', 'Hi {{first_name|there}}, shortlisted two senior Canadian tax specialists familiar with TaxCycle and CaseWare for {{company_name|your firm}}.', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE)
+      ON CONFLICT (id) DO NOTHING;
+
       INSERT INTO scoring_rules (
         id, name, category, field_path, operator, target_value, points, active
       ) VALUES

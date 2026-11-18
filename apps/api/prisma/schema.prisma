@@ -661,3 +661,135 @@ model FxRate {
   @@unique([fromCurrency, toCurrency, effectiveDate])
   @@map("fx_rates")
 }
+
+// Microsoft 365 & Graph Inbox connections, threads, messages, attachment metadata, templates, and
+// inbound webhook event deduplication (PRD 4.11, 7.3, 8.2, 8.3). Migration 0001 + 0017.
+model MailboxConnection {
+  id                        String    @id
+  userId                    String    @unique @map("user_id")
+  email                     String    @unique
+  provider                  String    @default("microsoft_graph")
+  status                    String    @default("connected")
+  scopes                    String    @default("openid profile email offline_access User.Read Mail.Read Mail.Send")
+  encryptedRefreshToken     String?   @map("encrypted_refresh_token")
+  encryptedAccessToken      String?   @map("encrypted_access_token")
+  accessTokenExpiresAt      DateTime? @map("access_token_expires_at") @db.Timestamptz(6)
+  tokenKeyVersion           Int       @default(1) @map("token_key_version")
+  inboxDeltaLink            String?   @map("inbox_delta_link")
+  sentDeltaLink             String?   @map("sent_delta_link")
+  inboxSubscriptionId       String?   @map("inbox_subscription_id")
+  inboxSubscriptionExpiresAt DateTime? @map("inbox_subscription_expires_at") @db.Timestamptz(6)
+  sentSubscriptionId        String?   @map("sent_subscription_id")
+  sentSubscriptionExpiresAt DateTime? @map("sent_subscription_expires_at") @db.Timestamptz(6)
+  clientStateSha256         String?   @map("client_state_sha256")
+  syncPending               Boolean   @default(false) @map("sync_pending")
+  retryAfterAt              DateTime? @map("retry_after_at") @db.Timestamptz(6)
+  lastError                 String?   @map("last_error")
+  connectedAt               DateTime? @default(now()) @map("connected_at") @db.Timestamptz(6)
+  lastSyncedAt              DateTime? @map("last_synced_at") @db.Timestamptz(6)
+  dailySendCap              Int       @default(50) @map("daily_send_cap")
+  sentTodayCount            Int       @default(0) @map("sent_today_count")
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, syncPending, lastSyncedAt])
+  @@map("mailbox_connections")
+}
+
+model EmailThread {
+  id             String   @id
+  subject        String
+  conversationId String?  @map("conversation_id")
+  contactId      String?  @map("contact_id")
+  companyId      String?  @map("company_id")
+  dealId         String?  @map("deal_id")
+  leadId         String?  @map("lead_id")
+  ownerUserId    String   @map("owner_user_id")
+  teamId         String?  @map("team_id")
+  lastMessageAt  DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  messageCount   Int      @default(1) @map("message_count")
+  unreadCount    Int      @default(0) @map("unread_count")
+  snippet        String   @default("")
+  status         String   @default("open")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([contactId, lastMessageAt(sort: Desc)])
+  @@index([ownerUserId, lastMessageAt(sort: Desc)])
+  @@map("email_threads")
+}
+
+model EmailMessage {
+  id                  String    @id
+  threadId            String    @map("thread_id")
+  mailboxConnectionId String?   @map("mailbox_connection_id")
+  providerMessageId   String?   @unique @map("provider_message_id")
+  internetMessageId   String?   @map("internet_message_id")
+  inReplyTo           String?   @map("in_reply_to")
+  referencesHeader    String?   @map("references_header")
+  direction           String
+  fromEmail           String    @map("from_email")
+  toEmails            Json      @default("[]") @map("to_emails")
+  ccEmails            Json      @default("[]") @map("cc_emails")
+  subject             String
+  bodyPreview         String    @map("body_preview")
+  bodyText            String    @map("body_text")
+  bodyHtmlSanitized   String?   @map("body_html_sanitized")
+  outboundStatus      String    @default("sent") @map("outbound_status")
+  errorDetail         String?   @map("error_detail")
+  hasAttachments      Boolean   @default(false) @map("has_attachments")
+  linkedBy            String    @default("auto") @map("linked_by")
+  sentAt              DateTime  @default(now()) @map("sent_at") @db.Timestamptz(6)
+  receivedAt          DateTime? @map("received_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([threadId, sentAt])
+  @@map("email_messages")
+}
+
+model EmailAttachment {
+  id                   String   @id
+  messageId            String   @map("message_id")
+  mailboxConnectionId  String?  @map("mailbox_connection_id")
+  providerAttachmentId String   @map("provider_attachment_id")
+  filename             String
+  mimeType             String   @default("application/octet-stream") @map("mime_type")
+  sizeBytes            Int      @default(0) @map("size_bytes")
+  isInline             Boolean  @default(false) @map("is_inline")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([messageId, providerAttachmentId])
+  @@index([messageId])
+  @@map("email_attachments")
+}
+
+model EmailTemplate {
+  id          String   @id
+  name        String
+  category    String   @default("outreach")
+  market      String   @default("US")
+  subject     String
+  bodyText    String   @map("body_text")
+  bodyHtml    String?  @map("body_html")
+  variables   Json     @default("[]")
+  shared      Boolean  @default(true)
+  ownerUserId String   @map("owner_user_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("templates")
+}
+
+model InboundEvent {
+  id              String    @id
+  provider        String
+  providerEventId String    @map("provider_event_id")
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz(6)
+  status          String    @default("processed")
+  metadata        Json      @default("{}")
+
+  @@unique([provider, providerEventId])
+  @@index([receivedAt(sort: Desc)])
+  @@map("inbound_events")
+}

@@ -26,6 +26,15 @@ const NAVIGATION_ITEMS: CommandPaletteItem[] = [
     targetScreen: 'dashboard',
   },
   {
+    id: 'nav_inbox',
+    group: 'NAVIGATION',
+    label: 'Inbox',
+    meta: 'Go to synced client conversations',
+    shortcut: 'G I',
+    targetScreen: 'inbox',
+    capability: 'inbox.read',
+  },
+  {
     id: 'nav_leads',
     group: 'NAVIGATION',
     label: 'Leads',

@@ -789,7 +789,7 @@ export class DashboardService {
             AND a.occurred_at >= ${start}::timestamptz AND a.occurred_at < ${end}::timestamptz) AS calls,
          (SELECT COUNT(*)::int FROM activities a WHERE a.actor_user_id = u.id AND a.activity_type = 'meeting'
             AND a.occurred_at >= ${start}::timestamptz AND a.occurred_at < ${end}::timestamptz) AS meetings,
-         (SELECT COUNT(*)::int FROM activities a WHERE a.actor_user_id = u.id AND a.activity_type = 'email_logged'
+         (SELECT COUNT(*)::int FROM activities a WHERE a.actor_user_id = u.id AND a.activity_type IN ('email_logged', 'email_sent')
             AND a.occurred_at >= ${start}::timestamptz AND a.occurred_at < ${end}::timestamptz) AS emails,
          (SELECT COUNT(*)::int FROM tasks t WHERE t.completed_by_user_id = u.id AND t.status = 'completed'
             AND t.completed_at >= ${start}::timestamptz AND t.completed_at < ${end}::timestamptz) AS tasks_done,

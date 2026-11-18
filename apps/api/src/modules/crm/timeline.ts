@@ -67,15 +67,42 @@ export class CrmTimelineService {
     const [beforeAt, beforeId] = parseTimelineCursor(options.before);
     const linkCol = TIMELINE_LINK_COLUMN[entityType];
 
+    const emailThreadFilter =
+      entityType === 'lead'
+        ? `(t.lead_id = $1 OR t.contact_id = (SELECT contact_id FROM leads WHERE id = $1))`
+        : `t.${linkCol} = $1`;
+
     const parts = [
       `SELECT a.id, 'activity' AS source, a.activity_type AS kind, a.title, a.detail,
               a.actor_user_id, u.name AS actor_name, a.occurred_at AS at, a.metadata
        FROM activities a LEFT JOIN users u ON u.id = a.actor_user_id
-       WHERE a.${linkCol} = $1`,
+       WHERE a.${linkCol} = $1
+         AND NOT (a.activity_type IN ('email_received', 'email_sent') AND a.metadata ? 'messageId')`,
       `SELECT n.id, 'note', 'note', 'Note', n.body, n.author_user_id, u.name, n.created_at,
               jsonb_build_object('version', n.version, 'updatedAt', n.updated_at)
        FROM notes n LEFT JOIN users u ON u.id = n.author_user_id
        WHERE n.entity_type = $2 AND n.entity_id = $1 AND n.deleted_at IS NULL`,
+      `SELECT m.id, 'email',
+              CASE WHEN m.direction = 'inbound' THEN 'email_received' ELSE 'email_sent' END,
+              m.subject, m.body_text,
+              CASE WHEN m.direction = 'outbound' THEN t.owner_user_id ELSE NULL END,
+              CASE WHEN m.direction = 'outbound' THEN u.name ELSE m.from_email END,
+              m.sent_at,
+              jsonb_build_object(
+                'threadId', m.thread_id,
+                'direction', m.direction,
+                'fromEmail', m.from_email,
+                'toEmails', m.to_emails,
+                'ccEmails', m.cc_emails,
+                'bodyPreview', m.body_preview,
+                'bodyHtmlSanitized', m.body_html_sanitized,
+                'outboundStatus', m.outbound_status,
+                'hasAttachments', m.has_attachments
+              )
+       FROM email_messages m
+       JOIN email_threads t ON t.id = m.thread_id
+       LEFT JOIN users u ON u.id = t.owner_user_id
+       WHERE ${emailThreadFilter}`,
     ];
     if (entityType === 'lead') {
       parts.push(

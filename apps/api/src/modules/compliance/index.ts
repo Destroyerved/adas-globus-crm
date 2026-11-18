@@ -1752,20 +1752,33 @@ export class ComplianceService {
         [contactId, leadIds],
       );
 
-      // 6. Scrub email subjects, recipients and message bodies.
+      // 6. Scrub email subjects, recipients, attachment metadata and message bodies.
+      await tx.query(
+        `DELETE FROM email_attachments
+         WHERE message_id IN (
+           SELECT m.id FROM email_messages m
+           JOIN email_threads t ON t.id = m.thread_id
+           WHERE t.contact_id = $1
+         )`,
+        [contactId],
+      );
       await tx.query(
         `UPDATE email_messages
          SET subject = '[Erased per privacy request]',
              body_preview = '[Erased per privacy request]',
              body_text = '[Erased per privacy request]',
+             body_html_sanitized = NULL,
              from_email = 'redacted@erased.invalid',
-             to_emails = '[]'::jsonb
+             to_emails = '[]'::jsonb,
+             cc_emails = '[]'::jsonb,
+             has_attachments = FALSE
          WHERE thread_id IN (SELECT id FROM email_threads WHERE contact_id = $1)`,
         [contactId],
       );
       await tx.query(
         `UPDATE email_threads
-         SET subject = '[Erased per privacy request]'
+         SET subject = '[Erased per privacy request]',
+             snippet = '[Erased per privacy request]'
          WHERE contact_id = $1`,
         [contactId],
       );

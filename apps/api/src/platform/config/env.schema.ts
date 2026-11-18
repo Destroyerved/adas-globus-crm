@@ -42,6 +42,13 @@ export const EnvSchema = z
     // Must match a redirect URI on the Entra app registration. In development the web app
     // proxies /api, so sign-in stays on one origin.
     ENTRA_REDIRECT_URI: z.string().url().default('http://localhost:5174/api/v1/auth/sso/callback'),
+    ENTRA_MAIL_REDIRECT_URI: z
+      .string()
+      .url()
+      .default('http://localhost:5174/api/v1/inbox/oauth/callback'),
+    MICROSOFT_AUTHORITY_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
+    MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
+    CRM_NOTIFICATION_MAILBOX: z.string().email().default('crm@adasglobuspro.com'),
 
     CF_ACCESS_TEAM_DOMAIN: z.string().min(1).default('adasglobuspro.cloudflareaccess.com'),
     CF_ACCESS_AUD: z

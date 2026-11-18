@@ -13,6 +13,7 @@ import { LeadProfileScreen } from '@/features/leads/lead-profile-screen.js';
 import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen.js';
 import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
+import { InboxScreen } from '@/features/inbox/inbox-screen.js';
 import { ReportsScreen } from '@/features/reports/reports-screen.js';
 import { SettingsScreen } from '@/features/settings/settings-screen.js';
 import { ImportsScreen } from '@/features/imports/imports-screen.js';
@@ -40,10 +41,10 @@ const queryClient: QueryClient = new QueryClient({
   },
 });
 
-// Only screens that work on live data. Inbox and Outreach come back when their real connectors
-// exist (docs/PROGRESS.md, "Make it real").
+// Only screens that work on live data. Sequences and Campaigns come back when their engines land.
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'dashboard',
+  'inbox',
   'reports',
   'settings',
   'leads',
@@ -193,6 +194,13 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
           <DashboardScreen
             role={user.role}
             go={(screen, { id, ...params } = {}) => navigateScreen(screen, id ?? null, params)}
+          />
+        )}
+        {activeScreen === 'inbox' && (
+          <InboxScreen
+            onOpenContact={openContact}
+            onOpenCompany={openCompany}
+            onOpenDeal={openDeal}
           />
         )}
         {activeScreen === 'reports' && <ReportsScreen />}

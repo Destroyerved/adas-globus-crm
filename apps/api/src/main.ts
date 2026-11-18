@@ -36,6 +36,7 @@ import { DataQualityService } from './modules/data-quality/index.js';
 import { ImportService, registerImportRoutes } from './modules/imports/index.js';
 import { DuplicateService, registerDuplicateRoutes } from './modules/duplicates/index.js';
 import { ExportService, registerExportRoutes } from './modules/exports/index.js';
+import { InboxService, registerInboxRoutes } from './modules/inbox/index.js';
 import { WebsiteIntakeService, registerIntakeRoutes } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
@@ -52,7 +53,7 @@ import { LocalFileStorage, type FileStorage } from './platform/files/index.js';
 import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
-import { MailpitTransport } from './platform/mail-transport/index.js';
+import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
 import { effectiveCapabilities, requireCapability } from './platform/scope/index.js';
 import {
   PerUserRateLimiter,
@@ -199,7 +200,7 @@ export function createAppServer(
 ) {
   const logger = createLogger(env.LOG_LEVEL);
   const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
-  const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV);
+  const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL);
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
   const apiTokens = new ApiTokenService(db, auth);
   const cfAccess = new CloudflareAccessVerifier({
@@ -282,6 +283,30 @@ export function createAppServer(
   });
   const devLoginEnabled = isDevLoginEnabled(env);
   const production = env.NODE_ENV === 'production';
+  const resolvedSecretBox =
+    options.secretBox !== undefined
+      ? options.secretBox
+      : loadSecretBox(
+          resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
+          env.TOKEN_ENCRYPTION_KEY_VERSION,
+          production,
+        );
+  const graph = new MicrosoftGraphMailboxClient({
+    tenantId: env.ENTRA_TENANT_ID,
+    clientId: env.ENTRA_CLIENT_ID,
+    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
+    redirectUri: env.ENTRA_MAIL_REDIRECT_URI,
+    authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
+    graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
+  });
+  const inbox = new InboxService(db, graph, transport, {
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+    publicHost: env.APP_PUBLIC_HOST,
+    maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
+    secretBox: resolvedSecretBox,
+  });
+  registerInboxRoutes(router, inbox);
   const sessions = new SessionService(
     db,
     env.SESSION_IDLE_TIMEOUT_HOURS,
@@ -296,18 +321,9 @@ export function createAppServer(
   const signer = new CookieSigner(
     loadSessionSecret(resolveConfigPath(env.SESSION_SECRET_FILE), production),
   );
-  const breakGlass = new BreakGlassService(
-    db,
-    options.secretBox !== undefined
-      ? options.secretBox
-      : loadSecretBox(
-          resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
-          env.TOKEN_ENCRYPTION_KEY_VERSION,
-          production,
-        ),
-    logger,
-  );
+  const breakGlass = new BreakGlassService(db, resolvedSecretBox, logger);
   const OIDC_COOKIE = production ? '__Host-adas_oidc' : 'adas_oidc';
+  const MAIL_OAUTH_COOKIE = production ? '__Host-adas_mail_oauth' : 'adas_mail_oauth';
   const sessionCookie = (token: string) =>
     serializeCookie(sessionCookieName(production), token, {
       maxAgeSeconds: env.SESSION_ABSOLUTE_TIMEOUT_DAYS * 86_400,
@@ -450,6 +466,38 @@ export function createAppServer(
         });
         res.end(serializeJson({ status: 'received' }));
         return;
+      }
+
+      // Public Microsoft Graph change-notification webhook (`POST /api/v1/webhooks/microsoft` on `go.` — PRD §8.2).
+      // Handles both the plain-text `?validationToken=...` subscription handshake and JSON notifications.
+      if (pathname === '/api/v1/webhooks/microsoft' && (method === 'POST' || method === 'GET')) {
+        const validationToken = parsedUrl.searchParams.get('validationToken');
+        if (validationToken !== null) {
+          if (validationToken.length === 0 || validationToken.length > 1024) {
+            throw new DomainError({
+              status: 400,
+              code: 'INVALID_VALIDATION_TOKEN',
+              title: 'Invalid validation token',
+              detail: 'The Microsoft Graph validationToken query parameter is invalid.',
+            });
+          }
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-store',
+          });
+          res.end(validationToken);
+          return;
+        }
+        if (method === 'POST') {
+          const body = await readJsonBody(req, 262_144);
+          const result = await inbox.handleMicrosoftWebhook(body);
+          res.writeHead(202, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+          });
+          res.end(serializeJson({ status: 'accepted', ...result }));
+          return;
+        }
       }
 
       // Cloudflare Access JWT defence-in-depth on internal `crm.` routes (PRD §6.5, §9)
@@ -663,6 +711,81 @@ export function createAppServer(
       const rateStatus = userRateLimiter.check(rateActorKey);
       res.setHeader('X-RateLimit-Remaining', String(rateStatus.remaining));
 
+      // Delegated Microsoft 365 mailbox connection OAuth2 + PKCE flow (PRD §4.11, §8.2)
+      if (method === 'GET' && pathname === '/api/v1/inbox/oauth/start') {
+        try {
+          const { url, pending } = inbox.startOAuthConnect(user);
+          redirect(url, [
+            serializeCookie(MAIL_OAUTH_COOKIE, signer.sign(JSON.stringify(pending)), {
+              maxAgeSeconds: 600,
+              secure: production,
+            }),
+          ]);
+        } catch (err) {
+          const code = err instanceof DomainError ? err.code.toLowerCase() : 'mail_oauth_failed';
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=inbox&mailError=${encodeURIComponent(code)}`);
+        }
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/inbox/oauth/callback') {
+        const clearMailPending = serializeCookie(MAIL_OAUTH_COOKIE, '', {
+          maxAgeSeconds: 0,
+          secure: production,
+        });
+        try {
+          const pendingRaw = signer.verify(cookies[MAIL_OAUTH_COOKIE]);
+          if (!pendingRaw) {
+            throw new DomainError({
+              status: 400,
+              code: 'OAUTH_SESSION_EXPIRED',
+              title: 'Authorization expired',
+              detail: 'Start the Microsoft 365 mailbox connection again.',
+            });
+          }
+          if (parsedUrl.searchParams.get('error')) {
+            throw new DomainError({
+              status: 400,
+              code: 'OAUTH_ACCESS_DENIED',
+              title: 'Microsoft 365 connection cancelled',
+              detail: 'Consent was cancelled in Microsoft 365.',
+            });
+          }
+          const code = parsedUrl.searchParams.get('code') ?? '';
+          const state = parsedUrl.searchParams.get('state') ?? '';
+          if (!code || !state) {
+            throw new DomainError({
+              status: 400,
+              code: 'OAUTH_CODE_MISSING',
+              title: 'Missing authorization code',
+              detail: 'Microsoft did not return an authorization code.',
+            });
+          }
+          await inbox.finishOAuthConnect(user, {
+            code,
+            state,
+            pending: JSON.parse(pendingRaw),
+            ipAddress: clientIpOf(req),
+          });
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=inbox&mailConnected=1`, [clearMailPending]);
+        } catch (err) {
+          const code = err instanceof DomainError ? err.code.toLowerCase() : 'mail_oauth_failed';
+          logger.warn(
+            {
+              requestId,
+              userId: user.id,
+              code,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'Microsoft 365 mailbox connection failed',
+          );
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=inbox&mailError=${encodeURIComponent(code)}`, [
+            clearMailPending,
+          ]);
+        }
+        return;
+      }
+
       // Internal OpenAPI documentation on `crm.` (PRD §6.7, AGENTS.md §6)
       if (method === 'GET' && (pathname === '/api/docs' || pathname === '/api/docs.json')) {
         const specPath = path.resolve(
@@ -792,15 +915,7 @@ export function createAppServer(
         return;
       }
 
-      // Inbox, Sequences, Campaigns, Reports
-      if (method === 'GET' && pathname === '/api/v1/inbox/threads') {
-        requireCapability(user, 'inbox.read');
-        const items = await outreach.listInboxThreads(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
+      // Sequences, Campaigns, Legacy Pipeline Rollup
       if (method === 'GET' && pathname === '/api/v1/sequences') {
         requireCapability(user, 'sequences.read');
         const items = await outreach.listSequences(user);
@@ -911,6 +1026,8 @@ export function createAppServer(
       compliance,
       crm,
       intake,
+      inbox,
+      graph,
       dataQuality,
       outreach,
       intelligence,

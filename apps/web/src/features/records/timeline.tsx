@@ -2,10 +2,12 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDate, formatRelative, formatTime } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
+import { StatusBadge } from '@/components/ui/badge.js';
 import { Select, Textarea } from '@/components/ui/select.js';
 import { ErrorState, LoadingState } from '@/components/ui/state-views.js';
 import { useToast } from '@/components/ui/toast.js';
 import { api, type EntityType, type TimelineItem } from '@/lib/api.js';
+import { SandboxedEmailBody } from '@/features/inbox/sandboxed-email-body.js';
 import { errorMessage, fieldError } from '@/features/shared/live-kit.js';
 import { useMe } from '@/features/shared/list-kit.js';
 
@@ -251,14 +253,26 @@ function TimelineEntry({
   const me = useMe();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [expandedEmail, setExpandedEmail] = useState(false);
   const [body, setBody] = useState(item.detail);
-  const isUserAction = item.source === 'note' || item.actor_user_id !== null;
+  const isEmail = item.source === 'email';
+  const isUserAction = item.source === 'note' || isEmail || item.actor_user_id !== null;
   const canEditNote = item.source === 'note' && me?.id === item.actor_user_id;
   const version = Number(item.metadata['version'] ?? 1);
   const edited =
     item.source === 'note' &&
     typeof item.metadata['updatedAt'] === 'string' &&
     Date.parse(item.metadata['updatedAt']) - Date.parse(item.at) > 1000;
+
+  const emailDirection = item.metadata['direction'] === 'inbound' ? 'inbound' : 'outbound';
+  const emailOutboundStatus = String(item.metadata['outboundStatus'] ?? 'sent');
+  const emailHtmlSanitized =
+    typeof item.metadata['bodyHtmlSanitized'] === 'string' && item.metadata['bodyHtmlSanitized']
+      ? item.metadata['bodyHtmlSanitized']
+      : null;
+  const emailLong =
+    isEmail &&
+    (Boolean(emailHtmlSanitized) || item.detail.split('\n').length > 4 || item.detail.length > 220);
 
   const save = useMutation({
     mutationFn: () => api.updateNote(item.id, { version, body: body.trim() }),
@@ -274,8 +288,18 @@ function TimelineEntry({
         aria-hidden="true"
         className={`absolute left-[-5px] top-[6px] h-[9px] w-[9px] rounded-full ${isUserAction ? 'timeline-dot-user' : 'bg-line-strong'}`}
       />
-      <div className="flex flex-wrap justify-between gap-x-[8px]">
-        <span className="font-semibold text-ink">{item.title}</span>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-[8px] gap-y-[4px]">
+        <div className="flex flex-wrap items-center gap-[6px]">
+          <span className="font-semibold text-ink">{item.title}</span>
+          {isEmail && (
+            <StatusBadge tone={emailDirection === 'inbound' ? 'info' : 'neutral'}>
+              {emailDirection === 'inbound' ? 'Email received' : 'Email sent'}
+            </StatusBadge>
+          )}
+          {isEmail && emailOutboundStatus === 'failed' && (
+            <StatusBadge tone="danger">Delivery failed</StatusBadge>
+          )}
+        </div>
         <span className="text-[13px] text-ink-3 whitespace-nowrap" title={formatRelative(item.at)}>
           {formatTime(item.at, timeZone)}
         </span>
@@ -323,12 +347,36 @@ function TimelineEntry({
             </Button>
           </div>
         </form>
+      ) : isEmail && expandedEmail ? (
+        <div className="mt-[6px] p-[10px] rounded-[8px] bg-bg-alt border border-line">
+          <SandboxedEmailBody
+            subject={item.title}
+            bodyText={item.detail}
+            bodyHtmlSanitized={emailHtmlSanitized}
+            hasRemoteImages={
+              emailHtmlSanitized ? emailHtmlSanitized.includes('data-remote-url=') : false
+            }
+          />
+        </div>
       ) : (
         item.detail && (
-          <p className="m-0 mt-[2px] text-[13.5px] text-ink-2 whitespace-pre-line break-words">
+          <p
+            className={`m-0 mt-[2px] text-[13.5px] text-ink-2 whitespace-pre-line break-words ${
+              emailLong ? 'line-clamp-4' : ''
+            }`}
+          >
             {item.detail}
           </p>
         )
+      )}
+      {isEmail && emailLong && (
+        <button
+          type="button"
+          onClick={() => setExpandedEmail((v) => !v)}
+          className="mt-[4px] bg-transparent border-0 p-0 text-[12.5px] font-semibold text-primary-ink cursor-pointer hover:underline"
+        >
+          {expandedEmail ? 'Collapse email' : 'Show full email'}
+        </button>
       )}
       {canEditNote && !editing && (
         <button
