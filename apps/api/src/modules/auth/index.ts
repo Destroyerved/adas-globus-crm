@@ -170,6 +170,53 @@ export class AuthAndUsersService {
     return user.id;
   }
 
+  /**
+   * PRD 6.6, 15 Q2: invite-only Google Workspace sign-in. Matches an invited CRM user by
+   * `google_subject_id` or email and pins `google_subject_id` on first login so a recycled
+   * email address cannot take over another person's CRM account.
+   */
+  async findUserForGoogleSignIn(identity: { subjectId: string; email: string }): Promise<string> {
+    const res = await this.db.query<{
+      id: string;
+      status: string;
+      google_subject_id: string | null;
+    }>(
+      `SELECT id, status, google_subject_id FROM users
+       WHERE google_subject_id = $1 OR LOWER(email) = $2
+       ORDER BY (google_subject_id = $1) DESC NULLS LAST
+       LIMIT 1`,
+      [identity.subjectId, identity.email.trim().toLowerCase()],
+    );
+    const user = res.rows[0];
+    if (!user || user.status === 'disabled') {
+      throw new DomainError({
+        status: 403,
+        code: 'USER_NOT_INVITED',
+        title: 'Access restricted to invited employees',
+        detail:
+          'Your Google Workspace account has not been invited to ADAS CRM. Ask an admin to invite you.',
+      });
+    }
+    if (user.google_subject_id && user.google_subject_id !== identity.subjectId) {
+      throw new DomainError({
+        status: 403,
+        code: 'GOOGLE_ACCOUNT_MISMATCH',
+        title: 'Different Google account',
+        detail:
+          'This CRM user is linked to a different Google Workspace account. Ask an admin to check it.',
+      });
+    }
+    await this.db.query(
+      `UPDATE users
+       SET google_subject_id = $2,
+           status = CASE WHEN status = 'invited' THEN 'active' ELSE status END,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [user.id, identity.subjectId],
+    );
+    return user.id;
+  }
+
   /** Development and tests only: the seeded user to sign in as (never in production). */
   async findUserForDevSignIn(userId: string): Promise<string> {
     if (!this.isDevLoginAllowed()) {
@@ -230,6 +277,12 @@ export {
   clientIp,
 } from './sessions.js';
 export { EntraSignIn, type EntraIdentity, type PendingSignIn } from './entra.js';
+export {
+  GoogleSignIn,
+  GOOGLE_PLACEHOLDER_CLIENT_ID,
+  type GoogleIdentity,
+  type GoogleSsoSettings,
+} from './google.js';
 export {
   BreakGlassService,
   BREAK_GLASS_LOCK_MINUTES,

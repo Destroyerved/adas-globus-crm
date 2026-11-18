@@ -55,6 +55,7 @@ describe('sessions and sign-in (development and test mode)', () => {
     const res = await fetch(`${ctx.base}/api/v1/auth/config`);
     expect(await res.json()).toEqual({
       microsoftSignIn: false,
+      googleSignIn: false,
       devSignIn: true,
       adminSignIn: true,
     });
@@ -67,11 +68,17 @@ describe('sessions and sign-in (development and test mode)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('sends unconfigured Microsoft sign-in back to the login page with a clear error', async () => {
+  it('sends unconfigured Microsoft and Google sign-in back to the login page with a clear error', async () => {
     const res = await fetch(`${ctx.base}/api/v1/auth/sso/start`, { redirect: 'manual' });
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe(
       `${WEB_ORIGIN}/?screen=login&error=sso_not_configured`,
+    );
+
+    const gRes = await fetch(`${ctx.base}/api/v1/auth/sso/google/start`, { redirect: 'manual' });
+    expect(gRes.status).toBe(302);
+    expect(gRes.headers.get('location')).toBe(
+      `${WEB_ORIGIN}/?screen=login&error=google_sso_not_configured`,
     );
   });
 

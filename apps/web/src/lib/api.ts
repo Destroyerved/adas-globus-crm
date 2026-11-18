@@ -724,7 +724,12 @@ export interface WidgetResult<T = Record<string, unknown>> {
 
 export const api = {
   authConfig: () =>
-    request<{ microsoftSignIn: boolean; devSignIn: boolean; adminSignIn: boolean }>('/auth/config'),
+    request<{
+      microsoftSignIn: boolean;
+      googleSignIn: boolean;
+      devSignIn: boolean;
+      adminSignIn: boolean;
+    }>('/auth/config'),
   me: () => request<CurrentUser>('/auth/me'),
   devLogin: (userId: string) => post<CurrentUser>('/auth/dev-login', { userId }),
   adminSignIn: (input: { email: string; password: string; totpCode: string }) =>
@@ -1153,9 +1158,12 @@ export const api = {
   markNotificationsRead: (notificationId?: string) =>
     post<{ updated: number }>('/notifications/read', notificationId ? { id: notificationId } : {}),
 
-  // Inbox & Microsoft 365 Graph (PRD 4.11, 8.2, 8.7)
+  // Inbox & Delegated Mailboxes (Microsoft 365 Outlook & Google Workspace Gmail)
   inboxMailbox: () => request<MailboxStatusView>('/inbox/mailbox'),
-  inboxOAuthStartUrl: () => '/api/v1/inbox/oauth/start',
+  inboxOAuthStartUrl: (provider: 'microsoft_graph' | 'google_gmail' = 'microsoft_graph') =>
+    provider === 'google_gmail'
+      ? '/api/v1/inbox/oauth/start?provider=google_gmail'
+      : '/api/v1/inbox/oauth/start',
   syncInboxMailbox: () =>
     post<{
       syncedMessages: number;
@@ -1653,6 +1661,8 @@ export interface IntegrationsOverviewView {
   connectors: {
     entraSso: { configured: boolean };
     microsoftGraphMail: { configured: boolean; connectedMailboxes: number };
+    googleSso: { configured: boolean };
+    googleGmailMail: { configured: boolean; connectedMailboxes: number };
     espCampaigns: {
       configured: boolean;
       provider: string;

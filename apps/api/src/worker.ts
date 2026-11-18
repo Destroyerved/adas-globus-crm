@@ -24,6 +24,7 @@ import { LocalFileStorage } from './platform/files/index.js';
 import { createLogger } from './platform/logger/index.js';
 import {
   EspBulkSender,
+  GoogleGmailMailboxClient,
   MailpitTransport,
   MicrosoftGraphMailboxClient,
 } from './platform/mail-transport/index.js';
@@ -56,12 +57,22 @@ const graph = new MicrosoftGraphMailboxClient({
   authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
   graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
 });
+const gmail = new GoogleGmailMailboxClient({
+  clientId: env.GOOGLE_CLIENT_ID,
+  clientSecretFile: resolveConfigPath(env.GOOGLE_CLIENT_SECRET_FILE),
+  redirectUri: env.GOOGLE_MAIL_REDIRECT_URI,
+  authUrl: env.GOOGLE_AUTH_URL,
+  tokenUrl: env.GOOGLE_TOKEN_URL,
+  gmailBaseUrl: env.GOOGLE_GMAIL_BASE_URL,
+  pubsubTopic: env.GOOGLE_PUBSUB_TOPIC,
+});
 const inbox = new InboxService(db, graph, mailpit, {
   nodeEnv: env.NODE_ENV,
   mailLive: env.MAIL_LIVE,
   publicHost: env.APP_PUBLIC_HOST,
   maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
   secretBox,
+  gmail,
 });
 const outreach = new OutreachService(db, new ComplianceService(db), mailpit, {
   nodeEnv: env.NODE_ENV,
@@ -69,6 +80,8 @@ const outreach = new OutreachService(db, new ComplianceService(db), mailpit, {
   publicHost: env.APP_PUBLIC_HOST,
   sendingSubdomain: env.ESP_SENDING_DOMAIN,
   espSender,
+  liveMailboxSender: (senderUserId, payload) =>
+    inbox.sendSequenceMessageViaUserMailbox(senderUserId, payload),
 });
 const intelligence = new IntelligenceService(db, {
   apolloClient: new ApolloClient({

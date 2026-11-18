@@ -61,6 +61,7 @@ import {
   type EspBulkSender,
   type MailpitTransport,
   type OutboundEmailPayload,
+  type OutboundEmailReceipt,
 } from '../../platform/mail-transport/index.js';
 import { extractDomainFromEmail, normalizeEmail } from '../../platform/normalize/index.js';
 import { type OutboxEvent } from '../../platform/outbox/index.js';
@@ -102,6 +103,11 @@ export interface SendMessageJobResult {
   internetMessageId?: string | null;
 }
 
+export type LiveMailboxSenderFn = (
+  senderUserId: string,
+  payload: OutboundEmailPayload,
+) => Promise<OutboundEmailReceipt>;
+
 export interface OutreachServiceOptions {
   nodeEnv?: 'development' | 'test' | 'production';
   mailLive?: boolean;
@@ -109,6 +115,7 @@ export interface OutreachServiceOptions {
   sendingSubdomain?: string;
   espSender?: EspBulkSender | BulkSender | null;
   espWebhookSecret?: string | null;
+  liveMailboxSender?: LiveMailboxSenderFn | null;
 }
 
 const SEGMENT_CONTACT_REGISTRY: FieldRegistry = {
@@ -172,6 +179,7 @@ export class OutreachService {
   private readonly sendingSubdomain: string;
   private readonly espSender: EspBulkSender | BulkSender | null;
   private readonly espWebhookSecret: string | null;
+  private liveMailboxSender: LiveMailboxSenderFn | null;
 
   constructor(
     private readonly db: DatabaseService,
@@ -185,6 +193,11 @@ export class OutreachService {
     this.sendingSubdomain = options.sendingSubdomain ?? 'mail.adasglobuspro.com';
     this.espSender = options.espSender ?? null;
     this.espWebhookSecret = options.espWebhookSecret ?? null;
+    this.liveMailboxSender = options.liveMailboxSender ?? null;
+  }
+
+  setLiveMailboxSender(sender: LiveMailboxSenderFn): void {
+    this.liveMailboxSender = sender;
   }
 
   private isLiveMailEnabled(): boolean {
@@ -318,7 +331,13 @@ export class OutreachService {
       }
     } else if (input.senderUserId) {
       const senderRes = await this.db.query<{ email: string }>(
-        `SELECT email FROM users WHERE id = $1 LIMIT 1`,
+        `SELECT COALESCE(
+           (SELECT email FROM mailbox_connections WHERE user_id = $1 AND status = 'connected' LIMIT 1),
+           u.email
+         ) AS email
+         FROM users u
+         WHERE u.id = $1
+         LIMIT 1`,
         [input.senderUserId],
       );
       if (senderRes.rows[0]) {
@@ -395,7 +414,12 @@ export class OutreachService {
         ? this.isLiveMailEnabled() && this.espSender
           ? await this.espSender.sendCampaignMessage(payload)
           : await this.transport.sendCampaignMessage(payload)
-        : await this.transport.sendOneToOne(payload);
+        : input.channel === 'sequence' &&
+            this.isLiveMailEnabled() &&
+            this.liveMailboxSender &&
+            input.senderUserId
+          ? await this.liveMailboxSender(input.senderUserId, payload)
+          : await this.transport.sendOneToOne(payload);
 
     // 6. Persist `message_sends` (the ONLY place in the codebase that inserts into `message_sends`)
     const sentTimestamp = (input.now ?? new Date()).toISOString();

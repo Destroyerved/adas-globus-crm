@@ -230,16 +230,26 @@ test('screens show an error with a retry when the API is unreachable', async ({ 
   await expect(page.getByRole('button', { name: /retry/i })).toBeVisible();
 });
 
-test('without a session the app shows sign-in, and Microsoft sign-in says it is not set up yet', async ({
+test('without a session the app shows sign-in with both Microsoft and Google options', async ({
   page,
 }) => {
   await page.context().clearCookies();
-  await page.goto('/?screen=deals');
-  await expect(page.getByRole('heading', { name: 'Sign in to ADAS CRM' })).toBeVisible();
-  await expect(page.getByTestId('microsoft-signin-btn')).toBeDisabled();
-  await expect(page.getByText('Not available yet')).toBeVisible();
-  // Production builds never offer the development sign-in
-  await expect(page.locator('#dev-user-select')).toHaveCount(0);
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/?screen=deals');
+    await expect(page.getByRole('heading', { name: 'Sign in to ADAS CRM' })).toBeVisible();
+    await expect(page.getByTestId('microsoft-signin-btn')).toBeDisabled();
+    await expect(page.getByTestId('google-signin-btn')).toBeDisabled();
+    await expect(page.getByText('Not available yet')).toBeVisible();
+    // Production builds never offer the development sign-in
+    await expect(page.locator('#dev-user-select')).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `01-login-${width}w.png`),
+      fullPage: true,
+    });
+  }
 
   // The API refuses data without a session
   const res = await page.request.get('/api/v1/leads');
@@ -1494,4 +1504,34 @@ test('settings system health shows live PostgreSQL, worker, outbox and backup te
     });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('inbox and integrations offer both Microsoft 365 and Google Workspace mailbox connections and pass axe at 1440px and 375px', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+  await page.goto('/?screen=inbox');
+  await expect(page.getByTestId('inbox-screen')).toBeVisible();
+  await expect(page.getByTestId('connect-microsoft-mailbox-btn')).toBeVisible();
+  await expect(page.getByTestId('connect-google-mailbox-btn')).toBeVisible();
+
+  await page.getByTestId('connect-google-mailbox-btn').click();
+  await expect(
+    page.getByText('Google Workspace is not configured on this server yet.'),
+  ).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `35-inbox-dual-provider-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.goto('/?screen=settings&tab=integrations');
+  await expect(page.getByText('Google Workspace sign-in')).toBeVisible();
+  await expect(page.getByText('Google Workspace Gmail sync')).toBeVisible();
 });

@@ -7,14 +7,22 @@ import { api } from '@/lib/api.js';
 import { errorMessage } from '@/features/shared/live-kit.js';
 import { AdminSignInForm } from './admin-sign-in-form.js';
 
-/** Messages for the ?error= codes the sign-in callback can return (PRD 6.6). */
+/** Messages for the ?error= codes the sign-in callback can return (PRD 6.6, 15 Q2). */
 const SIGN_IN_ERRORS: Record<string, string> = {
   sso_not_configured:
     'Microsoft sign-in isn’t set up yet. An admin needs to add the Entra app registration.',
-  user_not_invited: 'Your Microsoft account hasn’t been invited to ADAS CRM. Ask an admin.',
+  google_sso_not_configured:
+    'Google Workspace sign-in isn’t set up yet. An admin needs to add the Google OAuth client.',
+  user_not_invited: 'Your account hasn’t been invited to ADAS CRM. Ask an admin.',
   entra_account_mismatch:
     'This CRM user is linked to a different Microsoft account. Ask an admin to check it.',
-  sso_failed: 'Microsoft sign-in didn’t complete. Try again.',
+  google_account_mismatch:
+    'This CRM user is linked to a different Google Workspace account. Ask an admin to check it.',
+  google_domain_not_allowed:
+    'Google sign-in is restricted to approved company Google Workspace domains.',
+  google_email_not_verified:
+    'Your Google account email address must be verified before signing in.',
+  sso_failed: 'Single sign-on didn’t complete. Try again.',
 };
 
 const CLOCKS = [
@@ -34,11 +42,13 @@ function useNow(intervalMs = 30_000): Date {
 
 export function LoginScreen({
   microsoftSignIn,
+  googleSignIn = false,
   devSignIn,
   adminSignIn,
   onSignedIn,
 }: {
   microsoftSignIn: boolean;
+  googleSignIn?: boolean;
   devSignIn: boolean;
   adminSignIn: boolean;
   onSignedIn: () => void;
@@ -154,7 +164,7 @@ export function LoginScreen({
         <h2 className="text-title-lg text-ink m-0">Sign in to ADAS CRM</h2>
         <p className="text-body text-ink-2 mt-[6px] mb-[24px]">
           Use your <span className="font-semibold text-ink">@adasglobuspro.com</span> Microsoft 365
-          account. Access is restricted to invited employees.
+          or Google Workspace account. Access is restricted to invited employees.
         </p>
 
         {signInError && (
@@ -163,20 +173,34 @@ export function LoginScreen({
           </p>
         )}
 
-        <Button
-          variant="primary"
-          size="lg"
-          className="w-full"
-          disabled={!microsoftSignIn}
-          onClick={() => window.location.assign('/api/v1/auth/sso/start')}
-          data-testid="microsoft-signin-btn"
-        >
-          <ShieldCheck size={18} strokeWidth={1.6} aria-hidden="true" />
-          <span>Sign in with Microsoft</span>
-        </Button>
-        {!microsoftSignIn && (
+        <div className="grid gap-[10px]">
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
+            disabled={!microsoftSignIn}
+            onClick={() => window.location.assign('/api/v1/auth/sso/start')}
+            data-testid="microsoft-signin-btn"
+          >
+            <ShieldCheck size={18} strokeWidth={1.6} aria-hidden="true" />
+            <span>Sign in with Microsoft</span>
+          </Button>
+          <Button
+            variant={microsoftSignIn ? 'outline' : 'primary'}
+            size="lg"
+            className="w-full"
+            disabled={!googleSignIn}
+            onClick={() => window.location.assign('/api/v1/auth/sso/google/start')}
+            data-testid="google-signin-btn"
+          >
+            <ShieldCheck size={18} strokeWidth={1.6} aria-hidden="true" />
+            <span>Sign in with Google</span>
+          </Button>
+        </div>
+        {!microsoftSignIn && !googleSignIn && (
           <p className="mt-[8px] mb-0 text-[13px] text-ink-3">
-            Not available yet: Microsoft sign-in needs the company’s Entra app registration.
+            Not available yet: single sign-on needs your Microsoft Entra or Google Workspace OAuth
+            credentials.
           </p>
         )}
         {adminSignIn && (

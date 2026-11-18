@@ -81,22 +81,22 @@ Order matters: each step builds on the one before. Items marked **Owner** need s
 
 ## Open questions (PRD 15)
 
-| #   | Status   | Answer or default in use                                      |
-| --- | -------- | ------------------------------------------------------------- |
-| Q1  | Default  | 40 named users, 15 concurrent                                 |
-| Q2  | Default  | All on Microsoft 365; no Gmail                                |
-| Q3  | Default  | Migrate Bigin contacts as legacy, not mailable                |
-| Q4  | Default  | Main-domain mailboxes, 50 sends per day                       |
-| Q5  | Open     | Email service provider not chosen                             |
-| Q6  | Open     | Counsel has **not** signed off section 5; no live sends       |
-| Q7  | Open     | Server location, key holders and UPS not confirmed            |
-| Q8  | Default  | USD                                                           |
-| Q9  | Answered | GitHub: `Destroyerved/adas-globus-crm`                        |
-| Q10 | Default  | PRD 4.18 retention defaults                                   |
-| Q11 | Open     | Apollo API access not confirmed                               |
-| Q12 | Default  | Marketing Manager (campaigns), Sales Manager (team sequences) |
-| Q13 | Default  | Round-robin within the market team                            |
-| Q14 | Default  | Managers see their teams; everyone sees their own             |
+| #   | Status   | Answer or default in use                                                  |
+| --- | -------- | ------------------------------------------------------------------------- |
+| Q1  | Default  | 40 named users, 15 concurrent                                             |
+| Q2  | Answered | Dual-provider: both Microsoft 365 & Google Workspace supported (ADR 0028) |
+| Q3  | Default  | Migrate Bigin contacts as legacy, not mailable                            |
+| Q4  | Default  | Main-domain mailboxes, 50 sends per day                                   |
+| Q5  | Open     | Email service provider not chosen                                         |
+| Q6  | Open     | Counsel has **not** signed off section 5; no live sends                   |
+| Q7  | Open     | Server location, key holders and UPS not confirmed                        |
+| Q8  | Default  | USD                                                                       |
+| Q9  | Answered | GitHub: `Destroyerved/adas-globus-crm`                                    |
+| Q10 | Default  | PRD 4.18 retention defaults                                               |
+| Q11 | Open     | Apollo API access not confirmed                                           |
+| Q12 | Default  | Marketing Manager (campaigns), Sales Manager (team sequences)             |
+| Q13 | Default  | Round-robin within the market team                                        |
+| Q14 | Default  | Managers see their teams; everyone sees their own                         |
 
 ## Phase 0: Groundwork
 
@@ -193,6 +193,8 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [ ] **Exit:** Apollo import deduplicates with Apollo IDs; n8n reacts to `deal.won`; scoring is configurable and explained (verified against local HTTP servers on PostgreSQL 17; live production connector verification pending R7/R8)
 
 ## Review log
+
+- **19 Nov 2026, Dual-Provider Google Workspace & Microsoft 365 (`PRD §15 Q2`, ADR 0028).** Added migration `0024_google_workspace_sso_and_gmail` (`users.google_subject_id` + `idx_users_google_subject_id`, `mailbox_connections.gmail_history_id`, and `chk_mailbox_connections_provider` allowing `'microsoft_graph'` and `'google_gmail'`), `GoogleSignIn` OIDC PKCE authenticator (`apps/api/src/modules/auth/google.ts` with RS256 JWKS validation, `email_verified`, `GOOGLE_ALLOWED_DOMAINS`/`hd` guard, invite-only matching, and immutable `google_subject_id` pinning), `GoogleGmailMailboxClient` (`apps/api/src/platform/mail-transport/google-gmail.ts` with OAuth2 PKCE + `access_type=offline`, `SecretBox` token encryption, 90-day initial scan, `users.history.list` incremental sync with `404` fallback, RFC 5322 MIME send/reply threading, DSN `5.x.x` bounce parsing, on-demand attachment streaming, `429 Retry-After` backoff, and Pub/Sub `users.watch`), `POST /api/v1/webhooks/google` constant-time push verification on `go.`, live `sequence` sending via `OutreachService.setLiveMailboxSender` -> `InboxService.sendSequenceMessageViaUserMailbox` across both Outlook and Gmail, dual sign-in & mailbox connect buttons on `LoginScreen`, `InboxScreen` and `Settings → Integrations`, and updated `@adas/installer`, `@adas/server-agent`, `.env.example`, `openapi.json`, and [`docs/INTEGRATIONS.md`](INTEGRATIONS.md). Verified in `google-gmail.test.ts`, `ms17-google-workspace-sso-and-gmail.int.test.ts` on PostgreSQL 17, and Playwright + axe at 1440px and 375px (`01-login-*`, `35-inbox-dual-provider-*`).
 
 - **18 Nov 2026, Milestone 16: complete production documentation suite and final readiness gates.** Authored [`docs/PRODUCTION_READINESS_REPORT.md`](PRODUCTION_READINESS_REPORT.md), [`docs/DEPLOYMENT.md`](DEPLOYMENT.md), [`docs/DISASTER_RECOVERY.md`](DISASTER_RECOVERY.md), [`docs/INSTALLATION.md`](INSTALLATION.md), [`docs/ELECTRON_MANAGEMENT.md`](ELECTRON_MANAGEMENT.md), [`docs/INTEGRATIONS.md`](INTEGRATIONS.md), and [`docs/OPERATIONS.md`](OPERATIONS.md); expanded [`docs/SECURITY.md`](SECURITY.md); and reconciled [`README.md`](../README.md), [`docs/runbooks/README.md`](runbooks/README.md), `.env.example`, and `docs/PROGRESS.md` across all 8 workspace packages and owner go-live gates.
 

@@ -22,10 +22,30 @@ Every external integration in ADAS Globus CRM calls the provider's real wire pro
    - Add **Redirect URI (Web):** `https://crm.adasglobuspro.com/api/v1/inbox/oauth/callback`
    - Under **API permissions** -> **Microsoft Graph (Delegated)**, add **only**:
      `openid`, `profile`, `email`, `offline_access`, `User.Read`, `Mail.Read`, `Mail.Send`, and grant **Admin consent**.
-2. Users connect their mailbox in **Inbox** -> **Connect Microsoft 365 mailbox**.
+2. Users connect their mailbox in **Inbox** -> **Connect Microsoft 365**.
    - Refresh/access tokens are sealed with `SecretBox` (`key_version` tracked per row).
    - Initial sync pulls 90 days of `Inbox` and `SentItems`, storing **only** threads matching an existing CRM Contact email or non-free-mail Company domain (`PRD §4.11`).
    - Change notifications deliver to `https://go.adasglobuspro.com/api/v1/webhooks/microsoft` (verified by constant-time `clientState` HMAC), backed up by 5-minute delta polling and `mail.subscriptions.renew`.
+
+---
+
+## 2b. Google Workspace OIDC Single Sign-On & Delegated Gmail REST v1 (`PRD §6.6, §8.2, §15 Q2` — ADR 0028)
+
+ADAS CRM supports **both Microsoft 365 and Google Workspace simultaneously**: employees can sign in with either identity provider, and sales reps can connect either Outlook (`microsoft_graph`) or Gmail (`google_gmail`) for 1:1 Inbox sync and automated outreach sequences.
+
+1. In **Google Cloud Console** (`console.cloud.google.com`):
+   - Enable the **Gmail API** (`gmail.googleapis.com`).
+   - Under **Google Auth Platform / OAuth consent screen**, select **Internal** (restricting consent to your Google Workspace organization) and add scopes:
+     `openid`, `email`, `profile`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`.
+   - Create an **OAuth 2.0 Client ID** (`Web application`) with **Authorized redirect URIs**:
+     - `https://crm.adasglobuspro.com/api/v1/auth/sso/google/callback` (Employee SSO)
+     - `https://crm.adasglobuspro.com/api/v1/inbox/oauth/callback` (Delegated Gmail sync & send)
+2. Store the Client Secret in `secrets/google_client_secret.txt` (`chmod 600`) and set `GOOGLE_CLIENT_ID` and `GOOGLE_ALLOWED_DOMAINS=adasglobuspro.com` in `.env.production`.
+3. **Optional Real-Time Pub/Sub Push (`users.watch`):**
+   - Create a Cloud Pub/Sub topic (e.g. `projects/<project>/topics/adas-crm-gmail`), grant `gmail-api-push@system.gserviceaccount.com` the **Pub/Sub Publisher** role on that topic, and set `GOOGLE_PUBSUB_TOPIC` in `.env.production`.
+   - Generate a random 256-bit secret in `secrets/google_webhook_token.txt` and create a Push Subscription pointing to:
+     `https://go.adasglobuspro.com/api/v1/webhooks/google?token=<secret>`
+   - Even without Pub/Sub configured, the 5-minute `mail.sync` incremental `users.history.list` worker poll stays active automatically.
 
 ---
 
