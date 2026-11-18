@@ -56,6 +56,14 @@ export const EnvSchema = z
     ESP_WEBHOOK_SECRET_FILE: z.string().min(1).default('./secrets/esp_webhook_secret.txt'),
     ESP_SENDING_DOMAIN: z.string().min(1).default('mail.adasglobuspro.com'),
 
+    APOLLO_API_BASE_URL: z.string().url().default('https://api.apollo.io'),
+    APOLLO_API_KEY_FILE: z.string().min(1).default('./secrets/apollo_api_key.txt'),
+    BOOKINGS_WEBHOOK_SECRET_FILE: z
+      .string()
+      .min(1)
+      .default('./secrets/bookings_webhook_secret.txt'),
+    WEBHOOK_ALLOW_PRIVATE_TARGETS: booleanFromString.default(false),
+
     CF_ACCESS_TEAM_DOMAIN: z.string().min(1).default('adasglobuspro.cloudflareaccess.com'),
     CF_ACCESS_AUD: z
       .string()

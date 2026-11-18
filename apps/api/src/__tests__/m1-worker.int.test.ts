@@ -298,6 +298,7 @@ describe('the worker on pg-boss', () => {
         'sequence.tick',
         'sla.check',
         'tasks.reminders',
+        'webhook.deliver',
       ]);
     } finally {
       await runner.stop();

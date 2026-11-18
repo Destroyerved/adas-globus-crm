@@ -1849,6 +1849,9 @@ export class ComplianceService {
 
       await tx.query(`DELETE FROM contact_emails WHERE contact_id = $1`, [contactId]);
       await tx.query(`DELETE FROM contact_phones WHERE contact_id = $1`, [contactId]);
+      await tx.query(`DELETE FROM external_ids WHERE entity_type = 'contact' AND entity_id = $1`, [
+        contactId,
+      ]);
       await tx.query(`DELETE FROM entity_tags WHERE entity_type = 'contact' AND entity_id = $1`, [
         contactId,
       ]);

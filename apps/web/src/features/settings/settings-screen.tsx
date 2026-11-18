@@ -3,6 +3,7 @@ import { can, useMe, useUrlState } from '@/features/shared/list-kit.js';
 import { AuditTab } from './audit-tab.js';
 import { CurrenciesTab } from './currencies-tab.js';
 import { CustomFieldsTab } from './custom-fields-tab.js';
+import { IntegrationsTab } from './integrations-tab.js';
 import { ListsTab } from './lists-tab.js';
 import { PipelinesTab } from './pipelines-tab.js';
 import { PreferencesTab } from './preferences-tab.js';
@@ -12,6 +13,7 @@ import { ScoringTab } from './scoring-tab.js';
 import { SuppressionsTab } from './suppressions-tab.js';
 import { TeamsTab } from './teams-tab.js';
 import { UsersTab } from './users-tab.js';
+import { WebhooksTab } from './webhooks-tab.js';
 
 type TabId =
   | 'preferences'
@@ -24,6 +26,8 @@ type TabId =
   | 'scoring'
   | 'currencies'
   | 'lists'
+  | 'integrations'
+  | 'webhooks'
   | 'suppressions'
   | 'audit';
 
@@ -37,6 +41,8 @@ const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'scoring', label: 'Scoring', capability: 'settings.manage' },
   { id: 'currencies', label: 'Currencies', capability: 'settings.manage' },
   { id: 'lists', label: 'Lists', capability: 'settings.manage' },
+  { id: 'integrations', label: 'Integrations', capability: 'settings.manage' },
+  { id: 'webhooks', label: 'Webhooks', capability: 'settings.manage' },
   { id: 'suppressions', label: 'Suppressions', capability: 'compliance.manage' },
   { id: 'audit', label: 'Audit log', capability: 'audit.read' },
   { id: 'preferences', label: 'Your preferences', capability: null },
@@ -89,6 +95,8 @@ export function SettingsScreen({ onOpenLead }: { onOpenLead?: (leadId: string) =
         {active?.id === 'scoring' && <ScoringTab />}
         {active?.id === 'currencies' && <CurrenciesTab />}
         {active?.id === 'lists' && <ListsTab />}
+        {active?.id === 'integrations' && <IntegrationsTab />}
+        {active?.id === 'webhooks' && <WebhooksTab />}
         {active?.id === 'suppressions' && <SuppressionsTab />}
         {active?.id === 'audit' && <AuditTab />}
         {active?.id === 'preferences' && <PreferencesTab />}

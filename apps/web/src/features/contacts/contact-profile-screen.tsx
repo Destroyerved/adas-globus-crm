@@ -112,6 +112,7 @@ export function ContactProfileScreen({
   const [editing, setEditing] = useState(false);
   const [composingEmail, setComposingEmail] = useState(false);
   const [enrollingInSequence, setEnrollingInSequence] = useState(false);
+  const [confirmingApolloEnrich, setConfirmingApolloEnrich] = useState(false);
   const [recordingConsent, setRecordingConsent] = useState(false);
   const [withdrawingConsent, setWithdrawingConsent] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState('');
@@ -128,6 +129,11 @@ export function ContactProfileScreen({
     queryFn: () => api.getContact(contactId as string),
     enabled: contactId !== null,
   });
+  const apolloStatusQuery = useQuery({
+    queryKey: ['apollo-status'],
+    queryFn: api.getApolloStatus,
+    enabled: contactId !== null && can(me, 'contacts.write'),
+  });
   const canReadOutreach = can(me, 'sequences.read') || can(me, 'campaigns.read');
   const outreachQuery = useQuery({
     queryKey: ['contact-outreach', contactId],
@@ -140,7 +146,21 @@ export function ContactProfileScreen({
       queryClient.invalidateQueries({ queryKey: ['contacts'] }),
       queryClient.invalidateQueries({ queryKey: ['timeline', 'contact', contactId] }),
       queryClient.invalidateQueries({ queryKey: ['contact-outreach', contactId] }),
+      queryClient.invalidateQueries({ queryKey: ['apollo-status'] }),
     ]);
+
+  const enrichApolloMutation = useMutation({
+    mutationFn: (id: string) => api.enrichContactWithApollo(id, 1),
+    onSuccess: async (res) => {
+      setConfirmingApolloEnrich(false);
+      toast(
+        res.updatedFields.length > 0
+          ? `Enriched via Apollo (${res.updatedFields.join(', ')} updated).`
+          : 'Checked Apollo (1 credit used; no missing fields to fill).',
+      );
+      await refresh();
+    },
+  });
 
   const stopEnrollmentMutation = useMutation({
     mutationFn: (enrollmentId: string) =>
@@ -275,6 +295,17 @@ export function ContactProfileScreen({
             {canWrite && (
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit contact
+              </Button>
+            )}
+            {canWrite && apolloStatusQuery.data?.configured && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  enrichApolloMutation.reset();
+                  setConfirmingApolloEnrich(true);
+                }}
+              >
+                Enrich via Apollo
               </Button>
             )}
             {canWrite && (
@@ -761,6 +792,25 @@ export function ContactProfileScreen({
         onClose={() => setEnrollingInSequence(false)}
         lockedContactIds={[contact.id]}
         onEnrolled={() => void refresh()}
+      />
+
+      <ConfirmDialog
+        open={confirmingApolloEnrich}
+        title={`Enrich ${contact.full_name} via Apollo`}
+        tone="primary"
+        confirmLabel="Confirm 1 credit & enrich"
+        pending={enrichApolloMutation.isPending}
+        error={enrichApolloMutation.isError ? errorMessage(enrichApolloMutation.error) : null}
+        onCancel={() => setConfirmingApolloEnrich(false)}
+        onConfirm={() => enrichApolloMutation.mutate(contact.id)}
+        body={
+          <p className="m-0">
+            This spends <strong className="text-ink">1 Apollo credit</strong> (
+            {apolloStatusQuery.data?.remainingDailyCredits ?? 0} remaining today) to verify work
+            email status and fill any blank job title or firm details without overwriting fields
+            edited in the CRM.
+          </p>
+        }
       />
     </div>
   );
