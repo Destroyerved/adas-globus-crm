@@ -85,6 +85,19 @@ export const EnvSchema = z
 
     DEFAULT_REPORTING_CURRENCY: CurrencySchema.default('USD'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+    BACKUP_LOCAL_DIR: z.string().min(1).default('./data/backups'),
+    BACKUP_ENCRYPTION_KEY_FILE: z.string().min(1).default('./secrets/backup_encryption_key.txt'),
+    BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(14),
+    BACKUP_S3_ENDPOINT: z.string().default(''),
+    BACKUP_S3_REGION: z.string().min(1).default('auto'),
+    BACKUP_S3_BUCKET: z.string().default(''),
+    BACKUP_S3_ACCESS_KEY_ID: z.string().default(''),
+    BACKUP_S3_SECRET_ACCESS_KEY_FILE: z
+      .string()
+      .min(1)
+      .default('./secrets/backup_s3_secret_key.txt'),
+    UPTIME_KUMA_PUSH_URL: z.string().default(''),
   })
   .superRefine((env, ctx) => {
     // Safety guardrail: Never send real email outside production (AGENTS.md §5, PRD §8.7)

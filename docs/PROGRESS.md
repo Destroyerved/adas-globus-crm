@@ -126,9 +126,9 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [x] Outbox and worker (pg-boss), dead-letter alert (verified on PostgreSQL 17 in `m1-worker.int.test.ts` and `ms8-worker-health-deadletter.int.test.ts`, plus Playwright e2e `33-system-health-*`: `worker_heartbeats`, graceful SIGTERM drain, deep `/healthz` readiness, PII-free Admin dead-letter notifications, and audited retry/dismiss UI; ADR 0023)
 - [x] Host routing (`crm.` vs `go.`) (verified over TCP socket in `m4-intake-routing-unsubscribe.int.test.ts`)
 - [x] Access JWT check (`CloudflareAccessVerifier` verified with RS256 JWKS in `security.test.ts` and `ms2-security-auth.int.test.ts`; ADR 0015)
-- [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (files exist; production fixes and server deploy pending)
-- [ ] Off-site backups and restore-drill script (`scripts/restore-drill.sh` is currently a stub; full encrypted backup & restore drill land in Milestone 10/14)
-- [ ] `scripts/deploy.sh` with smoke checks and rollback (currently a stub; full implementation lands in Milestone 10)
+- [ ] Production stack: compose, cloudflared, Access, Uptime Kuma, external uptime check (`infra/compose.prod.yml` with pinned images, `00-provision-roles.sh` `adas_admin`/`adas_app` separation, worker DB heartbeat healthcheck, `backup` daemon, `n8n` `automation` profile, and `verifyProductionReadiness` startup guard built and tested; not yet deployed on the production server — ADR 0025)
+- [ ] Off-site backups and restore-drill script (`ADASBK01` AES-256-GCM `pg_dump -Fc`, S3 Signature v4 off-site sync, 14-day retention, Uptime Kuma push, and `scripts/restore-drill.sh` built and verified end-to-end against real PostgreSQL 17 in `ms10-14-backup-restore-drill.int.test.ts`; not yet run on the production server — ADR 0025)
+- [ ] `scripts/deploy.sh` with smoke checks and rollback (built with secret preflight, pre-deploy encrypted backup, one-off `dist/cli/migrate.js`, `/healthz?strict=1` smoke check, and automatic rollback to `.deploy-state`; not yet run on the production server — ADR 0025)
 - [ ] **Exit:** SSO through Access in production; scope tests pass; role changes audited; first restore drill passes; external alert fires when the tunnel stops
 
 ### Phase 2: Core records and intake
