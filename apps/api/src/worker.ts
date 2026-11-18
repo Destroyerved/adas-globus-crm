@@ -9,7 +9,9 @@
 import { buildWorker } from './jobs.js';
 import { ComplianceService } from './modules/compliance/index.js';
 import { InboxService } from './modules/inbox/index.js';
+import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
+import { ApolloClient } from './platform/apollo/index.js';
 import { loadDotEnv, resolveConfigPath, validateEnv } from './platform/config/index.js';
 import { loadSecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
@@ -69,10 +71,25 @@ const outreach = new OutreachService(db, new ComplianceService(db), mailpit, {
   sendingSubdomain: env.ESP_SENDING_DOMAIN,
   espSender,
 });
+const intelligence = new IntelligenceService(db, {
+  apolloClient: new ApolloClient({
+    apiBaseUrl: env.APOLLO_API_BASE_URL,
+    apiKeyFile: resolveConfigPath(env.APOLLO_API_KEY_FILE),
+  }),
+  secretBox,
+  bookingsWebhookSecretFile: resolveConfigPath(env.BOOKINGS_WEBHOOK_SECRET_FILE),
+  nodeEnv: env.NODE_ENV,
+  mailLive: env.MAIL_LIVE,
+  publicHost: env.APP_PUBLIC_HOST,
+  allowPrivateWebhookTargets:
+    env.WEBHOOK_ALLOW_PRIVATE_TARGETS || (env.NODE_ENV as string) !== 'production',
+});
 const { runner } = buildWorker(db, logger, {
   files: new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH)),
+  secretBox,
   inbox,
   outreach,
+  intelligence,
 });
 try {
   await db.ensureInitialized();

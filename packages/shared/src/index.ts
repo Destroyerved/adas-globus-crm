@@ -14,3 +14,4 @@ export * from './crm-extensions.js';
 export * from './reports.js';
 export * from './inbox.js';
 export * from './outreach.js';
+export * from './integrations.js';

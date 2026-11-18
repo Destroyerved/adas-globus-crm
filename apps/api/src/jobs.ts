@@ -1,4 +1,5 @@
 import { type Logger } from 'pino';
+import { type SecretBox } from './platform/crypto/index.js';
 import { type DatabaseService } from './platform/db/index.js';
 import { type FileStorage } from './platform/files/index.js';
 import { JobRunner, type PeriodicJob } from './platform/jobs/index.js';
@@ -11,6 +12,7 @@ import { DuplicateService } from './modules/duplicates/index.js';
 import { ExportService } from './modules/exports/index.js';
 import { ImportProcessor } from './modules/imports/index.js';
 import { InboxService } from './modules/inbox/index.js';
+import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
 
 /**
@@ -33,13 +35,15 @@ export const JOB_QUEUES = [
   'mail.subscriptions.renew',
   'sequence.tick',
   'campaign.tick',
+  'webhook.deliver',
 ] as const;
 
 /**
  * Deletes what nobody needs any more: replayable responses after their 24 hours
  * (ADR 0004), sessions that ended more than 30 days ago, public per-IP rate events older than
- * 1 hour, raw website inquiry rows older than 24 months, and email message bodies 24 months
- * after the last activity on the contact (PRD 4.18, Q10 default).
+ * 1 hour, raw website inquiry rows older than 24 months, email message bodies 24 months
+ * after the last activity on the contact, and terminal webhook delivery logs older than 30 days
+ * (PRD 4.18, Q10 default).
  */
 export async function purgeExpired(db: DatabaseService): Promise<{
   idempotencyKeys: number;
@@ -47,6 +51,7 @@ export async function purgeExpired(db: DatabaseService): Promise<{
   rateEvents: number;
   inquiries: number;
   emailBodiesPurged: number;
+  webhookDeliveriesPurged: number;
 }> {
   const keys = await db.query(
     `DELETE FROM idempotency_keys WHERE created_at < NOW() - INTERVAL '24 hours'`,
@@ -76,12 +81,17 @@ export async function purgeExpired(db: DatabaseService): Promise<{
            AND COALESCE(c.last_contacted_at, c.updated_at) >= NOW() - INTERVAL '24 months'
        )`,
   );
+  const webhookDeliveries = await db.query(
+    `DELETE FROM webhook_deliveries
+     WHERE status IN ('delivered', 'failed') AND created_at < NOW() - INTERVAL '30 days'`,
+  );
   return {
     idempotencyKeys: keys.rowCount,
     sessions: sessions.rowCount,
     rateEvents: rateEvents.rowCount,
     inquiries: inquiries.rowCount,
     emailBodiesPurged: emailBodies.rowCount,
+    webhookDeliveriesPurged: webhookDeliveries.rowCount,
   };
 }
 
@@ -91,8 +101,10 @@ export function buildWorker(
   options: {
     install?: boolean;
     files: FileStorage;
+    secretBox?: SecretBox | null;
     inbox?: InboxService;
     outreach?: OutreachService;
+    intelligence?: IntelligenceService;
   },
 ): {
   runner: JobRunner;
@@ -104,6 +116,7 @@ export function buildWorker(
   bulk: BulkActionService;
   inbox: InboxService;
   outreach: OutreachService;
+  intelligence: IntelligenceService;
   jobs: PeriodicJob[];
 } {
   const crm = new CrmJobs(db);
@@ -142,7 +155,7 @@ export function buildWorker(
         mailLive: false,
         publicHost: 'go.adasglobuspro.com',
         maxAttachmentBytes: 20_971_520,
-        secretBox: null,
+        secretBox: options.secretBox ?? null,
       },
     );
   const outreach =
@@ -152,12 +165,20 @@ export function buildWorker(
       mailLive: false,
       publicHost: 'go.adasglobuspro.com',
     });
+  const intelligence =
+    options.intelligence ??
+    new IntelligenceService(db, {
+      secretBox: options.secretBox ?? null,
+      nodeEnv: 'test',
+      allowPrivateWebhookTargets: true,
+    });
 
-  // Outbox handlers for sequence stop conditions (PRD 4.12, 6.4, 6.9).
+  // Outbox handlers for sequence stop conditions and outbound webhooks (PRD 4.12, 4.14, 6.9).
   const outbox = new OutboxDispatcher(db, logger);
   outbox.on('deal.created', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
   outbox.on('deal.won', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
   outbox.on('activity.logged', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
+  outbox.on('*', (event, tx) => intelligence.enqueueMatchingWebhooks(event, tx));
 
   const jobs: PeriodicJob[] = [
     { name: 'outbox.dispatch', everySeconds: 2, run: () => outbox.dispatch() },
@@ -215,6 +236,11 @@ export function buildWorker(
       cron: '* * * * *',
       run: () => outreach.runCampaignTick(),
     },
+    {
+      name: 'webhook.deliver',
+      everySeconds: 3,
+      run: () => intelligence.deliverDueWebhooks(),
+    },
   ];
   return {
     runner: new JobRunner(db, logger, jobs, { install: options.install }),
@@ -226,6 +252,7 @@ export function buildWorker(
     bulk,
     inbox,
     outreach,
+    intelligence,
     jobs,
   };
 }

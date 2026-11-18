@@ -1037,3 +1037,97 @@ model ClickToken {
   @@index([messageSendId])
   @@map("click_tokens")
 }
+
+// Phase 6 Integrations: External IDs, Apollo Credit Ledger, Outbound Webhooks & Bookings
+// (PRD 4.9, 4.14, 4.17, 7.6, 9). Migration 0001 + 0021.
+model ExternalId {
+  id         String   @id
+  provider   String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  externalId String   @map("external_id")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([provider, entityType, externalId])
+  @@index([entityType, entityId])
+  @@map("external_ids")
+}
+
+model ApolloCreditLedger {
+  id             String   @id
+  action         String
+  creditsUsed    Int      @map("credits_used")
+  apolloPersonId String?  @map("apollo_person_id")
+  apolloOrgId    String?  @map("apollo_org_id")
+  entityType     String?  @map("entity_type")
+  entityId       String?  @map("entity_id")
+  metadata       Json     @default("{}")
+  actorUserId    String   @map("actor_user_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@map("apollo_credit_ledger")
+}
+
+model WebhookEndpoint {
+  id               String    @id
+  name             String
+  description      String?
+  targetUrl        String    @map("target_url")
+  secretHmac       String    @default("") @map("secret_hmac")
+  secretCiphertext String?   @map("secret_ciphertext")
+  secretKeyVersion Int?      @map("secret_key_version")
+  secretHint       String?   @map("secret_hint")
+  eventTypes       Json      @default("[]") @map("event_types")
+  active           Boolean   @default(true)
+  lastStatusCode   Int?      @map("last_status_code")
+  lastDeliveredAt  DateTime? @map("last_delivered_at") @db.Timestamptz(6)
+  lastError        String?   @map("last_error")
+  createdByUserId  String?   @map("created_by_user_id")
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id              String    @id
+  endpointId      String    @map("endpoint_id")
+  outboxEventId   String?   @map("outbox_event_id")
+  eventType       String    @map("event_type")
+  payload         Json
+  status          String    @default("pending")
+  attempts        Int       @default(0)
+  lastStatusCode  Int?      @map("last_status_code")
+  lastError       String?   @map("last_error")
+  responseExcerpt String?   @map("response_excerpt")
+  availableAt     DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  deliveredAt     DateTime? @map("delivered_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([endpointId, outboxEventId])
+  @@index([endpointId, createdAt(sort: Desc)])
+  @@map("webhook_deliveries")
+}
+
+model BookingEvent {
+  id                   String    @id
+  bookingAppointmentId String    @map("booking_appointment_id")
+  eventType            String    @default("created") @map("event_type")
+  serviceName          String    @map("service_name")
+  startAt              DateTime  @map("start_at") @db.Timestamptz(6)
+  endAt                DateTime? @map("end_at") @db.Timestamptz(6)
+  customerEmailSha256  String    @map("customer_email_sha256")
+  contactId            String?   @map("contact_id")
+  activityId           String?   @map("activity_id")
+  taskId               String?   @map("task_id")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([bookingAppointmentId, eventType])
+  @@map("booking_events")
+}
+

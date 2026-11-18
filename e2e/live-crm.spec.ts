@@ -1414,3 +1414,60 @@ test('sequences and campaigns support multi-step enrollment, contact outreach hi
     });
   }
 });
+
+test('settings integrations and webhooks manage Apollo credit caps, one-time scoped API tokens, encrypted outbound webhooks and delivery logs', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+
+  // 1. Settings -> Integrations: update Apollo daily credit cap and create a scoped Service API token
+  await page.goto('/?screen=settings&tab=integrations');
+  await expect(page.getByTestId('settings-integrations-tab')).toBeVisible();
+
+  await page.getByLabel('Daily credit limit').fill('350');
+  await page.getByRole('button', { name: 'Save credit limit' }).click();
+  await expect(page.getByText('Daily Apollo credit limit updated to 350.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'New API token' }).first().click();
+  await page.getByLabel('Token name').fill('n8n Deal Won Sync');
+  await page.getByLabel('Record scope').selectOption('all');
+  await page.getByRole('button', { name: 'Create token' }).click();
+  await expect(page.getByTestId('revealed-api-token')).toContainText('adas_pat_');
+
+  // Persist across reload; one-time secret is no longer shown after reload
+  await page.reload();
+  await expect(page.getByText('n8n Deal Won Sync')).toBeVisible();
+  await expect(page.getByTestId('revealed-api-token')).toHaveCount(0);
+
+  // 2. Settings -> Webhooks: add an encrypted outbound webhook, inspect secret & delivery log, check axe
+  await page.getByRole('tab', { name: 'Webhooks' }).click();
+  await expect(page.getByTestId('settings-webhooks-tab')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add endpoint' }).first().click();
+  await page.getByLabel('Endpoint name').fill('Partner Onboarding Hook');
+  await page.getByLabel('Destination URL').fill('http://127.0.0.1:3000/healthz');
+  await page.getByRole('button', { name: 'Create endpoint' }).click();
+  await expect(page.getByText('Webhook endpoint created.')).toBeVisible();
+  await expect(page.getByTestId('revealed-webhook-secret')).toContainText('whsec_');
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `32-integrations-webhooks-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const hookRow = page.locator('tr', { hasText: 'Partner Onboarding Hook' });
+  await hookRow.getByRole('button', { name: 'Send test' }).click();
+  await expect(page.getByText(/Test webhook (delivered|failed)/)).toBeVisible();
+  await hookRow.getByRole('button', { name: 'Deliveries' }).click();
+  await expect(page.getByText('webhook.test')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.reload();
+  await expect(page.getByText('Partner Onboarding Hook')).toBeVisible();
+});

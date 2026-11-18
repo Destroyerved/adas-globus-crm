@@ -2006,7 +2006,11 @@ export class OutreachService {
       return;
     }
 
-    if (event.eventType === 'activity.logged' && event.payload['activityType'] === 'meeting') {
+    if (
+      event.eventType === 'activity.logged' &&
+      (event.payload['activityType'] === 'meeting' ||
+        event.payload['activityType'] === 'meeting_booked')
+    ) {
       let contactId =
         typeof event.payload['contactId'] === 'string'
           ? event.payload['contactId']

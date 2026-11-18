@@ -38,8 +38,9 @@ import { DuplicateService, registerDuplicateRoutes } from './modules/duplicates/
 import { ExportService, registerExportRoutes } from './modules/exports/index.js';
 import { InboxService, registerInboxRoutes } from './modules/inbox/index.js';
 import { WebsiteIntakeService, registerIntakeRoutes } from './modules/intake/index.js';
-import { IntelligenceService } from './modules/intelligence/index.js';
+import { IntelligenceService, registerIntelligenceRoutes } from './modules/intelligence/index.js';
 import { OutreachService, registerOutreachRoutes } from './modules/outreach/index.js';
+import { ApolloClient } from './platform/apollo/index.js';
 import {
   isDevLoginEnabled,
   loadDotEnv,
@@ -202,10 +203,24 @@ export function createAppServer(
     cfAccessJwksLoader?: CloudflareAccessOptions['jwksLoader'];
     /** Optional ESP webhook HMAC secret override for offline integration tests. */
     espWebhookSecret?: string;
+    /** Optional ApolloClient override for offline HTTP protocol integration tests. */
+    apolloClient?: ApolloClient;
+    /** Optional Microsoft Bookings webhook HMAC secret override for integration tests. */
+    bookingsWebhookSecret?: string;
   } = {},
 ) {
   const logger = createLogger(env.LOG_LEVEL);
   const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
+  const devLoginEnabled = isDevLoginEnabled(env);
+  const production = env.NODE_ENV === 'production';
+  const resolvedSecretBox =
+    options.secretBox !== undefined
+      ? options.secretBox
+      : loadSecretBox(
+          resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
+          env.TOKEN_ENCRYPTION_KEY_VERSION,
+          production,
+        );
   const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL);
   const espSender = new EspBulkSender({
     provider: env.ESP_PROVIDER,
@@ -216,6 +231,26 @@ export function createAppServer(
     nodeEnv: env.NODE_ENV,
     mailLive: env.MAIL_LIVE,
   });
+  const graph = new MicrosoftGraphMailboxClient({
+    tenantId: env.ENTRA_TENANT_ID,
+    clientId: env.ENTRA_CLIENT_ID,
+    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
+    redirectUri: env.ENTRA_MAIL_REDIRECT_URI,
+    authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
+    graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
+  });
+  const entra = new EntraSignIn({
+    tenantId: env.ENTRA_TENANT_ID,
+    clientId: env.ENTRA_CLIENT_ID,
+    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
+    redirectUri: env.ENTRA_REDIRECT_URI,
+  });
+  const apolloClient =
+    options.apolloClient ??
+    new ApolloClient({
+      apiBaseUrl: env.APOLLO_API_BASE_URL,
+      apiKeyFile: resolveConfigPath(env.APOLLO_API_KEY_FILE),
+    });
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
   const apiTokens = new ApiTokenService(db, auth);
   const cfAccess = new CloudflareAccessVerifier({
@@ -239,7 +274,23 @@ export function createAppServer(
     espSender,
     espWebhookSecret: options.espWebhookSecret ?? null,
   });
-  const intelligence = new IntelligenceService(db);
+  const intelligence = new IntelligenceService(db, {
+    apolloClient,
+    secretBox: resolvedSecretBox,
+    bookingsWebhookSecretFile: resolveConfigPath(env.BOOKINGS_WEBHOOK_SECRET_FILE),
+    bookingsWebhookSecret: options.bookingsWebhookSecret ?? null,
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+    publicHost: env.APP_PUBLIC_HOST,
+    allowPrivateWebhookTargets: env.WEBHOOK_ALLOW_PRIVATE_TARGETS || !production,
+    connectorFlags: {
+      entraConfigured: entra.isConfigured(),
+      graphConfigured: graph.isConfigured(),
+      espConfigured: espSender.isConfigured(),
+      espProvider: env.ESP_PROVIDER,
+      espSendingDomain: env.ESP_SENDING_DOMAIN,
+    },
+  });
   const lists = new CrmListService(db);
   const records = new CrmRecordService(db);
   const timeline = new CrmTimelineService(db);
@@ -262,6 +313,7 @@ export function createAppServer(
   registerComplianceRoutes(router, compliance);
   registerIntakeRoutes(router, intake);
   registerOutreachRoutes(router, outreach);
+  registerIntelligenceRoutes(router, intelligence);
   const admin = new AdminService(db);
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
@@ -304,24 +356,6 @@ export function createAppServer(
   router.post('/api/v1/admin/api-tokens/:id/revoke', async (ctx) => {
     ctx.json(200, await apiTokens.revokeToken(ctx.user, ctx.params['id'] ?? '', ctx.ip));
   });
-  const devLoginEnabled = isDevLoginEnabled(env);
-  const production = env.NODE_ENV === 'production';
-  const resolvedSecretBox =
-    options.secretBox !== undefined
-      ? options.secretBox
-      : loadSecretBox(
-          resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
-          env.TOKEN_ENCRYPTION_KEY_VERSION,
-          production,
-        );
-  const graph = new MicrosoftGraphMailboxClient({
-    tenantId: env.ENTRA_TENANT_ID,
-    clientId: env.ENTRA_CLIENT_ID,
-    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
-    redirectUri: env.ENTRA_MAIL_REDIRECT_URI,
-    authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
-    graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
-  });
   const inbox = new InboxService(db, graph, transport, {
     nodeEnv: env.NODE_ENV,
     mailLive: env.MAIL_LIVE,
@@ -335,12 +369,6 @@ export function createAppServer(
     env.SESSION_IDLE_TIMEOUT_HOURS,
     env.SESSION_ABSOLUTE_TIMEOUT_DAYS,
   );
-  const entra = new EntraSignIn({
-    tenantId: env.ENTRA_TENANT_ID,
-    clientId: env.ENTRA_CLIENT_ID,
-    clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
-    redirectUri: env.ENTRA_REDIRECT_URI,
-  });
   const signer = new CookieSigner(
     loadSessionSecret(resolveConfigPath(env.SESSION_SECRET_FILE), production),
   );
@@ -592,6 +620,35 @@ export function createAppServer(
           signatureHeader: sigHeader,
           timestampHeader: tsHeader,
           parsedBody,
+        });
+        res.writeHead(202, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(serializeJson({ status: 'accepted', ...result }));
+        return;
+      }
+
+      // Public Microsoft Bookings webhook receiver (`POST /api/v1/webhooks/bookings` on `go.` — PRD §4.14, §6.5, §9).
+      // Verifies constant-time timestamped HMAC-SHA256 signature (`X-Bookings-Signature`) with 5-minute replay window.
+      if (method === 'POST' && pathname === '/api/v1/webhooks/bookings') {
+        const rawBuf = await readRawBody(req, 131_072);
+        const rawBody = rawBuf.toString('utf-8');
+        const sigHeader =
+          (typeof req.headers['x-bookings-signature'] === 'string'
+            ? req.headers['x-bookings-signature']
+            : undefined) ??
+          (typeof req.headers['x-adas-signature'] === 'string'
+            ? req.headers['x-adas-signature']
+            : undefined);
+        const tsHeader =
+          typeof req.headers['x-bookings-timestamp'] === 'string'
+            ? req.headers['x-bookings-timestamp']
+            : undefined;
+        const result = await intelligence.handleSignedBookingsWebhook({
+          rawBody,
+          signatureHeader: sigHeader,
+          timestampHeader: tsHeader,
         });
         res.writeHead(202, {
           'Content-Type': 'application/json; charset=utf-8',

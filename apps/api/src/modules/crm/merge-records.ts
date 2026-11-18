@@ -155,6 +155,13 @@ const CONTACT_RELATIONS: readonly Relation[] = [
   },
   { key: 'emails', label: 'Email addresses', table: 'contact_emails', column: 'contact_id' },
   { key: 'phones', label: '', table: 'contact_phones', column: 'contact_id' },
+  {
+    key: 'externalIds',
+    label: '',
+    table: 'external_ids',
+    column: 'entity_id',
+    where: "entity_type = 'contact'",
+  },
 ];
 
 const COMPANY_RELATIONS: readonly Relation[] = [
@@ -207,6 +214,13 @@ const COMPANY_RELATIONS: readonly Relation[] = [
     live: LIVE,
   },
   { key: 'emailThreads', label: 'Email threads', table: 'email_threads', column: 'company_id' },
+  {
+    key: 'externalIds',
+    label: '',
+    table: 'external_ids',
+    column: 'entity_id',
+    where: "entity_type = 'company'",
+  },
 ];
 
 const META: Record<

@@ -70,6 +70,13 @@ import {
   type SuppressionStateFilter,
   type TemplateChannel,
   type TestSendCampaignInput,
+  type ApiTokenView,
+  type ApolloImportInput,
+  type ApolloSearchInput,
+  type CreateApiTokenInput,
+  type CreateWebhookEndpointInput,
+  type Scope,
+  type UpdateApolloCreditLimitInput,
   type UpdateCampaignInput,
   type UpdateCustomFieldInput,
   type UpdateDealContactInput,
@@ -81,6 +88,7 @@ import {
   type UpdateScoringRuleInput,
   type UpdateSenderIdentityInput,
   type UpdateSequenceInput,
+  type UpdateWebhookEndpointInput,
   type UpsertFxRateInput,
   type WithdrawConsentInput,
 } from '@adas/shared';
@@ -1273,6 +1281,66 @@ export const api = {
   // Contact profile outreach history
   getContactOutreachHistory: (contactId: string) =>
     request<ContactOutreachHistoryView>(`/contacts/${enc(contactId)}/outreach`),
+
+  // Integrations overview, Apollo prospecting & enrichment
+  getIntegrationsOverview: () => request<IntegrationsOverviewView>('/admin/integrations'),
+  updateApolloCreditLimit: (input: UpdateApolloCreditLimitInput) =>
+    put<{ dailyCap: number; creditsUsedToday: number; remainingDailyCredits: number }>(
+      '/admin/apollo/credit-limit',
+      input,
+    ),
+  getApolloStatus: () =>
+    request<{
+      configured: boolean;
+      dailyCap: number;
+      creditsUsedToday: number;
+      remainingDailyCredits: number;
+    }>('/apollo/status'),
+  searchApollo: (input: ApolloSearchInput) => post<ApolloSearchResultView>('/apollo/search', input),
+  importFromApollo: (input: ApolloImportInput) =>
+    createWithKey<{
+      createdCount: number;
+      deduplicatedCount: number;
+      skippedSuppressedCount: number;
+      skippedMissingEmailCount: number;
+      creditsConsumed: number;
+      remainingDailyCredits: number;
+      contactIds: string[];
+    }>('/apollo/import', input),
+  enrichContactWithApollo: (contactId: string, confirmedCreditCost = 1) =>
+    post<{
+      enriched: boolean;
+      updatedFields: string[];
+      creditsConsumed: number;
+      remainingDailyCredits: number;
+    }>(`/contacts/${enc(contactId)}/enrich-apollo`, { confirmedCreditCost }),
+
+  // Scoped Service API Tokens
+  listApiTokens: () => request<Items<ApiTokenView>>('/admin/api-tokens').then((r) => r.items),
+  createApiToken: (input: CreateApiTokenInput) =>
+    createWithKey<{ token: ApiTokenView; secretToken: string }>('/admin/api-tokens', input),
+  revokeApiToken: (tokenId: string) =>
+    post<{ id: string; revoked: true }>(`/admin/api-tokens/${enc(tokenId)}/revoke`, {}),
+
+  // Outbound Webhooks & delivery logs
+  listWebhooks: () => request<Items<WebhookEndpointRow>>('/admin/webhooks').then((r) => r.items),
+  createWebhook: (input: CreateWebhookEndpointInput) =>
+    createWithKey<{ endpoint: WebhookEndpointRow; signingSecret: string }>(
+      '/admin/webhooks',
+      input,
+    ),
+  updateWebhook: (id: string, input: UpdateWebhookEndpointInput) =>
+    patch<{ endpoint: WebhookEndpointRow; rotatedSigningSecret: string | null }>(
+      `/admin/webhooks/${enc(id)}`,
+      input,
+    ),
+  deleteWebhook: (id: string) => del<{ deleted: true }>(`/admin/webhooks/${enc(id)}`),
+  listWebhookDeliveries: (endpointId: string) =>
+    request<Items<WebhookDeliveryRow>>(`/admin/webhooks/${enc(endpointId)}/deliveries`).then(
+      (r) => r.items,
+    ),
+  testWebhook: (endpointId: string) =>
+    post<WebhookDeliveryRow>(`/admin/webhooks/${enc(endpointId)}/test`, {}),
 };
 
 export interface OutreachTemplateRow {
@@ -1536,4 +1604,103 @@ export interface ContactOutreachHistoryView {
     transport_provider: string;
     sent_at: string;
   }>;
+}
+
+export type { ApiTokenView, Scope };
+
+export interface IntegrationsOverviewView {
+  connectors: {
+    entraSso: { configured: boolean };
+    microsoftGraphMail: { configured: boolean; connectedMailboxes: number };
+    espCampaigns: {
+      configured: boolean;
+      provider: string;
+      sendingDomain: string;
+      mailLive: boolean;
+    };
+    apollo: {
+      configured: boolean;
+      dailyCap: number;
+      creditsUsedToday: number;
+      remainingDailyCredits: number;
+    };
+    microsoftBookings: {
+      configured: boolean;
+      webhookUrl: string;
+      eventsProcessed30d: number;
+    };
+    outboundWebhooks: {
+      activeEndpointsCount: number;
+      delivered24hCount: number;
+      failed24hCount: number;
+      availableEventTypes: string[];
+    };
+  };
+  recentApolloLedger: Array<{
+    id: string;
+    action: string;
+    creditsUsed: number;
+    entityType: string | null;
+    actorName: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface ApolloSearchPersonRow {
+  apolloPersonId: string;
+  apolloOrgId: string | null;
+  firstName: string;
+  lastName: string;
+  title: string;
+  firmName: string;
+  domain: string;
+  country: string | null;
+  state: string | null;
+  email: string | null;
+  emailVerificationStatus: 'valid' | 'risky' | 'invalid' | 'unknown';
+  hasEmail: boolean;
+  alreadyInCrm: boolean;
+  existingContactId: string | null;
+  suppressed: boolean;
+  estimatedCreditCost: number;
+}
+
+export interface ApolloSearchResultView {
+  items: ApolloSearchPersonRow[];
+  totalEntries: number;
+  page: number;
+  perPage: number;
+  dailyCap: number;
+  creditsUsedToday: number;
+  remainingDailyCredits: number;
+}
+
+export interface WebhookEndpointRow {
+  id: string;
+  name: string;
+  description: string | null;
+  target_url: string;
+  secret_hint: string;
+  event_types: string[];
+  active: boolean;
+  last_status_code: number | null;
+  last_delivered_at: string | null;
+  last_error: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDeliveryRow {
+  id: string;
+  endpoint_id: string;
+  outbox_event_id: string | null;
+  event_type: string;
+  status: 'pending' | 'retrying' | 'delivered' | 'failed';
+  attempts: number;
+  last_status_code: number | null;
+  last_error: string | null;
+  available_at: string;
+  delivered_at: string | null;
+  created_at: string;
 }

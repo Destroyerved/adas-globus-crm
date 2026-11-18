@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { formatRelative, type Market } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
@@ -50,6 +50,7 @@ import {
 import { CompanyPicker, type PickedCompany } from '@/features/shared/company-picker.js';
 import { ExportButton } from '@/features/exports/export-button.js';
 import { EnrollInSequenceDrawer } from '@/features/sequences/sequences-screen.js';
+import { ApolloSearchDrawer } from '@/features/settings/integrations-tab.js';
 
 export const VERIFICATION_TONE = { valid: 'success', risky: 'warning', invalid: 'danger' } as const;
 
@@ -70,6 +71,7 @@ export function ContactsScreen({
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
   const [density, setDensity] = useTableDensity('contact');
   const [formOpen, setFormOpen] = useState(false);
+  const [apolloOpen, setApolloOpen] = useState(false);
   const [enrollingSelected, setEnrollingSelected] = useState(false);
   const [company, setCompany] = useState<PickedCompany | null>(null);
 
@@ -105,6 +107,11 @@ export function ContactsScreen({
     setState({ q: '', market: '', owner: '', dnc: '' });
   };
   const canCreate = can(me, 'contacts.write');
+  const apolloStatusQuery = useQuery({
+    queryKey: ['apollo-status'],
+    queryFn: api.getApolloStatus,
+    enabled: canCreate,
+  });
 
   return (
     <div className="space-y-[16px]" data-testid="contacts-screen">
@@ -121,6 +128,11 @@ export function ContactsScreen({
                   Enroll in sequence ({selectedContactIds.length})
                 </Button>
               )}
+            {canCreate && apolloStatusQuery.data?.configured && (
+              <Button variant="secondary" onClick={() => setApolloOpen(true)}>
+                Search Apollo
+              </Button>
+            )}
             <ExportButton
               entity="contact"
               q={state.q}
@@ -392,6 +404,8 @@ export function ContactsScreen({
         lockedContactIds={selectedContactIds}
         onEnrolled={() => selection.clear()}
       />
+
+      <ApolloSearchDrawer open={apolloOpen} onClose={() => setApolloOpen(false)} />
     </div>
   );
 }

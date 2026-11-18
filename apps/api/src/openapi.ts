@@ -1535,6 +1535,110 @@ const sequencesAndCampaignsPaths = {
   },
 };
 
+const integrationsAndWebhooksPaths: Record<string, Record<string, unknown>> = {
+  '/admin/integrations': {
+    get: {
+      operationId: 'getIntegrationsOverview',
+      summary:
+        'Live configuration and health summary for Entra SSO, Microsoft 365 Graph, ESP, Apollo, Bookings, and Outbound Webhooks (PRD 4.14, 4.17)',
+      responses: ok('Integrations overview'),
+    },
+  },
+  '/admin/apollo/credit-limit': {
+    put: {
+      operationId: 'updateApolloCreditLimit',
+      summary: 'Update the daily Apollo enrichment credit guard cap (PRD 4.14, 4.17)',
+      responses: ok('Updated Apollo credit cap'),
+    },
+  },
+  '/apollo/status': {
+    get: {
+      operationId: 'getApolloStatus',
+      summary: 'Apollo connector status and remaining daily credit balance (PRD 4.14)',
+      responses: ok('Apollo status'),
+    },
+  },
+  '/apollo/search': {
+    post: {
+      operationId: 'searchApolloProspects',
+      summary:
+        'Search Apollo B2B prospects with CRM deduplication and suppression preview (PRD 4.14)',
+      responses: ok('Apollo search results'),
+    },
+  },
+  '/apollo/import': {
+    post: {
+      operationId: 'importApolloProspects',
+      summary:
+        'Import selected Apollo prospects after upfront credit-cost confirmation, skipping suppressions and storing zero consent (PRD 4.14, 5)',
+      responses: { '201': { description: 'Import result' } },
+    },
+  },
+  '/contacts/{id}/enrich-apollo': {
+    post: {
+      operationId: 'enrichContactWithApollo',
+      summary: 'Enrich a single CRM contact via Apollo after 1-credit confirmation (PRD 4.14)',
+      parameters: idParam,
+      responses: ok('Enrichment result'),
+    },
+  },
+  '/admin/webhooks': {
+    get: {
+      operationId: 'listWebhookEndpoints',
+      summary: 'List outbound webhook endpoints with masked secret hints (PRD 4.14, 4.17)',
+      responses: ok('Webhook endpoints'),
+    },
+    post: {
+      operationId: 'createWebhookEndpoint',
+      summary:
+        'Create an encrypted outbound webhook endpoint and reveal its HMAC signing secret once (PRD 4.14, 9)',
+      responses: { '201': { description: 'Created webhook endpoint' } },
+    },
+  },
+  '/admin/webhooks/{id}': {
+    patch: {
+      operationId: 'updateWebhookEndpoint',
+      summary: 'Update or rotate the secret of an outbound webhook endpoint (PRD 4.14, 4.17)',
+      parameters: idParam,
+      responses: ok('Updated webhook endpoint'),
+    },
+    delete: {
+      operationId: 'deleteWebhookEndpoint',
+      summary: 'Delete an outbound webhook endpoint (PRD 4.17)',
+      parameters: idParam,
+      responses: ok('Deleted'),
+    },
+  },
+  '/admin/webhooks/{id}/deliveries': {
+    get: {
+      operationId: 'listWebhookDeliveries',
+      summary: 'List recent outbound webhook delivery attempts and HTTP status codes (PRD 4.14)',
+      parameters: idParam,
+      responses: ok('Webhook delivery log'),
+    },
+  },
+  '/admin/webhooks/{id}/test': {
+    post: {
+      operationId: 'testWebhookEndpoint',
+      summary:
+        'Send a signed webhook.test ping and return the live HTTP delivery status (PRD 4.14)',
+      parameters: idParam,
+      responses: ok('Test delivery status'),
+    },
+  },
+  '/webhooks/bookings': {
+    post: {
+      operationId: 'receiveMicrosoftBookingsWebhook',
+      summary:
+        'Public HMAC-SHA256 verified Microsoft Bookings webhook on go. host creating meeting activities and prep tasks (PRD 4.14, 6.5)',
+      responses: {
+        '202': { description: 'Bookings event accepted' },
+        '401': { description: 'Invalid or expired signature' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
@@ -1546,6 +1650,7 @@ for (const [path, methods] of Object.entries({
   ...crmExtensionsPaths,
   ...inboxAndGraphPaths,
   ...sequencesAndCampaignsPaths,
+  ...integrationsAndWebhooksPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

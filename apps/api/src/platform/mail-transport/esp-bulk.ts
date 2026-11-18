@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { extractDomainFromEmail, normalizeEmail } from '../normalize/index.js';
 import type { BulkSender, OutboundEmailPayload, OutboundEmailReceipt } from './index.js';
 
@@ -281,6 +281,16 @@ export class EspBulkSender implements BulkSender {
       throw new Error('Safety guard: EspBulkSender cannot enable live sending outside production.');
     }
     this.fetchImpl = config.fetchImpl ?? fetch;
+  }
+
+  isConfigured(): boolean {
+    if (!existsSync(this.config.apiKeyFile)) return false;
+    try {
+      const raw = readFileSync(this.config.apiKeyFile, 'utf8').trim();
+      return raw.length > 0 && !raw.startsWith('00000000') && raw.toLowerCase() !== 'changeme';
+    } catch {
+      return false;
+    }
   }
 
   isConfiguredForLive(): boolean {
