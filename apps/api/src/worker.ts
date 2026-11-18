@@ -7,10 +7,13 @@
  *   pnpm --filter @adas/api dev:worker
  */
 import { buildWorker } from './jobs.js';
+import { InboxService } from './modules/inbox/index.js';
 import { loadDotEnv, resolveConfigPath, validateEnv } from './platform/config/index.js';
+import { loadSecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
 import { LocalFileStorage } from './platform/files/index.js';
 import { createLogger } from './platform/logger/index.js';
+import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
 
 loadDotEnv();
 const env = validateEnv();
@@ -23,8 +26,34 @@ if (env.NODE_ENV === 'production') {
 }
 
 const db = DatabaseService.connect(env.DATABASE_URL);
+const secretBox = loadSecretBox(
+  resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
+  env.TOKEN_ENCRYPTION_KEY_VERSION,
+  false,
+);
+const graph = new MicrosoftGraphMailboxClient({
+  tenantId: env.ENTRA_TENANT_ID,
+  clientId: env.ENTRA_CLIENT_ID,
+  clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
+  redirectUri: env.ENTRA_MAIL_REDIRECT_URI,
+  authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
+  graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
+});
+const inbox = new InboxService(
+  db,
+  graph,
+  new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL),
+  {
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+    publicHost: env.APP_PUBLIC_HOST,
+    maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
+    secretBox,
+  },
+);
 const { runner } = buildWorker(db, logger, {
   files: new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH)),
+  inbox,
 });
 try {
   await db.ensureInitialized();

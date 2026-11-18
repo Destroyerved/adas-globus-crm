@@ -1154,6 +1154,141 @@ const crmExtensionsPaths = {
   },
 };
 
+const inboxAndGraphPaths = {
+  '/inbox/mailbox': {
+    get: {
+      operationId: 'getInboxMailboxStatus',
+      summary:
+        'Get the current user Microsoft 365 delegated mailbox connection status, send cap and last sync (PRD 4.11, 8.2)',
+      responses: ok('MailboxStatusView'),
+    },
+  },
+  '/inbox/oauth/start': {
+    get: {
+      operationId: 'startInboxMailboxOAuth',
+      summary:
+        'Redirect to Microsoft Entra OAuth2 + PKCE consent for Mail.Read, Mail.Send and offline_access (PRD 4.11, 8.2)',
+      responses: { '302': { description: 'Redirect to Microsoft authorize endpoint' } },
+    },
+  },
+  '/inbox/oauth/callback': {
+    get: {
+      operationId: 'finishInboxMailboxOAuth',
+      summary:
+        'Exchange OAuth2 code, seal tokens with AES-256-GCM SecretBox, register Graph webhooks and run initial 90-day sync (PRD 8.2)',
+      responses: { '302': { description: 'Redirect back to Inbox screen' } },
+    },
+  },
+  '/inbox/mailbox/sync': {
+    post: {
+      operationId: 'syncInboxMailboxNow',
+      summary: 'Trigger immediate delta sync for the signed-in user mailbox (PRD 8.2)',
+      responses: ok('Sync summary'),
+    },
+  },
+  '/inbox/mailbox/disconnect': {
+    post: {
+      operationId: 'disconnectInboxMailbox',
+      summary:
+        'Disconnect mailbox, delete Graph subscriptions, clear tokens and pause active sequence enrollments (PRD 4.12, 8.2)',
+      responses: ok('Disconnect summary'),
+    },
+  },
+  '/admin/mailboxes': {
+    get: {
+      operationId: 'listAdminMailboxes',
+      summary: 'Admin overview of connected Microsoft 365 mailboxes (PRD 4.17)',
+      responses: ok('AdminMailboxRow list'),
+    },
+  },
+  '/inbox/threads': {
+    get: {
+      operationId: 'listInboxThreads',
+      summary:
+        'Keyset-paginated email conversation threads scoped by inbox.read and filterable by status, search, contact, company, deal or lead (PRD 4.11)',
+      responses: ok('InboxThreadSummary page'),
+    },
+  },
+  '/inbox/threads/{id}': {
+    get: {
+      operationId: 'getInboxThreadDetail',
+      summary: 'Full email thread with sanitised messages and attachment metadata (PRD 4.11, 9)',
+      parameters: idParam,
+      responses: ok('InboxThreadDetail'),
+    },
+    patch: {
+      operationId: 'updateInboxThread',
+      summary: 'Archive, reopen, mark read or link a thread to a deal (PRD 4.11)',
+      parameters: idParam,
+      responses: ok('InboxThreadSummary'),
+    },
+  },
+  '/inbox/send': {
+    post: {
+      operationId: 'sendInboxEmail',
+      summary:
+        'Send a 1:1 email from the user mailbox (Graph in live production, Mailpit outside production — PRD 4.11, 8.7, A10)',
+      responses: { '201': { description: 'InboxThreadDetail' } },
+    },
+  },
+  '/inbox/threads/{id}/reply': {
+    post: {
+      operationId: 'replyInboxThread',
+      summary: 'Reply in an existing email conversation thread (PRD 4.11, 8.2)',
+      parameters: idParam,
+      responses: { '201': { description: 'InboxThreadDetail' } },
+    },
+  },
+  '/inbox/messages/{id}/task': {
+    post: {
+      operationId: 'createTaskFromEmailMessage',
+      summary:
+        'Create a follow-up task pre-linked to the email contact, company, deal and lead (PRD 4.11)',
+      parameters: idParam,
+      responses: { '201': { description: 'Task' } },
+    },
+  },
+  '/inbox/manual-link': {
+    post: {
+      operationId: 'manualLinkGraphMessage',
+      summary:
+        'Manually link a specific Microsoft 365 message to a CRM contact or company (PRD 4.11)',
+      responses: ok('Link outcome'),
+    },
+  },
+  '/inbox/messages/{messageId}/attachments/{attachmentId}': {
+    get: {
+      operationId: 'downloadInboxAttachment',
+      summary:
+        'Stream an email attachment on-demand from Microsoft Graph after verifying inbox.read scope (PRD 4.11)',
+      responses: { '200': { description: 'Binary attachment stream' } },
+    },
+  },
+  '/inbox/templates': {
+    get: {
+      operationId: 'listInboxTemplates',
+      summary: 'List shared and personal email templates (PRD 4.11, 4.12)',
+      responses: ok('EmailTemplateView list'),
+    },
+    post: {
+      operationId: 'createInboxTemplate',
+      summary: 'Create a reusable email template with personalisation variables (PRD 4.11, 4.12)',
+      responses: { '201': { description: 'EmailTemplateView' } },
+    },
+  },
+  '/webhooks/microsoft': {
+    post: {
+      operationId: 'receiveMicrosoftGraphWebhook',
+      summary:
+        'Public Microsoft Graph webhook on go. host: echoes validationToken on handshake and validates clientState SHA-256 on change notifications (PRD 8.2)',
+      responses: {
+        '200': { description: 'Plain-text validationToken echo' },
+        '202': { description: 'Notification accepted' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
@@ -1163,6 +1298,7 @@ for (const [path, methods] of Object.entries({
   ...complianceAndPrivacyPaths,
   ...intakeAndRoutingPaths,
   ...crmExtensionsPaths,
+  ...inboxAndGraphPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

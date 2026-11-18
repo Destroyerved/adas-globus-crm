@@ -44,6 +44,7 @@ import { ScorePanel } from '@/features/records/score-panel.js';
 import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
 import { FormRow } from '@/features/settings/settings-kit.js';
+import { ComposeEmailDrawer } from '@/features/inbox/compose-email-drawer.js';
 import { ContactChannelsPanel } from './contact-channels-panel.js';
 import { VERIFICATION_TONE } from './contacts-screen.js';
 
@@ -108,6 +109,7 @@ export function ContactProfileScreen({
   const ownerName = useUserNames();
   const timeZone = viewerTimeZone();
   const [editing, setEditing] = useState(false);
+  const [composingEmail, setComposingEmail] = useState(false);
   const [recordingConsent, setRecordingConsent] = useState(false);
   const [withdrawingConsent, setWithdrawingConsent] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState('');
@@ -247,6 +249,11 @@ export function ContactProfileScreen({
         }
         actions={
           <>
+            {can(me, 'inbox.send') && !isBlocked && (
+              <Button variant="primary" onClick={() => setComposingEmail(true)}>
+                Send email
+              </Button>
+            )}
             {canWrite && (
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit contact
@@ -649,6 +656,15 @@ export function ContactProfileScreen({
             </FormRow>
           </div>
         }
+      />
+
+      <ComposeEmailDrawer
+        open={composingEmail}
+        onClose={() => setComposingEmail(false)}
+        initialToEmail={contact.primary_email}
+        contactId={contact.id}
+        companyId={company?.id ?? null}
+        onSent={() => void refresh()}
       />
     </div>
   );

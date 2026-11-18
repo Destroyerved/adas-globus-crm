@@ -5,6 +5,7 @@ import {
   CheckSquare,
   GitMerge,
   Handshake,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -50,13 +51,19 @@ interface NavItem {
   capability?: string;
 }
 
-// Only modules that work end to end appear here (AGENTS.md section 3). Inbox and Outreach
-// return when their real connectors exist.
+// Only modules that work end to end appear here (AGENTS.md section 3). Sequences and Campaigns
+// return when their engines land.
 const WORK_ITEMS: NavItem[] = [
   {
     id: 'dashboard',
     label: 'Dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    id: 'inbox',
+    label: 'Inbox',
+    icon: Inbox,
+    capability: 'inbox.read',
   },
   {
     id: 'tasks',
@@ -133,6 +140,7 @@ export function AppShell({
   const workItems = WORK_ITEMS.filter((item) => !item.capability || can(me, item.capability));
   const growItems = GROW_ITEMS.filter((item) => !item.capability || can(me, item.capability));
   const canReports = can(me, 'reports.read');
+  const canInbox = can(me, 'inbox.read');
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -183,7 +191,7 @@ export function AppShell({
 
       if (gChordRef.current) {
         gChordRef.current = false;
-        // DESIGN 9.3 keyboard map: G then H (home), L, C, O, D, T, R
+        // DESIGN 9.3 keyboard map: G then H (home), I (inbox), L, C, O, D, T, R
         const targets: Record<string, AppScreenId> = {
           h: 'dashboard',
           l: 'leads',
@@ -191,6 +199,7 @@ export function AppShell({
           o: 'companies',
           d: 'deals',
           t: 'tasks',
+          ...(canInbox ? { i: 'inbox' } : {}),
           ...(canReports ? { r: 'reports' } : {}),
         };
         const target = targets[event.key.toLowerCase()];
@@ -203,7 +212,7 @@ export function AppShell({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onNavigate, onOpenCommandPalette, canReports]);
+  }, [onNavigate, onOpenCommandPalette, canInbox, canReports]);
 
   const renderSidebarNavContent = (isCollapsedView: boolean) => (
     <div className="flex flex-col h-full justify-between p-[12px] text-sidebar-foreground select-none">

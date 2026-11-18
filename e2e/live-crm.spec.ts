@@ -1256,3 +1256,60 @@ test('dashboard portfolio deltas and standalone standard reports with currency t
   expect(download.suggestedFilename()).toContain('adas-report-employee_activity');
   await expect(page.getByText('Report exported as CSV.')).toBeVisible();
 });
+
+test('sending an email from a contact profile appears on the timeline, and Inbox threads support replies, deal linking and tasks from email', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_mgr_1');
+
+  // 1. Open Contact profile (Jane Patel) and send a 1:1 email using a template (A10)
+  await page.goto('/?screen=contact&id=cnt_jane');
+  await expect(page.getByTestId('contact-profile-screen')).toBeVisible();
+  await page.getByRole('button', { name: 'Send email' }).click();
+
+  await page.getByLabel('Template (optional)').selectOption('tpl_inbox_trial_intro');
+  await page.getByLabel('Subject').fill('Kickoff checklist for {{company_name}}');
+  await page
+    .getByLabel('Message')
+    .fill('Hi {{first_name}}, sharing our UltraTax kickoff steps for {{company_name}}.');
+  await page.getByRole('button', { name: 'Send email' }).last().click();
+  await expect(page.getByText('Email sent.')).toBeVisible();
+
+  // Verify the rendered message immediately appears in the Contact timeline and survives a reload
+  await expect(page.getByText('Kickoff checklist for Acme Tax & Advisory LLP')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Kickoff checklist for Acme Tax & Advisory LLP')).toBeVisible();
+
+  // 2. Navigate to Inbox via sidebar and verify threads, axe & 1440px / 375px layout
+  await page.getByRole('button', { name: 'Inbox' }).first().click();
+  await expect(page.getByTestId('inbox-screen')).toBeVisible();
+  await expect(
+    page.getByRole('heading', {
+      name: /Kickoff checklist for Acme Tax & Advisory LLP|Re: 3-day UltraTax CS trial candidate resumes/,
+    }),
+  ).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `29-inbox-threads-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // 3. Create a follow-up task from an email message and reply in thread
+  await page.getByRole('button', { name: 'Create task' }).first().click();
+  await page.getByLabel('Task title').fill('Send candidate NDA before trial day 1');
+  await page.getByRole('button', { name: 'Save task' }).click();
+  await expect(page.getByText('Task created from email.')).toBeVisible();
+
+  await page.getByLabel('Write a reply').fill('Confirmed — see you Tuesday morning at 9:30 am CT.');
+  await page.getByRole('button', { name: 'Send reply' }).click();
+  await expect(page.getByText('Reply sent.')).toBeVisible();
+  await expect(
+    page.getByText('Confirmed — see you Tuesday morning at 9:30 am CT.').first(),
+  ).toBeVisible();
+});

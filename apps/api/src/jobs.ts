@@ -2,12 +2,14 @@ import { type Logger } from 'pino';
 import { type DatabaseService } from './platform/db/index.js';
 import { type FileStorage } from './platform/files/index.js';
 import { JobRunner, type PeriodicJob } from './platform/jobs/index.js';
+import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
 import { OutboxDispatcher } from './platform/outbox/index.js';
 import { AuthAndUsersService } from './modules/auth/index.js';
 import { BulkActionService, CrmJobs, CrmListService } from './modules/crm/index.js';
 import { DuplicateService } from './modules/duplicates/index.js';
 import { ExportService } from './modules/exports/index.js';
 import { ImportProcessor } from './modules/imports/index.js';
+import { InboxService } from './modules/inbox/index.js';
 
 /**
  * The worker's jobs (PRD 6.9 job catalogue). Composition lives here, outside `platform/`, so
@@ -25,18 +27,22 @@ export const JOB_QUEUES = [
   'duplicates.scan',
   'export.build',
   'bulk.execute',
+  'mail.sync',
+  'mail.subscriptions.renew',
 ] as const;
 
 /**
  * Deletes what nobody needs any more: replayable responses after their 24 hours
  * (ADR 0004), sessions that ended more than 30 days ago, public per-IP rate events older than
- * 1 hour, and raw website inquiry rows older than 24 months (PRD 4.18, Q10 default).
+ * 1 hour, raw website inquiry rows older than 24 months, and email message bodies 24 months
+ * after the last activity on the contact (PRD 4.18, Q10 default).
  */
 export async function purgeExpired(db: DatabaseService): Promise<{
   idempotencyKeys: number;
   sessions: number;
   rateEvents: number;
   inquiries: number;
+  emailBodiesPurged: number;
 }> {
   const keys = await db.query(
     `DELETE FROM idempotency_keys WHERE created_at < NOW() - INTERVAL '24 hours'`,
@@ -51,18 +57,34 @@ export async function purgeExpired(db: DatabaseService): Promise<{
   const inquiries = await db.query(
     `DELETE FROM inquiries WHERE created_at < NOW() - INTERVAL '24 months'`,
   );
+  const emailBodies = await db.query(
+    `UPDATE email_messages m
+     SET body_text = '[Purged per 24-month retention policy]',
+         body_html_sanitized = NULL,
+         body_preview = '[Purged per 24-month retention policy]'
+     WHERE m.sent_at < NOW() - INTERVAL '24 months'
+       AND m.body_text != '[Purged per 24-month retention policy]'
+       AND m.body_text != '[Erased per privacy request]'
+       AND NOT EXISTS (
+         SELECT 1 FROM email_threads t
+         JOIN contacts c ON c.id = t.contact_id
+         WHERE t.id = m.thread_id
+           AND COALESCE(c.last_contacted_at, c.updated_at) >= NOW() - INTERVAL '24 months'
+       )`,
+  );
   return {
     idempotencyKeys: keys.rowCount,
     sessions: sessions.rowCount,
     rateEvents: rateEvents.rowCount,
     inquiries: inquiries.rowCount,
+    emailBodiesPurged: emailBodies.rowCount,
   };
 }
 
 export function buildWorker(
   db: DatabaseService,
   logger: Logger,
-  options: { install?: boolean; files: FileStorage },
+  options: { install?: boolean; files: FileStorage; inbox?: InboxService },
 ): {
   runner: JobRunner;
   outbox: OutboxDispatcher;
@@ -71,6 +93,7 @@ export function buildWorker(
   duplicates: DuplicateService;
   exports: ExportService;
   bulk: BulkActionService;
+  inbox: InboxService;
   jobs: PeriodicJob[];
 } {
   const crm = new CrmJobs(db);
@@ -92,6 +115,26 @@ export function buildWorker(
     (userId) => auth.resolveSessionUser(userId),
     logger,
   );
+  const inbox =
+    options.inbox ??
+    new InboxService(
+      db,
+      new MicrosoftGraphMailboxClient({
+        tenantId: '00000000-0000-0000-0000-000000000000',
+        clientId: '00000000-0000-0000-0000-000000000000',
+        clientSecretFile: './secrets/entra_client_secret.txt',
+        redirectUri: 'http://localhost:5174/api/v1/inbox/oauth/callback',
+      }),
+      new MailpitTransport(false, 'test'),
+      {
+        nodeEnv: 'test',
+        mailLive: false,
+        publicHost: 'go.adasglobuspro.com',
+        maxAttachmentBytes: 20_971_520,
+        secretBox: null,
+      },
+    );
+
   // Handlers for outbound webhooks (n8n) and sequences attach here as those phases land.
   const outbox = new OutboxDispatcher(db, logger);
   const jobs: PeriodicJob[] = [
@@ -130,6 +173,16 @@ export function buildWorker(
         return { worked: res.jobId ? 1 : 0 };
       },
     },
+    {
+      name: 'mail.sync',
+      everySeconds: 15,
+      run: () => inbox.syncDueMailboxes(),
+    },
+    {
+      name: 'mail.subscriptions.renew',
+      cron: '12 * * * *',
+      run: () => inbox.renewExpiringSubscriptions(),
+    },
   ];
   return {
     runner: new JobRunner(db, logger, jobs, { install: options.install }),
@@ -139,6 +192,7 @@ export function buildWorker(
     duplicates,
     exports: exportService,
     bulk,
+    inbox,
     jobs,
   };
 }

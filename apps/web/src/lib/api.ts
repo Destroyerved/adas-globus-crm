@@ -4,26 +4,35 @@ import {
   type AddDealContactInput,
   type AddSuppressedDomainInput,
   type AddSuppressionInput,
+  type AdminMailboxRow,
   type BulkActionInput,
   type BulkJobView,
   type ConvertLeadInput,
   type CreateCustomFieldInput,
+  type CreateEmailTemplateInput,
   type CreateSavedViewInput,
   type CreateScoringRuleInput,
+  type CreateTaskFromEmailInput,
   type Currency,
   type CustomFieldDefinitionView,
   type DashboardSummaryView,
   type DealContactView,
   type DuplicateCandidateView,
+  type EmailTemplateView,
   type ExportCreateInput,
   type ExportView,
   type FxRateView,
   type ImportBatchView,
   type ImportEntity,
   type ImportRowView,
+  type InboxThreadDetail,
+  type InboxThreadFilterStatus,
+  type InboxThreadSummary,
   type InquiryFormType,
   type InquirySummaryView,
   type LiftSuppressionInput,
+  type MailboxStatusView,
+  type ManualLinkEmailInput,
   type Market,
   type MarketingBasisSummary,
   type MergeEntity,
@@ -34,6 +43,7 @@ import {
   type RecordConsentInput,
   type RecurrenceRule,
   type RemoveSuppressedDomainInput,
+  type ReplyInboxThreadInput,
   type ReportFilterOptions,
   type ReportId,
   type ReportResultView,
@@ -42,12 +52,14 @@ import {
   type SavedViewEntity,
   type ScoreBreakdownItem,
   type ScoringRuleView,
+  type SendInboxEmailInput,
   type SetCustomFieldsInput,
   type SetPrimaryContactEmailInput,
   type SetPrimaryContactPhoneInput,
   type SuppressionStateFilter,
   type UpdateCustomFieldInput,
   type UpdateDealContactInput,
+  type UpdateInboxThreadInput,
   type UpdateRoutingRuleInput,
   type UpdateSavedViewInput,
   type UpdateScoringRuleInput,
@@ -370,7 +382,7 @@ export interface ActivityRow {
 
 export interface TimelineItem {
   id: string;
-  source: 'activity' | 'note' | 'history';
+  source: 'activity' | 'note' | 'history' | 'email';
   kind: string;
   title: string;
   detail: string;
@@ -1092,4 +1104,64 @@ export const api = {
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),
   markNotificationsRead: (notificationId?: string) =>
     post<{ updated: number }>('/notifications/read', notificationId ? { id: notificationId } : {}),
+
+  // Inbox & Microsoft 365 Graph (PRD 4.11, 8.2, 8.7)
+  inboxMailbox: () => request<MailboxStatusView>('/inbox/mailbox'),
+  inboxOAuthStartUrl: () => '/api/v1/inbox/oauth/start',
+  syncInboxMailbox: () =>
+    post<{
+      syncedMessages: number;
+      ignoredMessages: number;
+      bouncesProcessed: number;
+      throttledUntil: string | null;
+    }>('/inbox/mailbox/sync', {}),
+  disconnectInboxMailbox: () =>
+    post<{ disconnected: boolean; pausedSequences: number }>('/inbox/mailbox/disconnect', {}),
+  adminMailboxes: () => request<Items<AdminMailboxRow>>('/admin/mailboxes').then((r) => r.items),
+  listInboxThreads: (
+    params: {
+      status?: InboxThreadFilterStatus;
+      q?: string;
+      contactId?: string;
+      companyId?: string;
+      dealId?: string;
+      leadId?: string;
+      cursor?: string | null;
+      limit?: number;
+    } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.status && params.status !== 'all') search.set('status', params.status);
+    if (params.q) search.set('q', params.q);
+    if (params.contactId) search.set('contactId', params.contactId);
+    if (params.companyId) search.set('companyId', params.companyId);
+    if (params.dealId) search.set('dealId', params.dealId);
+    if (params.leadId) search.set('leadId', params.leadId);
+    if (params.cursor) search.set('cursor', params.cursor);
+    if (params.limit) search.set('limit', String(params.limit));
+    const qs = search.toString();
+    return request<{
+      items: InboxThreadSummary[];
+      nextCursor: string | null;
+      counts: Record<string, number>;
+    }>(`/inbox/threads${qs ? `?${qs}` : ''}`);
+  },
+  getInboxThread: (threadId: string) =>
+    request<InboxThreadDetail>(`/inbox/threads/${enc(threadId)}`),
+  sendInboxEmail: (input: SendInboxEmailInput) =>
+    createWithKey<InboxThreadDetail>('/inbox/send', input),
+  replyInboxThread: (threadId: string, input: ReplyInboxThreadInput) =>
+    createWithKey<InboxThreadDetail>(`/inbox/threads/${enc(threadId)}/reply`, input),
+  updateInboxThread: (threadId: string, input: UpdateInboxThreadInput) =>
+    patch<InboxThreadSummary>(`/inbox/threads/${enc(threadId)}`, input),
+  createTaskFromEmail: (messageId: string, input: CreateTaskFromEmailInput) =>
+    createWithKey<TaskRow>(`/inbox/messages/${enc(messageId)}/task`, input),
+  manualLinkEmail: (input: ManualLinkEmailInput) =>
+    post<{ synced: boolean; threadId: string | null }>('/inbox/manual-link', input),
+  downloadEmailAttachment: (messageId: string, attachmentId: string) =>
+    download(`/inbox/messages/${enc(messageId)}/attachments/${enc(attachmentId)}`),
+  listInboxTemplates: () =>
+    request<Items<EmailTemplateView>>('/inbox/templates').then((r) => r.items),
+  createInboxTemplate: (input: CreateEmailTemplateInput) =>
+    createWithKey<EmailTemplateView>('/inbox/templates', input),
 };
