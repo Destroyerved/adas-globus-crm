@@ -1,4 +1,5 @@
 export * from './microsoft-graph.js';
+export * from './esp-bulk.js';
 
 export interface OutboundEmailPayload {
   idempotencyKey: string;

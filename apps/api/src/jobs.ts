@@ -5,11 +5,13 @@ import { JobRunner, type PeriodicJob } from './platform/jobs/index.js';
 import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
 import { OutboxDispatcher } from './platform/outbox/index.js';
 import { AuthAndUsersService } from './modules/auth/index.js';
+import { ComplianceService } from './modules/compliance/index.js';
 import { BulkActionService, CrmJobs, CrmListService } from './modules/crm/index.js';
 import { DuplicateService } from './modules/duplicates/index.js';
 import { ExportService } from './modules/exports/index.js';
 import { ImportProcessor } from './modules/imports/index.js';
 import { InboxService } from './modules/inbox/index.js';
+import { OutreachService } from './modules/outreach/index.js';
 
 /**
  * The worker's jobs (PRD 6.9 job catalogue). Composition lives here, outside `platform/`, so
@@ -29,6 +31,8 @@ export const JOB_QUEUES = [
   'bulk.execute',
   'mail.sync',
   'mail.subscriptions.renew',
+  'sequence.tick',
+  'campaign.tick',
 ] as const;
 
 /**
@@ -84,7 +88,12 @@ export async function purgeExpired(db: DatabaseService): Promise<{
 export function buildWorker(
   db: DatabaseService,
   logger: Logger,
-  options: { install?: boolean; files: FileStorage; inbox?: InboxService },
+  options: {
+    install?: boolean;
+    files: FileStorage;
+    inbox?: InboxService;
+    outreach?: OutreachService;
+  },
 ): {
   runner: JobRunner;
   outbox: OutboxDispatcher;
@@ -94,6 +103,7 @@ export function buildWorker(
   exports: ExportService;
   bulk: BulkActionService;
   inbox: InboxService;
+  outreach: OutreachService;
   jobs: PeriodicJob[];
 } {
   const crm = new CrmJobs(db);
@@ -115,6 +125,7 @@ export function buildWorker(
     (userId) => auth.resolveSessionUser(userId),
     logger,
   );
+  const defaultTransport = new MailpitTransport(false, 'test');
   const inbox =
     options.inbox ??
     new InboxService(
@@ -125,7 +136,7 @@ export function buildWorker(
         clientSecretFile: './secrets/entra_client_secret.txt',
         redirectUri: 'http://localhost:5174/api/v1/inbox/oauth/callback',
       }),
-      new MailpitTransport(false, 'test'),
+      defaultTransport,
       {
         nodeEnv: 'test',
         mailLive: false,
@@ -134,9 +145,20 @@ export function buildWorker(
         secretBox: null,
       },
     );
+  const outreach =
+    options.outreach ??
+    new OutreachService(db, new ComplianceService(db), defaultTransport, {
+      nodeEnv: 'test',
+      mailLive: false,
+      publicHost: 'go.adasglobuspro.com',
+    });
 
-  // Handlers for outbound webhooks (n8n) and sequences attach here as those phases land.
+  // Outbox handlers for sequence stop conditions (PRD 4.12, 6.4, 6.9).
   const outbox = new OutboxDispatcher(db, logger);
+  outbox.on('deal.created', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
+  outbox.on('deal.won', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
+  outbox.on('activity.logged', (event, tx) => outreach.handleOutboxStopCondition(event, tx));
+
   const jobs: PeriodicJob[] = [
     { name: 'outbox.dispatch', everySeconds: 2, run: () => outbox.dispatch() },
     {
@@ -183,6 +205,16 @@ export function buildWorker(
       cron: '12 * * * *',
       run: () => inbox.renewExpiringSubscriptions(),
     },
+    {
+      name: 'sequence.tick',
+      cron: '* * * * *',
+      run: () => outreach.runSequenceTick(),
+    },
+    {
+      name: 'campaign.tick',
+      cron: '* * * * *',
+      run: () => outreach.runCampaignTick(),
+    },
   ];
   return {
     runner: new JobRunner(db, logger, jobs, { install: options.install }),
@@ -193,6 +225,7 @@ export function buildWorker(
     exports: exportService,
     bulk,
     inbox,
+    outreach,
     jobs,
   };
 }

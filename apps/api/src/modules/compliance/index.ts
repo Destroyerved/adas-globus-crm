@@ -107,7 +107,7 @@ export function checkSendable(rawInput: CheckSendableInput): CheckSendableResult
     evaluatedAt: nowIso,
   });
 
-  if (!normalizedEmail || input.emailVerificationStatus === 'invalid') {
+  if (!normalizedEmail) {
     return reject(
       'INVALID_EMAIL',
       'Recipient email address is syntactically invalid or failed verification.',
@@ -120,6 +120,32 @@ export function checkSendable(rawInput: CheckSendableInput): CheckSendableResult
 
   if (input.suppressedDomain) {
     return reject('SUPPRESSED_DOMAIN', 'Recipient domain is on the suppressed domains list.');
+  }
+
+  if (input.emailVerificationStatus === 'invalid') {
+    return reject(
+      'INVALID_EMAIL',
+      'Recipient email address is syntactically invalid or failed verification.',
+    );
+  }
+
+  if (
+    input.channel === 'campaign' &&
+    input.excludeUnverifiedInCampaigns &&
+    (input.emailVerificationStatus === 'unknown' || input.emailVerificationStatus === 'risky')
+  ) {
+    return reject(
+      'EMAIL_UNVERIFIED_OR_RISKY',
+      'Contacts with unknown or risky email verification are excluded from campaigns.',
+    );
+  }
+
+  if (input.unsubscribed) {
+    return reject('UNSUBSCRIBED', 'Recipient has unsubscribed from outreach and marketing emails.');
+  }
+
+  if (input.complained) {
+    return reject('COMPLAINED', 'Recipient previously reported a spam complaint.');
   }
 
   if (input.hardBounced) {
@@ -165,11 +191,51 @@ export function checkSendable(rawInput: CheckSendableInput): CheckSendableResult
     }
   }
 
+  if (input.alreadySentThisStep) {
+    return reject(
+      'ALREADY_SENT_THIS_STEP',
+      'This sequence step or campaign message has already been sent to this recipient.',
+    );
+  }
+
+  if (input.inOtherActiveSequence) {
+    return reject(
+      'IN_OTHER_ACTIVE_SEQUENCE',
+      'Recipient is already enrolled in another active sequence.',
+    );
+  }
+
+  if (input.sequenceInactive) {
+    return reject('SEQUENCE_INACTIVE', 'Sequence is paused, draft, or archived.');
+  }
+
+  if (input.campaignNotApproved) {
+    return reject('CAMPAIGN_NOT_APPROVED', 'Campaign has not been approved by a second reviewer.');
+  }
+
+  if (input.campaignPaused) {
+    return reject('CAMPAIGN_PAUSED', 'Campaign is paused or cancelled.');
+  }
+
+  if (input.senderNotVerified) {
+    return reject(
+      'SENDER_NOT_VERIFIED',
+      'Sender identity SPF, DKIM, and DMARC records are not verified.',
+    );
+  }
+
+  if (input.mailboxDisconnected) {
+    return reject(
+      'MAILBOX_DISCONNECTED',
+      'Sender mailbox is disconnected or requires reconnection.',
+    );
+  }
+
   if (input.channel === 'sequence' || input.channel === 'campaign') {
     if (input.sendsInLast7Days >= input.maxSendsPer7Days) {
       return reject(
         'FREQUENCY_CAP',
-        `Recipient has already received ${input.sendsInLast7Days} outreach messages in the last 7 days (cap: ${input.maxSendsPer7Days}).`,
+        `Recipient has already received ${input.sendsInLast7Days} outreach messages in the frequency window (cap: ${input.maxSendsPer7Days}).`,
       );
     }
   }
@@ -187,7 +253,7 @@ export function checkSendable(rawInput: CheckSendableInput): CheckSendableResult
     if (!input.bypassSendWindow && !input.withinSendWindow) {
       return reject(
         'OUTSIDE_SEND_WINDOW',
-        'Current time is outside the recipient local business-day send window (08:30–17:00).',
+        'Current time is outside the recipient local business-day send window.',
       );
     }
   }
@@ -237,39 +303,57 @@ export class ComplianceService {
     email: string;
     channel: MessageChannel;
     senderUserId?: string;
+    senderIdentityId?: string | null;
+    sequenceId?: string | null;
+    campaignId?: string | null;
+    mailboxDailyCapOverride?: number | null;
+    sendWindowStartMinutes?: number;
+    sendWindowEndMinutes?: number;
+    excludeUnverifiedInCampaigns?: boolean;
+    requireConnectedMailbox?: boolean;
     bypassSendWindow?: boolean;
     now?: Date;
   }): Promise<CheckSendableResult> {
     const now = options.now ?? new Date();
+    const nowIso = now.toISOString();
     const cleanEmail = normalizeEmail(options.email) ?? options.email.trim().toLowerCase();
     const emailHash = sha256Hex(cleanEmail);
     const domain = extractDomainFromEmail(cleanEmail);
 
-    const [supEmailRes, supDomainRes, contactRes, consentRes, freqRes, senderCapRes] =
-      await Promise.all([
-        this.db.query<{ id: string }>(
-          `SELECT id FROM suppressions
+    const [
+      supEmailRes,
+      supDomainRes,
+      contactRes,
+      consentRes,
+      freqRes,
+      senderCapRes,
+      senderIdRes,
+      seqRes,
+      cmpgRes,
+    ] = await Promise.all([
+      this.db.query<{ id: string }>(
+        `SELECT id FROM suppressions
            WHERE (email = $1 OR email_sha256 = $2) AND lifted_at IS NULL
            LIMIT 1`,
-          [cleanEmail, emailHash],
-        ),
-        domain
-          ? this.db.query<{ id: string }>(
-              `SELECT id FROM suppressed_domains WHERE domain = $1 LIMIT 1`,
-              [domain],
-            )
-          : Promise.resolve({ rows: [], rowCount: 0 }),
-        this.db.query<{
-          id: string;
-          market: Market;
-          timezone: string;
-          do_not_contact: boolean;
-          email_verification_status: 'unknown' | 'valid' | 'risky' | 'invalid';
-          hard_bounced_at: string | null;
-          account_status:
-            'prospect' | 'client' | 'former_client' | 'partner' | 'do_not_contact' | null;
-        }>(
-          `SELECT c.id, c.market, c.timezone, c.do_not_contact,
+        [cleanEmail, emailHash],
+      ),
+      domain
+        ? this.db.query<{ id: string }>(
+            `SELECT id FROM suppressed_domains WHERE domain = $1 LIMIT 1`,
+            [domain],
+          )
+        : Promise.resolve({ rows: [], rowCount: 0 }),
+      this.db.query<{
+        id: string;
+        market: Market;
+        timezone: string;
+        do_not_contact: boolean;
+        email_verification_status: 'unknown' | 'valid' | 'risky' | 'invalid';
+        hard_bounced_at: string | null;
+        account_status:
+          'prospect' | 'client' | 'former_client' | 'partner' | 'do_not_contact' | null;
+      }>(
+        `SELECT c.id, c.market, c.timezone, c.do_not_contact,
                   c.email_verification_status, c.hard_bounced_at,
                   cmp.account_status
            FROM contacts c
@@ -277,44 +361,123 @@ export class ComplianceService {
            LEFT JOIN contact_emails ce ON ce.contact_id = c.id
            WHERE (c.primary_email = $1 OR ce.email = $1) AND c.deleted_at IS NULL
            LIMIT 1`,
-          [cleanEmail],
-        ),
-        this.db.query<{
-          basis: ConsentBasis;
-          status: 'active' | 'expired' | 'revoked';
-          expires_at: string | null;
-          captured_at: string;
-        }>(
-          `SELECT basis, status, expires_at, captured_at
+        [cleanEmail],
+      ),
+      this.db.query<{
+        basis: ConsentBasis;
+        status: 'active' | 'expired' | 'revoked';
+        expires_at: string | null;
+        captured_at: string;
+      }>(
+        `SELECT basis, status, expires_at, captured_at
            FROM consent_records
            WHERE email = $1
            ORDER BY created_at DESC
            LIMIT 1`,
-          [cleanEmail],
-        ),
-        this.db.query<{ cnt: number }>(
-          `SELECT COUNT(*)::int AS cnt
+        [cleanEmail],
+      ),
+      this.db.query<{ cnt: number }>(
+        `SELECT COUNT(*)::int AS cnt
            FROM message_sends
            WHERE recipient_email = $1
              AND channel IN ('sequence', 'campaign')
-             AND sent_at >= NOW() - INTERVAL '7 days'`,
-          [cleanEmail],
-        ),
-        options.senderUserId
-          ? this.db.query<{ cnt: number; cap: number }>(
-              `SELECT
-                 (SELECT COUNT(*)::int FROM message_sends WHERE sender_user_id = $1 AND sent_at >= CURRENT_DATE) AS cnt,
-                 COALESCE((SELECT daily_send_cap FROM users WHERE id = $1), 50) AS cap`,
-              [options.senderUserId],
-            )
-          : Promise.resolve({ rows: [{ cnt: 0, cap: 50 }], rowCount: 1 }),
-      ]);
+             AND sent_at >= $2::timestamptz - INTERVAL '7 days'`,
+        [cleanEmail, nowIso],
+      ),
+      options.senderUserId
+        ? this.db.query<{
+            cnt: number;
+            cap: number;
+            mbx_status: string | null;
+            mbx_sent_today: number | null;
+          }>(
+            `SELECT
+                 (SELECT COUNT(*)::int FROM message_sends WHERE sender_user_id = $1 AND sent_at >= date_trunc('day', $2::timestamptz)) AS cnt,
+                 COALESCE(
+                   (SELECT daily_send_cap FROM mailbox_connections WHERE user_id = $1),
+                   (SELECT daily_send_cap FROM users WHERE id = $1),
+                   50
+                 ) AS cap,
+                 (SELECT status FROM mailbox_connections WHERE user_id = $1 LIMIT 1) AS mbx_status,
+                 (SELECT sent_today_count FROM mailbox_connections WHERE user_id = $1 LIMIT 1) AS mbx_sent_today`,
+            [options.senderUserId, nowIso],
+          )
+        : Promise.resolve({
+            rows: [{ cnt: 0, cap: 50, mbx_status: null, mbx_sent_today: null }],
+            rowCount: 1,
+          }),
+      options.senderIdentityId
+        ? this.db.query<{
+            verified_at: Date | string | null;
+            spf_verified: boolean;
+            dkim_verified: boolean;
+            dmarc_verified: boolean;
+          }>(
+            `SELECT verified_at, spf_verified, dkim_verified, dmarc_verified
+               FROM sender_identities WHERE id = $1 LIMIT 1`,
+            [options.senderIdentityId],
+          )
+        : Promise.resolve({ rows: [], rowCount: 0 }),
+      options.sequenceId
+        ? this.db.query<{ status: string }>(`SELECT status FROM sequences WHERE id = $1 LIMIT 1`, [
+            options.sequenceId,
+          ])
+        : Promise.resolve({ rows: [], rowCount: 0 }),
+      options.campaignId
+        ? this.db.query<{ status: string; approved_at: Date | string | null }>(
+            `SELECT status, approved_at FROM campaigns WHERE id = $1 LIMIT 1`,
+            [options.campaignId],
+          )
+        : Promise.resolve({ rows: [], rowCount: 0 }),
+    ]);
 
     const contact = contactRes.rows[0];
     const consentRow = consentRes.rows[0];
     const market: Market = contact?.market ?? 'US';
     const timezone = contact?.timezone ?? 'America/New_York';
-    const withinWindow = isWithinSendWindow(now, timezone, market);
+    const withinWindow = isWithinSendWindow(
+      now,
+      timezone,
+      market,
+      options.sendWindowStartMinutes ?? 8 * 60,
+      options.sendWindowEndMinutes ?? 17 * 60,
+    );
+
+    const senderCapRow = senderCapRes.rows[0];
+    const mbxStatus = senderCapRow?.mbx_status ?? null;
+    const mailboxDisconnected =
+      mbxStatus !== null ? mbxStatus !== 'connected' : Boolean(options.requireConnectedMailbox);
+
+    const senderIdentity = senderIdRes.rows[0];
+    const senderNotVerified = options.senderIdentityId
+      ? !senderIdentity ||
+        !senderIdentity.verified_at ||
+        !senderIdentity.spf_verified ||
+        !senderIdentity.dkim_verified ||
+        !senderIdentity.dmarc_verified
+      : false;
+
+    const seqStatus = seqRes.rows[0]?.status;
+    const sequenceInactive = options.sequenceId ? seqStatus !== 'active' : false;
+
+    const cmpgRow = cmpgRes.rows[0];
+    const campaignPaused = options.campaignId
+      ? cmpgRow?.status === 'paused' ||
+        cmpgRow?.status === 'paused_deliverability' ||
+        cmpgRow?.status === 'cancelled'
+      : false;
+    const campaignNotApproved =
+      options.campaignId && !campaignPaused
+        ? !cmpgRow ||
+          cmpgRow.status === 'draft' ||
+          cmpgRow.status === 'pending_approval' ||
+          !cmpgRow.approved_at
+        : false;
+
+    const effectiveCap =
+      options.mailboxDailyCapOverride && options.mailboxDailyCapOverride > 0
+        ? Math.min(options.mailboxDailyCapOverride, senderCapRow?.cap ?? 50)
+        : (senderCapRow?.cap ?? 50);
 
     return checkSendable({
       email: cleanEmail,
@@ -323,9 +486,15 @@ export class ComplianceService {
       contactDoNotContact: contact?.do_not_contact ?? false,
       companyAccountStatus: contact?.account_status ?? 'prospect',
       emailVerificationStatus: contact?.email_verification_status ?? 'unknown',
+      excludeUnverifiedInCampaigns: options.excludeUnverifiedInCampaigns ?? false,
       hardBounced: Boolean(contact?.hard_bounced_at),
       suppressedEmail: supEmailRes.rows.length > 0,
       suppressedDomain: supDomainRes.rows.length > 0,
+      sequenceInactive,
+      campaignNotApproved,
+      campaignPaused,
+      senderNotVerified,
+      mailboxDisconnected,
       consent: consentRow
         ? {
             basis: consentRow.basis,
@@ -336,11 +505,11 @@ export class ComplianceService {
         : null,
       sendsInLast7Days: freqRes.rows[0]?.cnt ?? 0,
       maxSendsPer7Days: 3,
-      mailboxSendsToday: senderCapRes.rows[0]?.cnt ?? 0,
-      mailboxDailyCap: senderCapRes.rows[0]?.cap ?? 50,
+      mailboxSendsToday: senderCapRow?.cnt ?? 0,
+      mailboxDailyCap: effectiveCap,
       withinSendWindow: withinWindow,
       bypassSendWindow: options.bypassSendWindow ?? true,
-      nowIso: now.toISOString(),
+      nowIso,
     });
   }
 

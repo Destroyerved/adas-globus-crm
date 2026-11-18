@@ -186,6 +186,74 @@ export function addBusinessDays(
 }
 
 /**
+ * Computes the UTC instant when the recipient's local business-day send window next opens
+ * (PRD 4.12, 8.3 & A18 mailbox-cap rollover).
+ */
+export function nextSendWindowStart(
+  fromUtc: Date,
+  timeZone: string,
+  market: Market = 'US',
+  options: {
+    windowStartMinutes?: number;
+    windowEndMinutes?: number;
+    forceNextBusinessDay?: boolean;
+    jitterMinutes?: number;
+  } = {},
+): Date {
+  const safeTz = (() => {
+    try {
+      getLocalParts(fromUtc, timeZone);
+      return timeZone;
+    } catch {
+      return 'UTC';
+    }
+  })();
+
+  const windowStart = options.windowStartMinutes ?? 8 * 60;
+  const windowEnd = options.windowEndMinutes ?? 17 * 60;
+  const startHour = Math.floor(windowStart / 60);
+  const startMinute = windowStart % 60;
+  const jitterMs = Math.max(0, Math.min(20, Math.trunc(options.jitterMinutes ?? 0))) * 60_000;
+
+  if (!options.forceNextBusinessDay) {
+    if (isBusinessDay(fromUtc, safeTz, market)) {
+      const p = getLocalParts(fromUtc, safeTz);
+      const mins = p.hour * 60 + p.minute;
+      if (mins >= windowStart && mins < windowEnd) {
+        return new Date(fromUtc.getTime() + jitterMs);
+      }
+      if (mins < windowStart) {
+        const todayStart = localToUtc(
+          { year: p.year, month: p.month, day: p.day, hour: startHour, minute: startMinute },
+          safeTz,
+        );
+        return new Date(todayStart.getTime() + jitterMs);
+      }
+    }
+  }
+
+  let cursor = new Date(fromUtc.getTime());
+  for (let guard = 0; guard < 15; guard += 1) {
+    const p = getLocalParts(cursor, safeTz);
+    const nextDay = new Date(Date.UTC(p.year, p.month - 1, p.day + 1));
+    cursor = localToUtc(
+      {
+        year: nextDay.getUTCFullYear(),
+        month: nextDay.getUTCMonth() + 1,
+        day: nextDay.getUTCDate(),
+        hour: startHour,
+        minute: startMinute,
+      },
+      safeTz,
+    );
+    if (isBusinessDay(cursor, safeTz, market)) {
+      return new Date(cursor.getTime() + jitterMs);
+    }
+  }
+  return new Date(cursor.getTime() + jitterMs);
+}
+
+/**
  * Computes the next due instant for a recurring task (PRD 4.7), anchored to the later of the
  * task's scheduled due date or completion date so long-overdue tasks advance into the future.
  */

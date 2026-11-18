@@ -45,6 +45,7 @@ import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
 import { FormRow } from '@/features/settings/settings-kit.js';
 import { ComposeEmailDrawer } from '@/features/inbox/compose-email-drawer.js';
+import { EnrollInSequenceDrawer } from '@/features/sequences/sequences-screen.js';
 import { ContactChannelsPanel } from './contact-channels-panel.js';
 import { VERIFICATION_TONE } from './contacts-screen.js';
 
@@ -87,7 +88,7 @@ function safeLocalTime(tz: string): string | null {
   }
 }
 
-/** Contact page (PRD 4.4, 4.18, 5): details, consent and suppression, deals, sequences, privacy, timeline. */
+/** Contact page (PRD 4.4, 4.18, 5): details, consent and suppression, deals, outreach, privacy, timeline. */
 export function ContactProfileScreen({
   contactId,
   onBack,
@@ -110,6 +111,7 @@ export function ContactProfileScreen({
   const timeZone = viewerTimeZone();
   const [editing, setEditing] = useState(false);
   const [composingEmail, setComposingEmail] = useState(false);
+  const [enrollingInSequence, setEnrollingInSequence] = useState(false);
   const [recordingConsent, setRecordingConsent] = useState(false);
   const [withdrawingConsent, setWithdrawingConsent] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState('');
@@ -126,12 +128,28 @@ export function ContactProfileScreen({
     queryFn: () => api.getContact(contactId as string),
     enabled: contactId !== null,
   });
+  const canReadOutreach = can(me, 'sequences.read') || can(me, 'campaigns.read');
+  const outreachQuery = useQuery({
+    queryKey: ['contact-outreach', contactId],
+    queryFn: () => api.getContactOutreachHistory(contactId as string),
+    enabled: contactId !== null && canReadOutreach,
+  });
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: key }),
       queryClient.invalidateQueries({ queryKey: ['contacts'] }),
       queryClient.invalidateQueries({ queryKey: ['timeline', 'contact', contactId] }),
+      queryClient.invalidateQueries({ queryKey: ['contact-outreach', contactId] }),
     ]);
+
+  const stopEnrollmentMutation = useMutation({
+    mutationFn: (enrollmentId: string) =>
+      api.stopEnrollment(enrollmentId, 'Stopped from contact profile'),
+    onSuccess: async () => {
+      toast('Stopped sequence enrollment.');
+      await refresh();
+    },
+  });
 
   const withdrawMutation = useMutation({
     mutationFn: ({
@@ -444,21 +462,92 @@ export function ContactProfileScreen({
                 </ul>
               </Panel>
             )}
-            <Panel title="Sequences" padded>
-              {enrollments.length === 0 ? (
-                <p className="m-0 text-[14px] text-ink-2">Not in any sequence.</p>
-              ) : (
-                <ul className="m-0 p-0 list-none space-y-[8px]">
-                  {enrollments.map((e) => (
-                    <li key={e.id} className="text-[14px]">
-                      <div className="text-ink">{e.sequence_name}</div>
-                      <div className="text-[13px] text-ink-3">
-                        {e.status} · since {formatDate(e.enrolled_at, timeZone)}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <Panel
+              title="Outreach"
+              padded
+              actions={
+                can(me, 'sequences.enroll') && !contact.do_not_contact ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setEnrollingInSequence(true)}
+                  >
+                    Enroll in sequence
+                  </Button>
+                ) : undefined
+              }
+            >
+              <div className="space-y-[14px]" data-testid="contact-outreach-panel">
+                <div>
+                  <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-3 mb-[6px]">
+                    Sequences
+                  </div>
+                  {(outreachQuery.data?.enrollments ?? enrollments).length === 0 ? (
+                    <p className="m-0 text-[14px] text-ink-2">Not in any sequence.</p>
+                  ) : (
+                    <ul className="m-0 p-0 list-none space-y-[8px]">
+                      {(outreachQuery.data?.enrollments ?? enrollments).map((e) => {
+                        const isActiveOrPaused = e.status === 'active' || e.status === 'paused';
+                        return (
+                          <li
+                            key={e.id}
+                            className="flex items-start justify-between gap-[8px] text-[14px]"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium text-ink">{e.sequence_name}</div>
+                              <div className="text-[13px] text-ink-3">
+                                {e.status} · since {formatDate(e.enrolled_at, timeZone)}
+                                {'current_step_order' in e &&
+                                typeof e.current_step_order === 'number'
+                                  ? ` · step ${e.current_step_order}`
+                                  : ''}
+                              </div>
+                              {'stop_reason' in e &&
+                                typeof e.stop_reason === 'string' &&
+                                e.stop_reason && (
+                                  <div className="text-[12px] text-ink-3">
+                                    Stopped: {e.stop_reason}
+                                  </div>
+                                )}
+                            </div>
+                            {isActiveOrPaused && can(me, 'sequences.enroll') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={stopEnrollmentMutation.isPending}
+                                onClick={() => stopEnrollmentMutation.mutate(e.id)}
+                              >
+                                Stop
+                              </Button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {outreachQuery.data && outreachQuery.data.campaigns.length > 0 && (
+                  <div className="pt-[10px] border-t border-line">
+                    <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-3 mb-[6px]">
+                      Campaigns
+                    </div>
+                    <ul className="m-0 p-0 list-none space-y-[8px]">
+                      {outreachQuery.data.campaigns.map((c) => (
+                        <li key={c.id} className="text-[14px]">
+                          <div className="font-medium text-ink">{c.campaign_name}</div>
+                          <div className="text-[13px] text-ink-3">
+                            {c.status}
+                            {c.sent_at ? ` · sent ${formatDate(c.sent_at, timeZone)}` : ''}
+                            {c.clicked_at ? ' · clicked' : ''}
+                            {c.reason_code && c.status === 'skipped' ? ` · ${c.reason_code}` : ''}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             </Panel>
             <Panel title="Tags" padded>
               <TagEditor
@@ -665,6 +754,13 @@ export function ContactProfileScreen({
         contactId={contact.id}
         companyId={company?.id ?? null}
         onSent={() => void refresh()}
+      />
+
+      <EnrollInSequenceDrawer
+        open={enrollingInSequence}
+        onClose={() => setEnrollingInSequence(false)}
+        lockedContactIds={[contact.id]}
+        onEnrolled={() => void refresh()}
       />
     </div>
   );

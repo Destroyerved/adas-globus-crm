@@ -75,6 +75,24 @@ const NAVIGATION_ITEMS: CommandPaletteItem[] = [
     targetScreen: 'tasks',
   },
   {
+    id: 'nav_sequences',
+    group: 'NAVIGATION',
+    label: 'Sequences',
+    meta: 'Go to personal outreach sequences',
+    shortcut: 'G S',
+    targetScreen: 'sequences',
+    capability: 'sequences.read',
+  },
+  {
+    id: 'nav_campaigns',
+    group: 'NAVIGATION',
+    label: 'Campaigns',
+    meta: 'Go to marketing campaigns and segments',
+    shortcut: 'G M',
+    targetScreen: 'campaigns',
+    capability: 'campaigns.read',
+  },
+  {
     id: 'nav_reports',
     group: 'NAVIGATION',
     label: 'Reports',
@@ -105,6 +123,8 @@ export type AppScreenId =
   | 'deals'
   | 'tasks'
   | 'inbox'
+  | 'sequences'
+  | 'campaigns'
   | 'outreach'
   | 'imports'
   | 'duplicates'

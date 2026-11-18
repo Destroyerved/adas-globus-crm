@@ -1313,3 +1313,104 @@ test('sending an email from a contact profile appears on the timeline, and Inbox
     page.getByText('Confirmed — see you Tuesday morning at 9:30 am CT.').first(),
   ).toBeVisible();
 });
+
+test('sequences and campaigns support multi-step enrollment, contact outreach history, non-creator approval guard, test sends and reload persistence', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_mgr_1');
+
+  // 1. Open Sequences, create a multi-step sequence (email + task), and enroll Elena Rostova
+  await page.goto('/?screen=sequences');
+  await expect(page.getByTestId('sequences-screen')).toBeVisible();
+
+  await page.getByRole('button', { name: 'New sequence' }).click();
+  await page.getByLabel('Sequence name').fill('Busy Season UltraTax Pod Sequence');
+  await page.getByRole('button', { name: 'Add task step' }).click();
+  await page.getByRole('button', { name: 'Create sequence' }).click();
+  await expect(page.getByText('Sequence created.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Busy Season UltraTax Pod Sequence' }).click();
+  await expect(page.getByTestId('sequence-detail-view')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Enroll contacts' }).first().click();
+  await page.getByLabel('Find contacts').fill('Elena Rostova');
+  await page.getByRole('checkbox', { name: /Elena Rostova/ }).check();
+  await page.getByRole('button', { name: 'Enroll 1 contact' }).click();
+  await expect(page.getByText('Enrolled 1 contact.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Elena Rostova' })).toBeVisible();
+
+  // Verify persistence across reload, axe WCAG 2.2 AA & zero horizontal scroll at 1440px and 375px
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Elena Rostova' })).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `30-sequences-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Open Elena Rostova's contact profile from the sequence and verify the Outreach panel
+  await page.getByRole('button', { name: 'Elena Rostova' }).click();
+  await expect(page.getByTestId('contact-profile-screen')).toBeVisible();
+  await expect(
+    page.getByTestId('contact-outreach-panel').getByText('Busy Season UltraTax Pod Sequence'),
+  ).toBeVisible();
+
+  // 2. Sign in as Marketing Manager (usr_mkt_1), create a block-based Campaign draft, and submit for approval
+  await signInAs(page, 'usr_mkt_1');
+  await page.goto('/?screen=campaigns');
+  await expect(page.getByTestId('campaigns-screen')).toBeVisible();
+
+  await page.getByRole('button', { name: 'New campaign' }).click();
+  await page.getByLabel('Campaign name').fill('January Tax Capacity Briefing');
+  await page
+    .getByLabel('Email subject')
+    .fill('3-day UltraTax & CCH staffing pilot for {{company.name|your firm}}');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByText('Campaign draft saved.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'January Tax Capacity Briefing' }).click();
+  await expect(page.getByTestId('campaign-detail-view')).toBeVisible();
+  await page.getByRole('button', { name: 'Submit for approval' }).click();
+  await expect(page.getByText('Campaign submitted for second-person approval.')).toBeVisible();
+
+  // Non-creator approval guard: creator (Marketing Manager) cannot self-approve
+  await expect(page.getByRole('button', { name: 'Approve campaign' })).toBeDisabled();
+  await expect(
+    page.getByText(
+      'You created this campaign, so another Marketing Manager or Admin must review and approve it before sending.',
+    ),
+  ).toBeVisible();
+
+  // 3. Sign in as Admin (usr_admin_1), approve the campaign, send internal test email, and trigger send
+  const campaignDetailUrl = page.url();
+  await signInAs(page, 'usr_admin_1');
+  await page.goto(campaignDetailUrl);
+  await expect(page.getByTestId('campaign-detail-view')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Approve campaign' }).click();
+  await expect(page.getByText('Campaign approved.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Send test' }).click();
+  await expect(page.getByText('Test email sent.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Send campaign' }).click();
+  await expect(
+    page.getByText('Campaign audience snapshotted and queued for throttled delivery.'),
+  ).toBeVisible();
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `31-campaigns-${width}w.png`),
+      fullPage: true,
+    });
+  }
+});

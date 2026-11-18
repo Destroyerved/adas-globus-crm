@@ -767,16 +767,21 @@ model EmailTemplate {
   id          String   @id
   name        String
   category    String   @default("outreach")
+  channel     String   @default("sequence")
   market      String   @default("US")
   subject     String
   bodyText    String   @map("body_text")
   bodyHtml    String?  @map("body_html")
+  blocksJson  Json     @default("[]") @map("blocks_json")
   variables   Json     @default("[]")
   shared      Boolean  @default(true)
   ownerUserId String   @map("owner_user_id")
+  teamId      String?  @map("team_id")
+  version     Int      @default(1)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
+  @@index([channel, ownerUserId])
   @@map("templates")
 }
 
@@ -792,4 +797,243 @@ model InboundEvent {
   @@unique([provider, providerEventId])
   @@index([receivedAt(sort: Desc)])
   @@map("inbound_events")
+}
+
+// Sequences, Campaigns, Lists, Verified Sender Identities, Message Sends, Send Events & Stored
+// Click Redirect Tokens (PRD 4.12, 4.13, 5, 7.3, 8.3–8.7). Migration 0001 + 0018–0020.
+// Partial unique index `uq_seq_enrollments_active_pair` and check constraints live in 0018–0020.
+model Sequence {
+  id                      String   @id
+  name                    String
+  description             String?
+  market                  String   @default("US")
+  status                  String   @default("active")
+  shared                  Boolean  @default(true)
+  dailyCapPerMailbox      Int      @default(50) @map("daily_cap_per_mailbox")
+  sendWindowStartMinutes  Int      @default(480) @map("send_window_start_minutes")
+  sendWindowEndMinutes    Int      @default(1020) @map("send_window_end_minutes")
+  stopOnCompanyReply      Boolean  @default(true) @map("stop_on_company_reply")
+  clickTrackingEnabled    Boolean  @default(false) @map("click_tracking_enabled")
+  ownerUserId             String   @map("owner_user_id")
+  teamId                  String?  @map("team_id")
+  version                 Int      @default(1)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("sequences")
+}
+
+model SequenceStep {
+  id                String   @id
+  sequenceId        String   @map("sequence_id")
+  stepOrder         Int      @map("step_order")
+  stepKind          String   @default("email") @map("step_kind")
+  delayBusinessDays Int      @default(0) @map("delay_business_days")
+  subjectTemplate   String   @default("") @map("subject_template")
+  bodyTemplate      String   @default("") @map("body_template")
+  replyInThread     Boolean  @default(true) @map("reply_in_thread")
+  taskType          String   @default("follow_up") @map("task_type")
+  taskTitle         String?  @map("task_title")
+  templateId        String?  @map("template_id")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([sequenceId, stepOrder])
+  @@map("sequence_steps")
+}
+
+model SequenceEnrollment {
+  id                  String    @id
+  sequenceId          String    @map("sequence_id")
+  contactId           String    @map("contact_id")
+  email               String
+  senderUserId        String    @map("sender_user_id")
+  mailboxConnectionId String?   @map("mailbox_connection_id")
+  enrolledByUserId    String?   @map("enrolled_by_user_id")
+  currentStepOrder    Int       @default(1) @map("current_step_order")
+  status              String    @default("active")
+  stopReason          String?   @map("stop_reason")
+  lastSkipReason      String?   @map("last_skip_reason")
+  nextSendAt          DateTime? @map("next_send_at") @db.Timestamptz(6)
+  lastStepSentAt      DateTime? @map("last_step_sent_at") @db.Timestamptz(6)
+  enrolledAt          DateTime  @default(now()) @map("enrolled_at") @db.Timestamptz(6)
+  completedAt         DateTime? @map("completed_at") @db.Timestamptz(6)
+  stoppedAt           DateTime? @map("stopped_at") @db.Timestamptz(6)
+
+  @@index([contactId])
+  @@index([sequenceId, status])
+  @@map("sequence_enrollments")
+}
+
+model MarketingList {
+  id          String   @id
+  name        String
+  description String?
+  listType    String   @default("static") @map("list_type")
+  market      String   @default("US")
+  filterJson  Json     @default("{}") @map("filter_json")
+  memberCount Int      @default(0) @map("member_count")
+  shared      Boolean  @default(true)
+  ownerUserId String   @map("owner_user_id")
+  teamId      String?  @map("team_id")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("lists")
+}
+
+model ListMember {
+  listId        String   @map("list_id")
+  contactId     String   @map("contact_id")
+  addedByUserId String?  @map("added_by_user_id")
+  addedAt       DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@id([listId, contactId])
+  @@map("list_members")
+}
+
+model SenderIdentity {
+  id             String    @id
+  fromName       String    @map("from_name")
+  fromEmail      String    @unique @map("from_email")
+  replyToEmail   String?   @map("reply_to_email")
+  domain         String
+  spfVerified    Boolean   @default(false) @map("spf_verified")
+  dkimVerified   Boolean   @default(false) @map("dkim_verified")
+  dmarcVerified  Boolean   @default(false) @map("dmarc_verified")
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz(6)
+  dailyWarmupCap Int       @default(250) @map("daily_warmup_cap")
+  sentTodayCount Int       @default(0) @map("sent_today_count")
+  ownerUserId    String?   @map("owner_user_id")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([domain])
+  @@map("sender_identities")
+}
+
+model Campaign {
+  id                       String    @id
+  name                     String
+  subject                  String
+  bodyHtml                 String    @map("body_html")
+  bodyText                 String    @default("") @map("body_text")
+  blocksJson               Json      @default("[]") @map("blocks_json")
+  market                   String    @default("US")
+  status                   String    @default("draft")
+  listId                   String?   @map("list_id")
+  segmentFilterJson        Json?     @map("segment_filter_json")
+  templateId               String?   @map("template_id")
+  senderIdentityId         String?   @map("sender_identity_id")
+  throttlePerHour          Int       @default(200) @map("throttle_per_hour")
+  respectRecipientTimezone Boolean   @default(true) @map("respect_recipient_timezone")
+  clickTrackingEnabled     Boolean   @default(true) @map("click_tracking_enabled")
+  excludeUnverified        Boolean   @default(true) @map("exclude_unverified")
+  approvedByUserId         String?   @map("approved_by_user_id")
+  approvedAt               DateTime? @map("approved_at") @db.Timestamptz(6)
+  scheduledAt              DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  startedAt                DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt              DateTime? @map("completed_at") @db.Timestamptz(6)
+  sentCount                Int       @default(0) @map("sent_count")
+  deliveredCount           Int       @default(0) @map("delivered_count")
+  bouncedCount             Int       @default(0) @map("bounced_count")
+  softBouncedCount         Int       @default(0) @map("soft_bounced_count")
+  complainedCount          Int       @default(0) @map("complained_count")
+  unsubscribedCount        Int       @default(0) @map("unsubscribed_count")
+  clickedCount             Int       @default(0) @map("clicked_count")
+  openedUnreliableCount    Int       @default(0) @map("opened_unreliable_count")
+  repliedCount             Int       @default(0) @map("replied_count")
+  pausedReason             String?   @map("paused_reason")
+  ownerUserId              String    @map("owner_user_id")
+  teamId                   String?   @map("team_id")
+  version                  Int       @default(1)
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, scheduledAt])
+  @@map("campaigns")
+}
+
+model CampaignRecipient {
+  id            String    @id
+  campaignId    String    @map("campaign_id")
+  contactId     String    @map("contact_id")
+  email         String
+  status        String    @default("queued")
+  reasonCode    String?   @map("reason_code")
+  messageSendId String?   @map("message_send_id")
+  sentAt        DateTime? @map("sent_at") @db.Timestamptz(6)
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(6)
+  clickedAt     DateTime? @map("clicked_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([campaignId, email])
+  @@index([campaignId, status])
+  @@map("campaign_recipients")
+}
+
+model MessageSend {
+  id                     String   @id
+  idempotencyKey         String   @unique @map("idempotency_key")
+  channel                String
+  recipientEmail         String   @map("recipient_email")
+  contactId              String?  @map("contact_id")
+  senderUserId           String?  @map("sender_user_id")
+  senderIdentityId       String?  @map("sender_identity_id")
+  sequenceEnrollmentId   String?  @map("sequence_enrollment_id")
+  sequenceStepId         String?  @map("sequence_step_id")
+  campaignId             String?  @map("campaign_id")
+  campaignRecipientId    String?  @map("campaign_recipient_id")
+  subject                String
+  bodyText               String   @map("body_text")
+  bodyHtml               String?  @map("body_html")
+  transportProvider      String   @default("mailpit") @map("transport_provider")
+  providerMessageId      String?  @map("provider_message_id")
+  internetMessageId      String?  @map("internet_message_id")
+  status                 String   @default("sent")
+  complianceReasonCode   String   @default("OK") @map("compliance_reason_code")
+  errorDetail            String?  @map("error_detail")
+  sentAt                 DateTime @default(now()) @map("sent_at") @db.Timestamptz(6)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([recipientEmail, sentAt(sort: Desc)])
+  @@index([senderUserId, sentAt(sort: Desc)])
+  @@map("message_sends")
+}
+
+model SendEvent {
+  id                   String   @id
+  messageSendId        String?  @map("message_send_id")
+  campaignId           String?  @map("campaign_id")
+  sequenceEnrollmentId String?  @map("sequence_enrollment_id")
+  contactId            String?  @map("contact_id")
+  eventType            String   @map("event_type")
+  provider             String   @default("esp_bulk")
+  providerEventId      String?  @map("provider_event_id")
+  linkUrl              String?  @map("link_url")
+  metadata             Json     @default("{}")
+  occurredAt           DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([provider, providerEventId])
+  @@index([messageSendId, eventType])
+  @@index([campaignId, eventType])
+  @@map("send_events")
+}
+
+model ClickToken {
+  tokenSha256          String    @id @map("token_sha256")
+  targetUrl            String    @map("target_url")
+  messageSendId        String?   @map("message_send_id")
+  campaignId           String?   @map("campaign_id")
+  sequenceEnrollmentId String?   @map("sequence_enrollment_id")
+  contactId            String?   @map("contact_id")
+  clickCount           Int       @default(0) @map("click_count")
+  firstClickedAt       DateTime? @map("first_clicked_at") @db.Timestamptz(6)
+  lastClickedAt        DateTime? @map("last_clicked_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([campaignId])
+  @@index([messageSendId])
+  @@map("click_tokens")
 }

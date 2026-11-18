@@ -49,6 +49,7 @@ import {
 } from '@/features/shared/bulk-action-bar.js';
 import { CompanyPicker, type PickedCompany } from '@/features/shared/company-picker.js';
 import { ExportButton } from '@/features/exports/export-button.js';
+import { EnrollInSequenceDrawer } from '@/features/sequences/sequences-screen.js';
 
 export const VERIFICATION_TONE = { valid: 'success', risky: 'warning', invalid: 'danger' } as const;
 
@@ -69,6 +70,7 @@ export function ContactsScreen({
   const [search, setSearch] = useSearchText(state.q, (q) => setState({ q }));
   const [density, setDensity] = useTableDensity('contact');
   const [formOpen, setFormOpen] = useState(false);
+  const [enrollingSelected, setEnrollingSelected] = useState(false);
   const [company, setCompany] = useState<PickedCompany | null>(null);
 
   const filter = allOf([
@@ -81,8 +83,10 @@ export function ContactsScreen({
     ['contacts', { q: state.q, sort: state.sort, filter }],
     (cursor) => api.listContacts({ q: state.q, sort: state.sort, filter, cursor, limit: 50 }),
   );
-  const canBulk = canUseBulkActions(me, 'contact');
+  const canEnrollSequences = can(me, 'sequences.enroll');
+  const canBulk = canUseBulkActions(me, 'contact') || canEnrollSequences;
   const selection = useBulkSelection(items, JSON.stringify({ q: state.q, filter }));
+  const selectedContactIds = Array.from(selection.selectedIds);
   const cellClass = densityTdClass(density);
 
   const createContact = useMutation({
@@ -110,6 +114,13 @@ export function ContactsScreen({
         count={total}
         actions={
           <>
+            {canEnrollSequences &&
+              selectedContactIds.length > 0 &&
+              !selection.selectAllMatching && (
+                <Button variant="secondary" onClick={() => setEnrollingSelected(true)}>
+                  Enroll in sequence ({selectedContactIds.length})
+                </Button>
+              )}
             <ExportButton
               entity="contact"
               q={state.q}
@@ -365,7 +376,7 @@ export function ContactsScreen({
         </table>
       </DataPanel>
 
-      {canBulk && (
+      {canUseBulkActions(me, 'contact') && (
         <BulkActionBar
           entity="contact"
           selection={selection}
@@ -374,6 +385,13 @@ export function ContactsScreen({
           filter={filter}
         />
       )}
+
+      <EnrollInSequenceDrawer
+        open={enrollingSelected}
+        onClose={() => setEnrollingSelected(false)}
+        lockedContactIds={selectedContactIds}
+        onEnrolled={() => selection.clear()}
+      />
     </div>
   );
 }
