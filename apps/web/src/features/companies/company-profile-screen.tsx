@@ -7,6 +7,9 @@ import { Panel } from '@/components/ui/panel.js';
 import { api } from '@/lib/api.js';
 import { useUserNames } from '@/features/shared/live-kit.js';
 import { can, useMe } from '@/features/shared/list-kit.js';
+import { MergeWithButton } from '@/features/duplicates/direct-merge-drawer.js';
+import { LEAD_STATUS_TONE } from '@/features/leads/leads-screen.js';
+import { CustomFieldsPanel } from '@/features/records/custom-fields-panel.js';
 import { CompanyEditDrawer } from '@/features/records/edit-drawers.js';
 import {
   BackLink,
@@ -28,12 +31,16 @@ export function CompanyProfileScreen({
   onOpenDeals,
   onOpenContact,
   onOpenDeal,
+  onOpenLead,
+  onOpenCompany,
 }: {
   companyId: string | null;
   onBack: () => void;
   onOpenDeals: () => void;
   onOpenContact: (id: string) => void;
   onOpenDeal: (id: string) => void;
+  onOpenLead?: (id: string) => void;
+  onOpenCompany?: (id: string) => void;
 }) {
   const me = useMe();
   const queryClient = useQueryClient();
@@ -62,7 +69,7 @@ export function CompanyProfileScreen({
   }
   if (!profile.isSuccess) return <ProfileStatus back={back} query={profile} />;
 
-  const { company, contacts, deals, tasks } = profile.data;
+  const { company, contacts, deals, tasks, leads = [] } = profile.data;
   const location = [company.city, company.state_province].filter(Boolean).join(', ');
   const canWrite = can(me, 'companies.write');
 
@@ -99,6 +106,14 @@ export function CompanyProfileScreen({
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit company
               </Button>
+            )}
+            {canWrite && (
+              <MergeWithButton
+                entity="company"
+                recordId={company.id}
+                recordName={company.name}
+                onOpenRecord={(id) => (onOpenCompany ? onOpenCompany(id) : void refresh())}
+              />
             )}
             {can(me, 'records.delete') && (
               <DeleteRecordButton
@@ -140,6 +155,14 @@ export function CompanyProfileScreen({
                 </ul>
               )}
             </Panel>
+            <CustomFieldsPanel
+              entityType="company"
+              entityId={company.id}
+              version={company.version}
+              values={company.custom_fields}
+              canWrite={canWrite}
+              onSaved={() => void refresh()}
+            />
             <Panel title="Timeline" padded>
               <Timeline
                 entityType="company"
@@ -194,6 +217,30 @@ export function CompanyProfileScreen({
                             { perMonth: true },
                           )}
                         </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+            <Panel title={`Leads (${leads.length})`} padded>
+              {leads.length === 0 ? (
+                <p className="m-0 text-[14px] text-ink-2">No leads linked to this company.</p>
+              ) : (
+                <ul className="m-0 p-0 list-none space-y-[10px]" data-testid="company-leads-list">
+                  {leads.map((l) => (
+                    <li key={l.id} className="space-y-[2px]">
+                      <div className="font-semibold text-ink">{l.full_name}</div>
+                      <div className="text-[13px] text-ink-2 flex flex-wrap gap-[6px] items-center">
+                        <StatusBadge tone={LEAD_STATUS_TONE[l.status] ?? 'neutral'}>
+                          {l.status}
+                        </StatusBadge>
+                        <span>{l.source}</span>
+                        {onOpenLead && (
+                          <Button variant="link" onClick={() => onOpenLead(l.id)}>
+                            Open lead
+                          </Button>
+                        )}
                       </div>
                     </li>
                   ))}

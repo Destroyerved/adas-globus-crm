@@ -24,6 +24,8 @@ import {
   CrmRecordService,
   CrmService,
   CrmTimelineService,
+  CustomFieldService,
+  LeadScoringService,
   SavedViewService,
   registerCrmRoutes,
 } from './modules/crm/index.js';
@@ -219,9 +221,20 @@ export function createAppServer(
   const timeline = new CrmTimelineService(db);
   const savedViews = new SavedViewService(db);
   const bulk = new BulkActionService(db, (userId) => auth.resolveSessionUser(userId), logger);
+  const customFields = new CustomFieldService(db);
+  const scoring = new LeadScoringService(db);
   const notifications = new NotificationService(db);
   const router = new Router();
-  registerCrmRoutes(router, { crm, lists, records, timeline, savedViews, bulk });
+  registerCrmRoutes(router, {
+    crm,
+    lists,
+    records,
+    timeline,
+    savedViews,
+    bulk,
+    customFields,
+    scoring,
+  });
   registerComplianceRoutes(router, compliance);
   registerIntakeRoutes(router, intake);
   const admin = new AdminService(db);

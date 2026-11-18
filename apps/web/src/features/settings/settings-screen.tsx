@@ -1,11 +1,13 @@
 import { PageHeader } from '@/features/shared/live-kit.js';
 import { can, useMe, useUrlState } from '@/features/shared/list-kit.js';
 import { AuditTab } from './audit-tab.js';
+import { CustomFieldsTab } from './custom-fields-tab.js';
 import { ListsTab } from './lists-tab.js';
 import { PipelinesTab } from './pipelines-tab.js';
 import { PreferencesTab } from './preferences-tab.js';
 import { RolesTab } from './roles-tab.js';
 import { RoutingTab } from './routing-tab.js';
+import { ScoringTab } from './scoring-tab.js';
 import { SuppressionsTab } from './suppressions-tab.js';
 import { TeamsTab } from './teams-tab.js';
 import { UsersTab } from './users-tab.js';
@@ -17,6 +19,8 @@ type TabId =
   | 'roles'
   | 'pipelines'
   | 'routing'
+  | 'custom-fields'
+  | 'scoring'
   | 'lists'
   | 'suppressions'
   | 'audit';
@@ -27,6 +31,8 @@ const TABS: { id: TabId; label: string; capability: string | null }[] = [
   { id: 'roles', label: 'Roles', capability: 'users.manage' },
   { id: 'pipelines', label: 'Pipelines', capability: 'settings.manage' },
   { id: 'routing', label: 'Routing', capability: 'settings.manage' },
+  { id: 'custom-fields', label: 'Custom fields', capability: 'settings.manage' },
+  { id: 'scoring', label: 'Scoring', capability: 'settings.manage' },
   { id: 'lists', label: 'Lists', capability: 'settings.manage' },
   { id: 'suppressions', label: 'Suppressions', capability: 'compliance.manage' },
   { id: 'audit', label: 'Audit log', capability: 'audit.read' },
@@ -76,6 +82,8 @@ export function SettingsScreen({ onOpenLead }: { onOpenLead?: (leadId: string) =
         {active?.id === 'roles' && <RolesTab />}
         {active?.id === 'pipelines' && <PipelinesTab />}
         {active?.id === 'routing' && <RoutingTab onOpenLead={onOpenLead} />}
+        {active?.id === 'custom-fields' && <CustomFieldsTab />}
+        {active?.id === 'scoring' && <ScoringTab />}
         {active?.id === 'lists' && <ListsTab />}
         {active?.id === 'suppressions' && <SuppressionsTab />}
         {active?.id === 'audit' && <AuditTab />}

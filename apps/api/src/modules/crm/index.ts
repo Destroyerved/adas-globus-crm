@@ -33,9 +33,14 @@ import {
   normalizePhone,
 } from '../../platform/normalize/index.js';
 import { requireCapability, scopeWhere } from '../../platform/scope/index.js';
+import { LeadScoringService } from './scoring.js';
 
 export class CrmService {
-  constructor(private readonly db: DatabaseService) {}
+  private readonly scoring: LeadScoringService;
+
+  constructor(private readonly db: DatabaseService) {
+    this.scoring = new LeadScoringService(db);
+  }
 
   // -------------------------------------------------------------------------
   // Companies (PRD §4.3)
@@ -70,18 +75,19 @@ export class CrmService {
   }
 
   /**
-   * Company profile (PRD 4.3): the company plus its contacts, deals, open tasks and
+   * Company profile (PRD 4.3): the company plus its contacts, deals, leads, open tasks and
    * timeline. Each related list applies the viewer's own scope for that record type.
    */
   async getCompanyProfile(user: SessionUser, companyId: string): Promise<Record<string, unknown>> {
     const company = await this.getCompany(user, companyId);
     const contactScope = scopeWhere(user, 'contacts.read', { startParamIndex: 2 });
     const dealScope = scopeWhere(user, 'deals.read', { startParamIndex: 2 });
+    const leadScope = scopeWhere(user, 'leads.read', { startParamIndex: 2 });
     const taskScope = scopeWhere(user, 'tasks.read', {
       ownerColumn: 'assignee_user_id',
       startParamIndex: 2,
     });
-    const [contacts, deals, tasks, activities, tags] = await Promise.all([
+    const [contacts, deals, leads, tasks, activities, tags] = await Promise.all([
       this.db.query(
         `SELECT id, full_name, title, primary_email, phone_e164, market, timezone,
                 owner_user_id, do_not_contact, email_verification_status, lead_score, updated_at
@@ -97,6 +103,14 @@ export class CrmService {
          WHERE company_id = $1 AND deleted_at IS NULL AND ${dealScope.sql}
          ORDER BY updated_at DESC`,
         [companyId, ...dealScope.params],
+      ),
+      this.db.query(
+        `SELECT id, full_name, email, title, status, status_category, source,
+                lead_score, owner_user_id, created_at, updated_at
+         FROM leads
+         WHERE company_id = $1 AND deleted_at IS NULL AND ${leadScope.sql}
+         ORDER BY updated_at DESC`,
+        [companyId, ...leadScope.params],
       ),
       this.db.query(
         `SELECT id, title, task_type, priority, status, due_at, assignee_user_id
@@ -124,6 +138,7 @@ export class CrmService {
       company: { ...company, tags: tags.rows.map((t) => t.name) },
       contacts: contacts.rows,
       deals: deals.rows,
+      leads: leads.rows,
       tasks: tasks.rows,
       activities: activities.rows,
     };
@@ -404,7 +419,9 @@ export class CrmService {
         );
       }
 
-      return inserted.rows[0] ?? { id };
+      await this.scoring.evaluateContact(tx, id);
+      const scored = await tx.query(`SELECT * FROM contacts WHERE id = $1`, [id]);
+      return scored.rows[0] ?? inserted.rows[0] ?? { id };
     });
   }
 
@@ -533,7 +550,9 @@ export class CrmService {
         payload: { id, email: cleanEmail, market: input.market, source: input.source },
       });
 
-      return inserted.rows[0] ?? { id };
+      await this.scoring.evaluateLead(tx, id);
+      const scored = await tx.query(`SELECT * FROM leads WHERE id = $1`, [id]);
+      return scored.rows[0] ?? inserted.rows[0] ?? { id };
     });
   }
 
@@ -541,8 +560,9 @@ export class CrmService {
    * PRD §4.2 & §4.5 (A7) — Lead conversion in one database transaction:
    * - Creates or links Company (unless free-mail domain without firm name)
    * - Creates or links Contact
-   * - Optionally creates Deal; if `startFreeTrial` is true, places Deal in
-   *   `Free Trial (3-Day)` stage and creates Day-1, Day-2, and Day-3 check-in tasks!
+   * - Links an existing Deal (`existingDealId`) OR creates a Deal in the chosen `pipelineId` and
+   *   `stageId`; if `startFreeTrial` is true (or the chosen stage is a trial stage), sets trial
+   *   timestamps and creates Day-1, Day-2, and Day-3 check-in tasks!
    * - Marks Lead `Converted` (`status_category = 'closed'`)
    */
   async convertLead(
@@ -664,48 +684,117 @@ export class CrmService {
           [`ce_${randomUUID()}`, contactId, lead.email],
         );
       }
+      await this.scoring.evaluateContact(tx, contactId);
 
-      // 3. Create Deal if requested
+      // 3. Link existing Deal OR create a new Deal if requested
       let dealId: string | null = null;
       const trialTaskIds: string[] = [];
 
-      if (input.createDeal && companyId) {
+      if (input.existingDealId) {
+        const dealScope = scopeWhere(user, 'deals.write', { startParamIndex: 2 });
+        const existingDealRes = await tx.query<{ id: string; company_id: string }>(
+          `SELECT id, company_id FROM deals
+           WHERE id = $1 AND deleted_at IS NULL AND ${dealScope.sql}
+           FOR UPDATE`,
+          [input.existingDealId, ...dealScope.params],
+        );
+        const existingDeal = existingDealRes.rows[0];
+        if (!existingDeal) {
+          throw new NotFoundDomainError('Deal', input.existingDealId);
+        }
+        if (companyId && existingDeal.company_id !== companyId) {
+          throw new ValidationDomainError('That deal belongs to a different company.', {
+            existingDealId: ['Pick a deal belonging to this company.'],
+          });
+        }
+        if (!companyId) {
+          companyId = existingDeal.company_id;
+          await tx.query(
+            `UPDATE contacts SET company_id = COALESCE(company_id, $2) WHERE id = $1`,
+            [contactId, companyId],
+          );
+        }
+        dealId = existingDeal.id;
+        await tx.query(
+          `UPDATE deals
+           SET primary_contact_id = COALESCE(primary_contact_id, $2),
+               last_activity_at = NOW(),
+               version = version + 1,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [dealId, contactId],
+        );
+      } else if (input.createDeal && companyId) {
         dealId = `deal_${randomUUID()}`;
         const monthlyMinor = BigInt(input.monthlyValueMinor);
+        const termMonths = input.termMonths ?? 12;
         const annualMinor = monthlyMinor * 12n;
-        // Stages are admin-editable (PRD 3.3): find the trial stage by its flag and the
-        // discovery stage by ID, falling back to the first open stage.
-        const startStage = await tx.query<{ id: string; name: string; probability: number }>(
-          `SELECT id, name, probability FROM pipeline_stages
-           WHERE pipeline_id = 'pipeline_new_business' AND category = 'open'
-           ORDER BY (CASE WHEN $1 THEN is_trial ELSE id = 'stg_disc' END) DESC, stage_order
-           LIMIT 1`,
-          [Boolean(input.startFreeTrial)],
-        );
-        const stageId = startStage.rows[0]?.id ?? 'stg_disc';
-        const stageName = startStage.rows[0]?.name ?? 'Discovery Scheduled';
-        const probability = startStage.rows[0]?.probability ?? 25;
+        const pipelineId = input.pipelineId || 'pipeline_new_business';
+
+        let chosenStage:
+          { id: string; name: string; probability: number; is_trial?: boolean } | undefined;
+        if (input.stageId) {
+          const explicitStage = await tx.query<{
+            id: string;
+            name: string;
+            probability: number;
+            is_trial: boolean;
+          }>(
+            `SELECT id, name, probability, is_trial FROM pipeline_stages
+             WHERE pipeline_id = $1 AND id = $2 AND category = 'open'
+             LIMIT 1`,
+            [pipelineId, input.stageId],
+          );
+          if (!explicitStage.rows[0]) {
+            throw new ValidationDomainError('Choose an open stage in the selected pipeline.', {
+              stageId: ['Invalid stage for this pipeline.'],
+            });
+          }
+          chosenStage = explicitStage.rows[0];
+        } else {
+          const startStage = await tx.query<{
+            id: string;
+            name: string;
+            probability: number;
+            is_trial: boolean;
+          }>(
+            `SELECT id, name, probability, is_trial FROM pipeline_stages
+             WHERE pipeline_id = $1 AND category = 'open'
+             ORDER BY (CASE WHEN $2 THEN is_trial ELSE id = 'stg_disc' END) DESC, stage_order
+             LIMIT 1`,
+            [pipelineId, Boolean(input.startFreeTrial)],
+          );
+          chosenStage = startStage.rows[0];
+        }
+
+        const stageId = chosenStage?.id ?? 'stg_disc';
+        const stageName = chosenStage?.name ?? 'Discovery Scheduled';
+        const probability = chosenStage?.probability ?? 25;
+        const startTrial = Boolean(input.startFreeTrial || chosenStage?.is_trial);
         const dealName =
-          input.dealName ??
+          input.dealName?.trim() ||
           `${lead.firm_name ?? lead.full_name} — ${input.services[0] ?? 'Staffing'} Pod (${input.fteCount} FTE)`;
+        const trialRole = startTrial
+          ? input.trialCandidateRole?.trim() || 'Senior Tax & Accounting Specialist'
+          : null;
 
         await tx.query(
           `INSERT INTO deals (
              id, pipeline_id, stage_id, stage_name, stage_category, company_id, primary_contact_id,
-             name, monthly_value_minor, annual_value_minor, currency, fte_count, engagement_model,
-             services, probability, trial_started_at, trial_ends_at, trial_candidate_role,
-             owner_user_id, team_id
+             name, monthly_value_minor, annual_value_minor, term_months, currency, fte_count,
+             engagement_model, services, probability, trial_started_at, trial_ends_at,
+             trial_candidate_role, owner_user_id, team_id
            ) VALUES (
-             $1, 'pipeline_new_business', $2, $3, 'open', $4, $5,
-             $6, $7, $8, $9, $10, $11,
-             $12::jsonb, $13,
-             CASE WHEN $14 THEN NOW() ELSE NULL END,
-             CASE WHEN $14 THEN NOW() + INTERVAL '3 days' ELSE NULL END,
-             CASE WHEN $14 THEN 'Senior Tax & Accounting Specialist' ELSE NULL END,
-             $15, $16
+             $1, $2, $3, $4, 'open', $5, $6,
+             $7, $8, $9, $10, $11, $12,
+             $13, $14::jsonb, $15,
+             CASE WHEN $16 THEN NOW() ELSE NULL END,
+             CASE WHEN $16 THEN NOW() + INTERVAL '3 days' ELSE NULL END,
+             $17, $18, $19
            )`,
           [
             dealId,
+            pipelineId,
             stageId,
             stageName,
             companyId,
@@ -713,18 +802,26 @@ export class CrmService {
             dealName,
             monthlyMinor.toString(),
             annualMinor.toString(),
+            termMonths,
             input.currency,
             input.fteCount,
             input.engagementModel,
             JSON.stringify(input.services),
             probability,
-            input.startFreeTrial,
+            startTrial,
+            trialRole,
             lead.owner_user_id,
             lead.team_id,
           ],
         );
 
-        if (input.startFreeTrial) {
+        await tx.query(
+          `INSERT INTO deal_stage_history (id, deal_id, from_stage, to_stage, to_stage_id, changed_by_user_id)
+           VALUES ($1, $2, NULL, $3, $4, $5)`,
+          [`dsh_${randomUUID()}`, dealId, stageName, stageId, user.id],
+        );
+
+        if (startTrial) {
           for (const dayOffset of [1, 2, 3]) {
             const taskId = `tsk_trial_${randomUUID()}`;
             trialTaskIds.push(taskId);
@@ -1249,6 +1346,8 @@ export { CrmRecordService } from './records.js';
 export { CrmTimelineService } from './timeline.js';
 export { SavedViewService } from './saved-views.js';
 export { BulkActionService } from './bulk.js';
+export { CustomFieldService } from './custom-fields.js';
+export { LeadScoringService } from './scoring.js';
 export { CrmJobs } from './jobs.js';
 export {
   ImportRecordWriter,

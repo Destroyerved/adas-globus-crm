@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+  AddContactEmailInputSchema,
+  AddContactPhoneInputSchema,
   CompleteTaskInputSchema,
   RecordEntityTypeSchema,
+  SetPrimaryContactEmailInputSchema,
+  SetPrimaryContactPhoneInputSchema,
   UpdateCompanyInputSchema,
   UpdateContactInputSchema,
   UpdateDealInputSchema,
@@ -34,6 +38,7 @@ import {
   resolveAssignee,
   writeChanges,
 } from './access.js';
+import { LeadScoringService } from './scoring.js';
 
 /**
  * Editing records (PRD 3.1, 3.2, 4.3-4.7, 6.7): optimistic concurrency on `version`,
@@ -124,7 +129,11 @@ function isValidTimeZone(tz: string): boolean {
 }
 
 export class CrmRecordService {
-  constructor(private readonly db: DatabaseService) {}
+  private readonly scoring: LeadScoringService;
+
+  constructor(private readonly db: DatabaseService) {
+    this.scoring = new LeadScoringService(db);
+  }
 
   // -------------------------------------------------------------------------
   // Leads (PRD 3.2, 4.5)
@@ -326,7 +335,9 @@ export class CrmRecordService {
       if (newOwnerName) {
         await this.recordAssignment(tx, user, 'lead', leadId, next, ownerId, newOwnerName);
       }
-      return next;
+      await this.scoring.evaluateLead(tx, leadId);
+      const scored = await tx.query<Row>(`SELECT * FROM leads WHERE id = $1`, [leadId]);
+      return scored.rows[0] ?? next;
     });
   }
 
@@ -487,7 +498,375 @@ export class CrmRecordService {
       if (newOwnerName) {
         await this.recordAssignment(tx, user, 'contact', contactId, next, ownerId, newOwnerName);
       }
-      return next;
+      await this.scoring.evaluateContact(tx, contactId);
+      const scored = await tx.query<Row>(`SELECT * FROM contacts WHERE id = $1`, [contactId]);
+      return scored.rows[0] ?? next;
+    });
+  }
+
+  async addContactEmail(
+    user: SessionUser,
+    contactId: string,
+    raw: unknown,
+  ): Promise<{ emails: Row[] }> {
+    const input = AddContactEmailInputSchema.parse(raw);
+    const clean = normalizeEmail(input.email);
+    if (!clean) {
+      throw new ValidationDomainError('Enter a valid email address.', {
+        email: ['Enter a valid email address.'],
+      });
+    }
+
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      const erased = await tx.query<{ id: string }>(
+        `SELECT id FROM suppressions WHERE email_sha256 = $1 AND reason = 'privacy_erasure' LIMIT 1`,
+        [sha256Hex(clean)],
+      );
+      if (erased.rows[0]) {
+        throw new DomainError({
+          status: 409,
+          code: 'PRIVACY_ERASED',
+          title: 'Address permanently suppressed',
+          detail: 'This email address was erased after a privacy request and cannot be used again.',
+          fieldErrors: { email: ['This email address was erased after a privacy request.'] },
+        });
+      }
+
+      const owner = await tx.query<{ full_name: string }>(
+        `SELECT c.full_name FROM contact_emails ce
+         JOIN contacts c ON c.id = ce.contact_id
+         WHERE ce.email = $1 AND ce.contact_id <> $2
+         UNION ALL
+         SELECT full_name FROM contacts
+         WHERE primary_email = $1 AND id <> $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [clean, contactId],
+      );
+      if (owner.rows[0]) {
+        throw new DomainError({
+          status: 409,
+          code: 'EMAIL_BELONGS_TO_OTHER_CONTACT',
+          title: 'Email already in use',
+          detail: `This email already belongs to ${owner.rows[0].full_name}.`,
+          fieldErrors: { email: ['This email belongs to another contact.'] },
+        });
+      }
+
+      // Ensure existing primary_email is present in contact_emails
+      const primary = String(cur['primary_email']);
+      await tx.query(
+        `INSERT INTO contact_emails (id, contact_id, email, is_primary, verification_status)
+         VALUES ($1, $2, $3, TRUE, $4)
+         ON CONFLICT (email) DO NOTHING`,
+        [`ce_${randomUUID()}`, contactId, primary, cur['email_verification_status'] ?? 'unknown'],
+      );
+
+      if (input.makePrimary && clean !== primary) {
+        await tx.query(`UPDATE contact_emails SET is_primary = FALSE WHERE contact_id = $1`, [
+          contactId,
+        ]);
+        await tx.query(
+          `INSERT INTO contact_emails (id, contact_id, email, is_primary, verification_status)
+           VALUES ($1, $2, $3, TRUE, 'unknown')
+           ON CONFLICT (email) DO UPDATE SET is_primary = TRUE`,
+          [`ce_${randomUUID()}`, contactId, clean],
+        );
+        await tx.query(
+          `UPDATE contacts SET primary_email = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
+          [contactId, clean],
+        );
+        await this.db.writeRecordHistory(tx, {
+          entityType: 'contact',
+          entityId: contactId,
+          fieldName: 'primary_email',
+          oldValue: primary,
+          newValue: clean,
+          changedByUserId: user.id,
+        });
+      } else {
+        await tx.query(
+          `INSERT INTO contact_emails (id, contact_id, email, is_primary, verification_status)
+           VALUES ($1, $2, $3, FALSE, 'unknown')
+           ON CONFLICT (email) DO NOTHING`,
+          [`ce_${randomUUID()}`, contactId, clean],
+        );
+      }
+
+      const emails = await tx.query<Row>(
+        `SELECT email, is_primary, verification_status FROM contact_emails
+         WHERE contact_id = $1 ORDER BY is_primary DESC, email ASC`,
+        [contactId],
+      );
+      return { emails: emails.rows };
+    });
+  }
+
+  async setPrimaryContactEmail(
+    user: SessionUser,
+    contactId: string,
+    raw: unknown,
+  ): Promise<{ emails: Row[] }> {
+    const input = SetPrimaryContactEmailInputSchema.parse(raw);
+    const clean = normalizeEmail(input.email);
+    if (!clean) {
+      throw new ValidationDomainError('Enter a valid email address.', {
+        email: ['Enter a valid email address.'],
+      });
+    }
+
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      const existing = await tx.query<{ id: string }>(
+        `SELECT id FROM contact_emails WHERE contact_id = $1 AND email = $2`,
+        [contactId, clean],
+      );
+      if (!existing.rows[0]) {
+        throw new NotFoundDomainError('Contact email', clean);
+      }
+      const oldPrimary = String(cur['primary_email']);
+      if (clean !== oldPrimary) {
+        await tx.query(`UPDATE contact_emails SET is_primary = FALSE WHERE contact_id = $1`, [
+          contactId,
+        ]);
+        await tx.query(
+          `UPDATE contact_emails SET is_primary = TRUE WHERE contact_id = $1 AND email = $2`,
+          [contactId, clean],
+        );
+        await tx.query(
+          `UPDATE contacts SET primary_email = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
+          [contactId, clean],
+        );
+        await this.db.writeRecordHistory(tx, {
+          entityType: 'contact',
+          entityId: contactId,
+          fieldName: 'primary_email',
+          oldValue: oldPrimary,
+          newValue: clean,
+          changedByUserId: user.id,
+        });
+      }
+      const emails = await tx.query<Row>(
+        `SELECT email, is_primary, verification_status FROM contact_emails
+         WHERE contact_id = $1 ORDER BY is_primary DESC, email ASC`,
+        [contactId],
+      );
+      return { emails: emails.rows };
+    });
+  }
+
+  async removeContactEmail(
+    user: SessionUser,
+    contactId: string,
+    rawEmail: string,
+  ): Promise<{ emails: Row[] }> {
+    const clean = normalizeEmail(rawEmail);
+    if (!clean) {
+      throw new ValidationDomainError('Enter a valid email address.', {
+        email: ['Enter a valid email address.'],
+      });
+    }
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      if (clean === String(cur['primary_email'])) {
+        throw new ValidationDomainError(
+          'Make another email primary before removing this address.',
+          { email: ['Cannot remove the primary email address.'] },
+        );
+      }
+      await tx.query(`DELETE FROM contact_emails WHERE contact_id = $1 AND email = $2`, [
+        contactId,
+        clean,
+      ]);
+      const emails = await tx.query<Row>(
+        `SELECT email, is_primary, verification_status FROM contact_emails
+         WHERE contact_id = $1 ORDER BY is_primary DESC, email ASC`,
+        [contactId],
+      );
+      return { emails: emails.rows };
+    });
+  }
+
+  async addContactPhone(
+    user: SessionUser,
+    contactId: string,
+    raw: unknown,
+  ): Promise<{ phones: Row[] }> {
+    const input = AddContactPhoneInputSchema.parse(raw);
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      const region = cur['market'] === 'CA' ? 'CA' : 'US';
+      const e164 = normalizePhone(input.phone, region);
+      if (!e164) {
+        throw new ValidationDomainError('Enter a valid phone number.', {
+          phone: ['Enter a valid phone number with area or country code.'],
+        });
+      }
+
+      const oldPrimary = (cur['phone_e164'] as string | null) ?? null;
+      if (oldPrimary) {
+        await tx.query(
+          `INSERT INTO contact_phones (id, contact_id, phone_e164, phone_label, is_primary)
+           SELECT $1, $2, $3, 'work', TRUE
+           WHERE NOT EXISTS (
+             SELECT 1 FROM contact_phones WHERE contact_id = $2 AND phone_e164 = $3
+           )`,
+          [`cp_${randomUUID()}`, contactId, oldPrimary],
+        );
+      }
+
+      const makePrimary = input.makePrimary || !oldPrimary;
+      if (makePrimary) {
+        await tx.query(`UPDATE contact_phones SET is_primary = FALSE WHERE contact_id = $1`, [
+          contactId,
+        ]);
+      }
+
+      const existing = await tx.query<{ id: string }>(
+        `SELECT id FROM contact_phones WHERE contact_id = $1 AND phone_e164 = $2`,
+        [contactId, e164],
+      );
+      if (existing.rows[0]) {
+        await tx.query(
+          `UPDATE contact_phones SET phone_label = $2, is_primary = $3 WHERE id = $1`,
+          [existing.rows[0].id, input.label, makePrimary],
+        );
+      } else {
+        await tx.query(
+          `INSERT INTO contact_phones (id, contact_id, phone_e164, phone_label, is_primary)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [`cp_${randomUUID()}`, contactId, e164, input.label, makePrimary],
+        );
+      }
+
+      if (makePrimary && e164 !== oldPrimary) {
+        await tx.query(
+          `UPDATE contacts SET phone_e164 = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
+          [contactId, e164],
+        );
+        await this.db.writeRecordHistory(tx, {
+          entityType: 'contact',
+          entityId: contactId,
+          fieldName: 'phone_e164',
+          oldValue: oldPrimary,
+          newValue: e164,
+          changedByUserId: user.id,
+        });
+      }
+
+      const phones = await tx.query<Row>(
+        `SELECT phone_e164, phone_label, is_primary FROM contact_phones
+         WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC`,
+        [contactId],
+      );
+      return { phones: phones.rows };
+    });
+  }
+
+  async setPrimaryContactPhone(
+    user: SessionUser,
+    contactId: string,
+    raw: unknown,
+  ): Promise<{ phones: Row[] }> {
+    const input = SetPrimaryContactPhoneInputSchema.parse(raw);
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      const existing = await tx.query<{ id: string }>(
+        `SELECT id FROM contact_phones WHERE contact_id = $1 AND phone_e164 = $2`,
+        [contactId, input.phoneE164],
+      );
+      if (!existing.rows[0]) {
+        throw new NotFoundDomainError('Contact phone', input.phoneE164);
+      }
+      const oldPrimary = (cur['phone_e164'] as string | null) ?? null;
+      await tx.query(`UPDATE contact_phones SET is_primary = FALSE WHERE contact_id = $1`, [
+        contactId,
+      ]);
+      await tx.query(
+        `UPDATE contact_phones SET is_primary = TRUE WHERE contact_id = $1 AND phone_e164 = $2`,
+        [contactId, input.phoneE164],
+      );
+      if (input.phoneE164 !== oldPrimary) {
+        await tx.query(
+          `UPDATE contacts SET phone_e164 = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
+          [contactId, input.phoneE164],
+        );
+        await this.db.writeRecordHistory(tx, {
+          entityType: 'contact',
+          entityId: contactId,
+          fieldName: 'phone_e164',
+          oldValue: oldPrimary,
+          newValue: input.phoneE164,
+          changedByUserId: user.id,
+        });
+      }
+      const phones = await tx.query<Row>(
+        `SELECT phone_e164, phone_label, is_primary FROM contact_phones
+         WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC`,
+        [contactId],
+      );
+      return { phones: phones.rows };
+    });
+  }
+
+  async removeContactPhone(
+    user: SessionUser,
+    contactId: string,
+    phoneE164: string,
+  ): Promise<{ phones: Row[] }> {
+    return this.db.transaction(async (tx) => {
+      const cur = await requireRecord<Row>(tx, user, 'contact', contactId, 'write', {
+        forUpdate: true,
+      });
+      await tx.query(`DELETE FROM contact_phones WHERE contact_id = $1 AND phone_e164 = $2`, [
+        contactId,
+        phoneE164,
+      ]);
+
+      const remaining = await tx.query<{ id: string; phone_e164: string; is_primary: boolean }>(
+        `SELECT id, phone_e164, is_primary FROM contact_phones
+         WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC`,
+        [contactId],
+      );
+      const nextPrimary = remaining.rows[0] ?? null;
+      if (nextPrimary && !nextPrimary.is_primary) {
+        await tx.query(`UPDATE contact_phones SET is_primary = TRUE WHERE id = $1`, [
+          nextPrimary.id,
+        ]);
+      }
+      const nextPhoneVal = nextPrimary?.phone_e164 ?? null;
+      const oldPrimary = (cur['phone_e164'] as string | null) ?? null;
+      if (nextPhoneVal !== oldPrimary) {
+        await tx.query(
+          `UPDATE contacts SET phone_e164 = $2, version = version + 1, updated_at = NOW() WHERE id = $1`,
+          [contactId, nextPhoneVal],
+        );
+        await this.db.writeRecordHistory(tx, {
+          entityType: 'contact',
+          entityId: contactId,
+          fieldName: 'phone_e164',
+          oldValue: oldPrimary,
+          newValue: nextPhoneVal,
+          changedByUserId: user.id,
+        });
+      }
+
+      const phones = await tx.query<Row>(
+        `SELECT phone_e164, phone_label, is_primary FROM contact_phones
+         WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC`,
+        [contactId],
+      );
+      return { phones: phones.rows };
     });
   }
 

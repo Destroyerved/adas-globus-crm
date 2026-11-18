@@ -20,6 +20,7 @@ import {
 import { getCapabilityScope, scopeWhere } from '../../platform/scope/index.js';
 import { insertActivity, linksFor, requireRecord } from './access.js';
 import { leadStatusCategory } from './records.js';
+import { LeadScoringService } from './scoring.js';
 
 /**
  * Notes, tags, logged calls and meetings, the activity timeline and record profiles
@@ -42,7 +43,11 @@ const ACTIVITY_TITLES: Record<string, string> = {
 };
 
 export class CrmTimelineService {
-  constructor(private readonly db: DatabaseService) {}
+  private readonly scoring: LeadScoringService;
+
+  constructor(private readonly db: DatabaseService) {
+    this.scoring = new LeadScoringService(db);
+  }
 
   // -------------------------------------------------------------------------
   // Timeline (PRD 4.7): activities, notes and status/stage history, newest first.
@@ -217,6 +222,11 @@ export class CrmTimelineService {
             payload: { leadId: links.leadId, from, to, automatic: true },
           });
         }
+      }
+
+      if (input.activityType === 'call' || input.activityType === 'meeting') {
+        if (links.leadId) await this.scoring.evaluateLead(tx, links.leadId);
+        if (links.contactId) await this.scoring.evaluateContact(tx, links.contactId);
       }
 
       await this.db.addOutboxEvent(tx, {

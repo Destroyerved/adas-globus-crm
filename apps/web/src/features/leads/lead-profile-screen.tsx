@@ -1,13 +1,12 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDate, formatRelative } from '@adas/shared';
 import { Button } from '@/components/ui/button.js';
 import { MarketBadge, StatusBadge } from '@/components/ui/badge.js';
 import { Panel } from '@/components/ui/panel.js';
-import { useToast } from '@/components/ui/toast.js';
 import { api } from '@/lib/api.js';
-import { errorMessage } from '@/features/shared/live-kit.js';
 import { can, useMe } from '@/features/shared/list-kit.js';
+import { CustomFieldsPanel } from '@/features/records/custom-fields-panel.js';
 import { LeadEditDrawer } from '@/features/records/edit-drawers.js';
 import {
   BackLink,
@@ -18,11 +17,13 @@ import {
   TasksPanel,
   TwoColumn,
 } from '@/features/records/profile-kit.js';
+import { ScorePanel } from '@/features/records/score-panel.js';
 import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
+import { ConvertLeadDrawer } from './convert-lead-drawer.js';
 import { LEAD_STATUS_TONE } from './leads-screen.js';
 
-/** Lead page (PRD 3.2, 4.4): details, status, owner, tags, tasks and the timeline. */
+/** Lead page (PRD 3.2, 4.4, 4.5): details, status, owner, score, custom fields, tags, tasks and timeline. */
 export function LeadProfileScreen({
   leadId,
   onBack,
@@ -37,10 +38,10 @@ export function LeadProfileScreen({
   onOpenDeal: (id: string) => void;
 }) {
   const me = useMe();
-  const toast = useToast();
   const queryClient = useQueryClient();
   const timeZone = viewerTimeZone();
   const [editing, setEditing] = useState(false);
+  const [converting, setConverting] = useState(false);
   const key = ['lead', leadId] as const;
   const profile = useQuery({
     queryKey: key,
@@ -52,15 +53,6 @@ export function LeadProfileScreen({
       queryClient.invalidateQueries({ queryKey: key }),
       queryClient.invalidateQueries({ queryKey: ['leads'] }),
     ]);
-
-  const convert = useMutation({
-    mutationFn: () => api.convertLead({ leadId: leadId as string }),
-    onSuccess: async (result) => {
-      toast('Converted. A deal was created in New business.');
-      await queryClient.invalidateQueries();
-      if (result.dealId) onOpenDeal(result.dealId);
-    },
-  });
 
   const back = <BackLink label="All leads" onClick={onBack} />;
   if (leadId === null) {
@@ -101,12 +93,8 @@ export function LeadProfileScreen({
               </Button>
             )}
             {canWrite && open && (
-              <Button
-                variant="primary"
-                disabled={convert.isPending}
-                onClick={() => convert.mutate()}
-              >
-                {convert.isPending ? 'Converting…' : 'Convert to deal'}
+              <Button variant="primary" onClick={() => setConverting(true)}>
+                Convert to deal
               </Button>
             )}
             {can(me, 'records.delete') && (
@@ -120,11 +108,6 @@ export function LeadProfileScreen({
           </>
         }
       />
-      {convert.isError && (
-        <p role="alert" className="m-0 text-[13px] text-danger">
-          {errorMessage(convert.error)}
-        </p>
-      )}
       {lead.status === 'Disqualified' && lead.disqualification_reason && (
         <p className="m-0 text-[14px] text-ink-2">Disqualified: {lead.disqualification_reason}</p>
       )}
@@ -165,6 +148,14 @@ export function LeadProfileScreen({
                 ]}
               />
             </Panel>
+            <CustomFieldsPanel
+              entityType="lead"
+              entityId={lead.id}
+              version={lead.version}
+              values={lead.custom_fields}
+              canWrite={canWrite}
+              onSaved={() => void refresh()}
+            />
             <Panel title="Timeline" padded>
               <Timeline
                 entityType="lead"
@@ -177,6 +168,7 @@ export function LeadProfileScreen({
         }
         aside={
           <>
+            <ScorePanel score={lead.lead_score} breakdown={lead.lead_score_breakdown} />
             <Panel title="Tags" padded>
               <TagEditor
                 entityType="lead"
@@ -228,6 +220,22 @@ export function LeadProfileScreen({
             setEditing(false);
             void refresh();
             void queryClient.invalidateQueries({ queryKey: ['timeline', 'lead', lead.id] });
+          }}
+        />
+      )}
+
+      {converting && (
+        <ConvertLeadDrawer
+          lead={lead}
+          onClose={() => setConverting(false)}
+          onConverted={(result) => {
+            setConverting(false);
+            void queryClient.invalidateQueries();
+            if (result.dealId) {
+              onOpenDeal(result.dealId);
+            } else {
+              onOpenContact(result.contactId);
+            }
           }}
         />
       )}

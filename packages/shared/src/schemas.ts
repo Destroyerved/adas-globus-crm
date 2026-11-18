@@ -200,17 +200,20 @@ export type CreateLeadInput = z.infer<typeof CreateLeadInputSchema>;
 export const ConvertLeadInputSchema = z.object({
   leadId: z.string(),
   createDeal: z.boolean().default(true),
-  dealName: z.string().optional(),
+  existingDealId: z.string().trim().min(1).nullable().optional(),
+  pipelineId: z.string().trim().min(1).default('pipeline_new_business'),
+  stageId: z.string().trim().min(1).nullable().optional(),
+  dealName: z.string().trim().max(200).optional(),
   monthlyValueMinor: z.string().regex(/^\d+$/).default('480000'),
+  termMonths: z.number().int().positive().max(120).default(12),
   currency: CurrencySchema.default('USD'),
-  fteCount: z.number().positive().default(1),
-  engagementModel: z
-    .enum(['Full-time', 'Part-time', 'Seasonal', 'Trial-first'])
-    .default('Full-time'),
+  fteCount: z.number().positive().max(999).default(1),
+  engagementModel: z.string().trim().min(1).max(80).default('Full-time'),
   startFreeTrial: z.boolean().default(false),
-  services: z.array(z.string()).default(['Tax Preparation']),
+  trialCandidateRole: z.string().trim().max(160).nullable().optional(),
+  services: z.array(z.string().max(120)).default(['Tax preparation and review']),
 });
-export type ConvertLeadInput = z.infer<typeof ConvertLeadInputSchema>;
+export type ConvertLeadInput = z.input<typeof ConvertLeadInputSchema>;
 
 export const CreateDealInputSchema = z.object({
   companyId: z.string(),

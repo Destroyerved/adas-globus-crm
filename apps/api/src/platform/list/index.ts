@@ -88,7 +88,11 @@ function list(value: unknown): (string | number)[] {
 export interface CompileOptions {
   userId: string;
   now?: Date;
+  /** Developer-written SQL column for custom_fields JSONB (e.g. 'c.custom_fields'). */
+  customFieldsSql?: string;
 }
+
+const CUSTOM_FIELD_PATH_RE = /^custom\.([a-z][a-z0-9_]{1,39})$/;
 
 /**
  * Compiles a filter-language clause (PRD 6.8) to a SQL boolean expression, adding values
@@ -115,6 +119,43 @@ export function compileFilter(
   };
 
   const condition = ({ field, op, value }: FilterCondition): string => {
+    if (options.customFieldsSql && field.startsWith('custom.')) {
+      const m = CUSTOM_FIELD_PATH_RE.exec(field);
+      if (!m || !m[1]) badFilter(`Invalid custom field "${field}".`);
+      const key = m[1];
+      const cfSql = options.customFieldsSql;
+      if (op === 'eq') {
+        const sv = scalar(value);
+        return `${cfSql} @> ${params.add(JSON.stringify({ [key]: sv }))}::jsonb`;
+      }
+      if (op === 'hasAny' || op === 'hasAll') {
+        const vals = list(value).map(String);
+        const keyParam = params.add(key);
+        return op === 'hasAny'
+          ? `(${cfSql} -> ${keyParam}) ?| ${params.add(vals)}::text[]`
+          : `(${cfSql} -> ${keyParam}) ?& ${params.add(vals)}::text[]`;
+      }
+      const keyParam = params.add(key);
+      const extracted = `(${cfSql} ->> ${keyParam})`;
+      if (op === 'isEmpty') return `NULLIF(${extracted}, '') IS NULL`;
+      if (op === 'isNotEmpty') return `NULLIF(${extracted}, '') IS NOT NULL`;
+      if (op === 'neq') return `${extracted} IS DISTINCT FROM ${params.add(String(scalar(value)))}`;
+      if (op === 'in') return `${extracted} = ANY(${params.add(list(value).map(String))}::text[])`;
+      if (op === 'contains') {
+        return `${extracted} ILIKE ${params.add(`%${escapeLike(String(scalar(value)))}%`)}`;
+      }
+      if (op === 'startsWith') {
+        return `${extracted} ILIKE ${params.add(`${escapeLike(String(scalar(value)))}%`)}`;
+      }
+      if (op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte') {
+        const num = Number(scalar(value));
+        if (!Number.isFinite(num)) badFilter(`"${field}" needs a number.`);
+        const sqlOp = { gt: '>', gte: '>=', lt: '<', lte: '<=' }[op];
+        return `(CASE WHEN ${extracted} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${extracted})::numeric ELSE NULL END) ${sqlOp} ${params.add(num)}`;
+      }
+      return badFilter(`"${op}" isn't available for "${field}".`);
+    }
+
     const def = registry[field];
     if (!def) badFilter(`You can't filter on "${field}".`);
     if (!OPS_BY_TYPE[def.type].includes(op)) {
@@ -228,6 +269,8 @@ export interface ListSpec {
   sorts: Record<string, SortDef>;
   defaultSort: string;
   registry: FieldRegistry;
+  /** Optional JSONB column holding custom field values (e.g. 'l.custom_fields'). */
+  customFieldsSql?: string;
   /** Builds the free-text search condition. */
   search?: (q: string, params: SqlParams) => string;
 }
@@ -320,7 +363,14 @@ export async function runList<T extends Record<string, unknown>>(
 
   const where = [...spec.where, scopeSql];
   if (req.q && spec.search) where.push(spec.search(req.q, params));
-  if (req.filter) where.push(compileFilter(req.filter, spec.registry, params, { userId }));
+  if (req.filter) {
+    where.push(
+      compileFilter(req.filter, spec.registry, params, {
+        userId,
+        customFieldsSql: spec.customFieldsSql,
+      }),
+    );
+  }
 
   // Total before the cursor condition is added.
   const countParams = [...params.values];

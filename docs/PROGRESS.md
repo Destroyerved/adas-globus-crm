@@ -62,8 +62,6 @@ Order matters: each step builds on the one before. Items marked **Owner** need s
 
 **Not verified yet:** A1's 10,000-row XLSX import in under 5 minutes; PRD 12.2's times under load (k6, 20 virtual users) and on the production server.
 
-**Not built yet:** a "Merge with…" action on contact and company pages; merges start from the Duplicates queue for now (ADR 0009).
-
 ## M3: compliance, suppressions, consent and privacy (no owner input needed)
 
 | Item                                                                                                                                                                                                                             | State                                           | Evidence                                                                                                                                                                                                                                                                                                                                                                           |
@@ -135,13 +133,13 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 
 ### Phase 2: Core records and intake
 
-- [x] Companies, contacts, leads and status history (verified on PostgreSQL 17 and Playwright e2e)
+- [x] Companies, contacts, leads and status history (verified on PostgreSQL 17 and Playwright e2e; Contact secondary emails/phones & local time and Company associated leads verified in `ms3b-crm-extensions.int.test.ts`)
 - [x] Reference lists seeded and admin-editable (PRD 3.4) (verified on PostgreSQL 17 and Playwright e2e)
-- [ ] Notes, tags, custom fields, record history, basic timeline (notes, tags, history and timeline verified on PostgreSQL 17; custom fields land in Milestone 3)
+- [x] Notes, tags, custom fields, record history, basic timeline (verified on PostgreSQL 17 across all 8 custom field types + `custom.<key>` GIN filtering in `ms3b-crm-extensions.int.test.ts` and Playwright e2e `26-lead-convert-custom-scoring-*`; ADR 0017)
 - [x] Filter language, field registry, saved views (verified on PostgreSQL 17 in `ms3a-saved-views-bulk.int.test.ts` and Playwright e2e `25-saved-views-bulk-*`; ADR 0016)
 - [ ] Global search (trigram + full-text) (trigram search verified on 60k contacts on PostgreSQL 17; full-text notes/email subject index lands in Milestone 3/5)
 - [ ] Imports: upload, mapping, dry run, background run, error CSV, rollback (verified on PostgreSQL 17 and Playwright e2e, ADR 0008; 10,000-row XLSX < 5 min benchmark pending)
-- [x] Duplicate rules, review queue, merge with undo (verified on PostgreSQL 17 and Playwright e2e, ADR 0009; profile "Merge with…" shortcut lands in Milestone 3)
+- [x] Duplicate rules, review queue, merge with undo (verified on PostgreSQL 17 and Playwright e2e, ADR 0009; direct profile `"Merge with…"` drawer built in Milestone 3b, ADR 0017)
 - [x] Exports (permissioned, audited, background > 5,000 rows) (verified on PostgreSQL 17 and Playwright e2e, ADR 0010)
 - [x] Suppressions, suppressed domains, consent records (verified on PostgreSQL 17 and Playwright e2e on 12 Nov 2026; ADR 0013)
 - [x] Privacy operations: access export and erasure (verified on PostgreSQL 17 and Playwright e2e on 12 Nov 2026; A14 passing)
@@ -152,11 +150,11 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 ### Phase 3: Sales and cutover
 
 - [x] Pipelines and stages with required fields, deals, and admin stage editor (verified on PostgreSQL 17 and Playwright e2e)
-- [ ] Kanban (keyboard accessible) and deal table (table and stage mover verified on PostgreSQL 17; keyboard drag-and-drop and deal contact roles land in Milestone 3)
-- [ ] Lead conversion (API conversion works; interactive conversion drawer with pipeline/stage/terms choice lands in Milestone 3)
-- [ ] Tasks (list and calendar), reminders, SLA warnings (list, reminders and SLA warnings verified on PostgreSQL 17; recurring tasks, team view and calendar view land in Milestone 3)
+- [ ] Kanban (keyboard accessible) and deal table (table and stage mover verified on PostgreSQL 17; keyboard drag-and-drop and deal contact roles land in Milestone 3c)
+- [x] Lead conversion (interactive conversion drawer with pipeline/stage/terms/3-day trial and existing open deal linkage verified on PostgreSQL 17 and Playwright e2e `26-lead-convert-custom-scoring-*`; ADR 0017)
+- [ ] Tasks (list and calendar), reminders, SLA warnings (list, reminders and SLA warnings verified on PostgreSQL 17; recurring tasks, team view and calendar view land in Milestone 3c)
 - [ ] Email notifications and digest via Graph shared mailbox (awaits Microsoft 365 Graph connector in Milestone 5)
-- [ ] Role dashboards, standard reports, metric definitions (PRD 14), FX rates (role dashboards built; standalone standard reports screen & FX admin land in Milestone 3/4)
+- [ ] Role dashboards, standard reports, metric definitions (PRD 14), FX rates (role dashboards built; standalone standard reports screen & FX admin land in Milestone 3c/4)
 - [ ] Bigin migration and cutover
 - [ ] **Exit:** A7–A9 pass; Bigin reconciles; team works only in ADAS CRM for 2 weeks
 
@@ -190,11 +188,13 @@ The API and worker run against PostgreSQL 17 through `DATABASE_URL` (PGlite is u
 - [ ] Apollo search, import and enrichment with credit guard
 - [ ] Microsoft Bookings to meetings
 - [ ] Outbound webhooks and API tokens; n8n container
-- [ ] Lead scoring
+- [x] Lead scoring (configurable fit/engagement/negative rules excluding email opens, automatic transaction scoring + admin recalculation + explainable `<ScorePanel />` verified on PostgreSQL 17 and Playwright e2e; ADR 0017)
 - [ ] Advanced reports and employee performance dashboard
 - [ ] **Exit:** Apollo import deduplicates with Apollo IDs; n8n reacts to `deal.won`; scoring is configurable and explained
 
 ## Review log
+
+- **18 Nov 2026, Milestone 3b: custom fields, configurable scoring, interactive lead conversion, contact channels and direct merges.** Added migration `0015_custom_fields_scoring_and_conversion` (widened `custom_field_definitions` to all 8 types including `money` and `url`, added `custom_fields JSONB` + `jsonb_path_ops` GIN indexes on `leads`, `contacts`, `companies` and `deals`, added `scoring_rules` `version`/`updated_at` and canonical CPA rules, and `adas_app` grants; ADR 0017), `CustomFieldService` (`GET /api/v1/custom-fields`, `POST/PATCH /api/v1/admin/custom-fields`, `PUT /api/v1/{leads,contacts,companies,deals}/:id/custom-fields` with optimistic concurrency and `record_history`), `custom.<key>` filter-language compilation in `platform/list`, `LeadScoringService` (`GET/POST/PATCH/DELETE /api/v1/admin/scoring-rules` + `recalculate` + automatic evaluation on lead/contact edits and call/meeting activities, excluding email opens), enhanced `convertLead` (`pipelineId`, `stageId`, `termMonths`, `startFreeTrial`, `existingDealId`), contact secondary emails/phones (`POST/DELETE /api/v1/contacts/:id/{emails,phones}` + `primary`), Company associated `leads`, and `<ConvertLeadDrawer />`, `<CustomFieldsPanel />`, `<ScorePanel />`, `<ContactChannelsPanel />`, `<MergeWithButton />`, `Settings → Custom fields` and `Settings → Scoring`. Verified in `scoring.test.ts`, `ms3b-crm-extensions.int.test.ts` (including on real PostgreSQL 17), and Playwright + axe at 1440px and 375px (`26-lead-convert-custom-scoring-*`).
 
 - **18 Nov 2026, Milestone 3a: saved views, table density and scoped bulk actions.** Added migration `0014_saved_views_and_bulk_jobs` (`saved_views` team sharing, `params_json`, `sort_spec`, `columns_json`, `version`, `updated_at`; `bulk_jobs` table and `adas_app` grants; ADR 0016), shared schemas in `packages/shared/src/views-and-bulk.ts`, `SavedViewService` (`GET/POST/PATCH/DELETE /api/v1/saved-views` with registry-validated filters/sorts and `own`/`team`/`all` visibility), `BulkActionService` (`POST /api/v1/{leads,contacts,companies,deals}/bulk` and `GET /api/v1/bulk-jobs/:id` supporting `assign`, `status`, `add_tag`, `remove_tag` and `delete` with SQL `scopeWhere`, synchronous `<= 500` execution, and chunked `> 500` background execution on the `bulk.execute` worker queue), and `<SavedViewsBar />`, `useTableDensity` (`44px` comfortable / `36px` compact) and the floating navy `<BulkActionBar />` across Leads, Contacts, Companies and Deals list views. Verified on real PostgreSQL 17 (`ms3a-saved-views-bulk.int.test.ts`) and Playwright + axe at 1440px and 375px (`25-saved-views-bulk-*`). Found and fixed during browser verification: `text-ink-3` on `--tint` selected rows measured `4.43:1` against `4.5:1` WCAG AA (promoted to `--ink-2` `7.1:1`), and the floating bulk bar gained full-width mobile wrapping at `375px`.
 

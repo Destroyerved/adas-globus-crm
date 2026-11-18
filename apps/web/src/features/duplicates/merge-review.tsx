@@ -120,7 +120,7 @@ export function MergeReview({
   );
 }
 
-function MergeForm({
+export function MergeForm({
   entity,
   pairId,
   keptId,
@@ -132,7 +132,7 @@ function MergeForm({
   onOpenRecord,
 }: {
   entity: MergeEntity;
-  pairId: string;
+  pairId?: string;
   keptId: string;
   mergedId: string;
   timeZone: string;
@@ -158,7 +158,7 @@ function MergeForm({
         keptVersion: p.kept.version,
         mergedVersion: p.merged.version,
         take: take ?? p.defaults,
-        candidateId: pairId,
+        ...(pairId ? { candidateId: pairId } : {}),
       }),
     onSuccess: async (result) => {
       setConfirming(false);
@@ -168,7 +168,7 @@ function MergeForm({
     },
   });
   const dismiss = useMutation({
-    mutationFn: () => api.dismissDuplicate(pairId),
+    mutationFn: () => api.dismissDuplicate(pairId as string),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['duplicates'] });
       toast('Marked as not duplicates.', 'success');
@@ -257,7 +257,9 @@ function MergeForm({
                         className="mt-[3px] h-[16px] w-[16px] shrink-0 accent-[var(--primary)]"
                       />
                       <span className="min-w-0 break-words text-ink">
-                        {value ?? <span className="text-ink-3">Blank</span>}
+                        {value ?? (
+                          <span className={checked ? 'text-ink-2' : 'text-ink-3'}>Blank</span>
+                        )}
                         <span className="sr-only"> (from {from})</span>
                       </span>
                     </label>
@@ -288,9 +290,15 @@ function MergeForm({
         <Button variant="primary" onClick={() => setConfirming(true)}>
           Merge {entityPlural(entity)}
         </Button>
-        <Button variant="secondary" onClick={() => dismiss.mutate()} disabled={dismiss.isPending}>
-          {dismiss.isPending ? 'Saving…' : 'Not duplicates'}
-        </Button>
+        {pairId ? (
+          <Button variant="secondary" onClick={() => dismiss.mutate()} disabled={dismiss.isPending}>
+            {dismiss.isPending ? 'Saving…' : 'Not duplicates'}
+          </Button>
+        ) : (
+          <Button variant="secondary" onClick={onDismissed}>
+            Choose a different {noun}
+          </Button>
+        )}
       </div>
 
       <ConfirmDialog
@@ -362,7 +370,7 @@ function RecordCard({
   );
 }
 
-function MergeDone({
+export function MergeDone({
   merge,
   timeZone,
   onBack,

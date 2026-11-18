@@ -959,3 +959,94 @@ test('saved views, row density and the floating bulk-action bar persist across r
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('priority-q4').first()).toBeVisible();
 });
+
+test('custom fields, explainable scoring, interactive lead conversion drawer and contact channels persist end-to-end', async ({
+  page,
+}) => {
+  await signInAs(page, 'usr_admin_1');
+
+  // 1. Admin creates a custom field on Leads in Settings → Custom fields.
+  await page.goto('/?screen=settings&tab=custom-fields');
+  await expect(page.getByTestId('settings-custom-fields-tab')).toBeVisible();
+  await page.getByRole('button', { name: 'Add custom field' }).first().click();
+  const cfDialog = page.getByRole('dialog', { name: 'Add custom field' });
+  await cfDialog.getByLabel('Label').fill('Tax season returns');
+  await cfDialog.getByLabel('Field type').selectOption('number');
+  await cfDialog.getByRole('button', { name: 'Create field' }).click();
+  await expect(cfDialog).toHaveCount(0);
+  await expect(page.getByText('custom.tax_season_returns')).toBeVisible();
+
+  // 2. Check Settings → Scoring tab and recalculate scores.
+  await page.getByRole('tab', { name: 'Scoring' }).click();
+  await expect(page.getByTestId('settings-scoring-tab')).toBeVisible();
+  await page.getByRole('button', { name: 'Recalculate all scores' }).click();
+  await expect(page.getByText(/Recalculated .* leads/)).toBeVisible();
+
+  // 3. Switch to synthetic Sales Manager (Maya Lin) so record screenshots show synthetic owners only.
+  await signInAs(page, 'usr_mgr_1');
+  await page.goto('/?screen=leads');
+  await page.getByRole('button', { name: 'New lead' }).click();
+  await page.getByLabel('Full name').fill('Clara Bennett');
+  await page.getByLabel('Work email').fill('clara.bennett@bennettadvisory.example');
+  await page.getByLabel(/^Firm/).fill('Bennett Advisory CPA');
+  await page.getByRole('button', { name: 'Save lead' }).click();
+  await expect(page.getByText('Added Clara Bennett as a new lead.')).toBeVisible();
+
+  await page.getByRole('button', { name: /Clara Bennett · Bennett Advisory CPA/ }).click();
+  await expect(page.getByTestId('lead-profile-screen')).toBeVisible();
+  await expect(page.getByTestId('record-score-panel')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit fields' }).click();
+  await page.getByLabel('Tax season returns').fill('850');
+  await page.getByRole('button', { name: 'Save fields' }).click();
+  await expect(page.getByText('850')).toBeVisible();
+
+  // Dismiss toasts before taking screenshots.
+  while ((await page.getByRole('button', { name: 'Dismiss' }).count()) > 0) {
+    await page.getByRole('button', { name: 'Dismiss' }).first().click();
+  }
+
+  // Open the interactive Lead Conversion Drawer and check axe + overflow at 1440px and 375px!
+  await page.getByRole('button', { name: 'Convert to deal' }).click();
+  const convertDrawer = page.getByRole('dialog', { name: 'Convert Clara Bennett' });
+  await expect(convertDrawer).toBeVisible();
+  await convertDrawer.getByLabel('Monthly fee').fill('6400');
+  await convertDrawer.getByLabel('Term (months)').fill('24');
+
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    await expectNoAxeViolations(page);
+    await page.screenshot({
+      path: resolve(SCREENS_DIR, `26-lead-convert-custom-scoring-${width}w.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await convertDrawer.getByRole('button', { name: 'Convert lead' }).click();
+  await expect(page.getByTestId('deal-profile-screen')).toBeVisible();
+  await expect(page.getByText('24 months')).toBeVisible();
+  await expect(page.getByText('US$6,400/mo').first()).toBeVisible();
+
+  // Reload to verify deal terms persisted.
+  await page.reload();
+  await expect(page.getByText('24 months')).toBeVisible();
+
+  // Open the converted Contact profile and verify local time, Merge with…, and secondary email!
+  await page.getByRole('button', { name: 'Clara Bennett' }).click();
+  await expect(page.getByTestId('contact-profile-screen')).toBeVisible();
+  await expect(page.getByTestId('contact-local-time')).toContainText('Local time');
+  await expect(page.getByRole('button', { name: 'Merge with…' })).toBeVisible();
+
+  await page.getByLabel('Add secondary email').fill('c.bennett@bennettadvisory.example');
+  await page.getByRole('button', { name: 'Add email' }).click();
+  await expect(
+    page.getByTestId('contact-channels-panel').getByText('c.bennett@bennettadvisory.example'),
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page.getByTestId('contact-channels-panel').getByText('c.bennett@bennettadvisory.example'),
+  ).toBeVisible();
+});

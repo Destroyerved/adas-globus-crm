@@ -57,7 +57,10 @@ function validateSortAndFilter(
     });
   }
   if (isNonEmptyFilter(filter)) {
-    compileFilter(filter, spec.registry, new SqlParams(), { userId });
+    compileFilter(filter, spec.registry, new SqlParams(), {
+      userId,
+      customFieldsSql: spec.customFieldsSql,
+    });
   }
   return { sortField: sortKey, sortDir: desc ? 'desc' : 'asc' };
 }

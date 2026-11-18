@@ -7,6 +7,7 @@ import {
   formatDate,
   formatMoney,
   formatRelative,
+  formatTime,
   type ConsentBasis,
   type ConsentPurpose,
 } from '@adas/shared';
@@ -20,6 +21,8 @@ import { useToast } from '@/components/ui/toast.js';
 import { api } from '@/lib/api.js';
 import { errorMessage, useUserNames } from '@/features/shared/live-kit.js';
 import { can, useMe } from '@/features/shared/list-kit.js';
+import { MergeWithButton } from '@/features/duplicates/direct-merge-drawer.js';
+import { CustomFieldsPanel } from '@/features/records/custom-fields-panel.js';
 import { ContactEditDrawer } from '@/features/records/edit-drawers.js';
 import {
   EditDrawer,
@@ -37,9 +40,11 @@ import {
   TasksPanel,
   TwoColumn,
 } from '@/features/records/profile-kit.js';
+import { ScorePanel } from '@/features/records/score-panel.js';
 import { TagEditor } from '@/features/records/tag-editor.js';
 import { Timeline, viewerTimeZone } from '@/features/records/timeline.js';
 import { FormRow } from '@/features/settings/settings-kit.js';
+import { ContactChannelsPanel } from './contact-channels-panel.js';
 import { VERIFICATION_TONE } from './contacts-screen.js';
 
 const SUPPRESSION_LABEL: Record<string, string> = {
@@ -73,6 +78,14 @@ function saveDownloadedFile(blob: Blob, filename: string): void {
   }
 }
 
+function safeLocalTime(tz: string): string | null {
+  try {
+    return formatTime(new Date(), tz);
+  } catch {
+    return null;
+  }
+}
+
 /** Contact page (PRD 4.4, 4.18, 5): details, consent and suppression, deals, sequences, privacy, timeline. */
 export function ContactProfileScreen({
   contactId,
@@ -80,12 +93,14 @@ export function ContactProfileScreen({
   onOpenCompany,
   onOpenDeal,
   onOpenLead,
+  onOpenContact,
 }: {
   contactId: string | null;
   onBack: () => void;
   onOpenCompany: (id: string) => void;
   onOpenDeal: (id: string) => void;
   onOpenLead: (id: string) => void;
+  onOpenContact?: (id: string) => void;
 }) {
   const me = useMe();
   const toast = useToast();
@@ -201,6 +216,7 @@ export function ContactProfileScreen({
     marketingBasis.kind === 'implied' && marketingBasis.expiresAt
       ? `Implied until ${formatDate(marketingBasis.expiresAt, timeZone)}`
       : marketingBasis.label;
+  const localTime = contact.timezone ? safeLocalTime(contact.timezone) : null;
 
   return (
     <div className="space-y-[16px]" data-testid="contact-profile-screen">
@@ -222,6 +238,11 @@ export function ContactProfileScreen({
               </button>
             )}
             <span>· Owner {ownerName(contact.owner_user_id)}</span>
+            {localTime && (
+              <span className="tabular-nums" data-testid="contact-local-time">
+                · Local time {localTime} ({contact.timezone})
+              </span>
+            )}
           </>
         }
         actions={
@@ -230,6 +251,14 @@ export function ContactProfileScreen({
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit contact
               </Button>
+            )}
+            {canWrite && (
+              <MergeWithButton
+                entity="contact"
+                recordId={contact.id}
+                recordName={contact.full_name}
+                onOpenRecord={(id) => (onOpenContact ? onOpenContact(id) : void refresh())}
+              />
             )}
             {can(me, 'records.delete') && (
               <DeleteRecordButton
@@ -331,6 +360,22 @@ export function ContactProfileScreen({
                 </div>
               )}
             </Panel>
+            <ContactChannelsPanel
+              contactId={contact.id}
+              primaryEmail={contact.primary_email}
+              emails={emails}
+              phones={phones}
+              canWrite={canWrite}
+              onChanged={() => void refresh()}
+            />
+            <CustomFieldsPanel
+              entityType="contact"
+              entityId={contact.id}
+              version={contact.version}
+              values={contact.custom_fields}
+              canWrite={canWrite}
+              onSaved={() => void refresh()}
+            />
             <Panel title="Timeline" padded>
               <Timeline
                 entityType="contact"
@@ -343,6 +388,7 @@ export function ContactProfileScreen({
         }
         aside={
           <>
+            <ScorePanel score={contact.lead_score} breakdown={contact.lead_score_breakdown} />
             <Panel title={`Deals (${deals.length})`} padded>
               {deals.length === 0 ? (
                 <p className="m-0 text-[14px] text-ink-2">Not on any deal.</p>

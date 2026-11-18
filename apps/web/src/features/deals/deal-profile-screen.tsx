@@ -8,6 +8,7 @@ import { api } from '@/lib/api.js';
 import { useUserNames } from '@/features/shared/live-kit.js';
 import { can, useMe } from '@/features/shared/list-kit.js';
 import { DealEditDrawer } from '@/features/records/edit-drawers.js';
+import { CustomFieldsPanel } from '@/features/records/custom-fields-panel.js';
 import {
   BackLink,
   DeleteRecordButton,
@@ -168,6 +169,14 @@ export function DealProfileScreen({
                 ]}
               />
             </Panel>
+            <CustomFieldsPanel
+              entityType="deal"
+              entityId={deal.id}
+              version={deal.version}
+              values={deal.custom_fields}
+              canWrite={canWrite}
+              onSaved={() => void refresh()}
+            />
             <Panel title="Timeline" padded>
               <Timeline
                 entityType="deal"

@@ -233,6 +233,7 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             onOpenCompany={openCompany}
             onOpenDeal={openDeal}
             onOpenLead={openLead}
+            onOpenContact={openContact}
           />
         )}
         {activeScreen === 'companies' && <CompaniesScreen onOpenCompany={openCompany} />}
@@ -244,6 +245,8 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             onOpenDeals={() => navigateScreen('deals')}
             onOpenContact={openContact}
             onOpenDeal={openDeal}
+            onOpenLead={openLead}
+            onOpenCompany={openCompany}
           />
         )}
         {activeScreen === 'deals' && (

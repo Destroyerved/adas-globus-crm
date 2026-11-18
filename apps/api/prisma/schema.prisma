@@ -30,6 +30,8 @@
 //   capabilities, expires_at, last_used_ip, active-hash index; ADR 0015)
 //   prisma/migrations/0014_saved_views_and_bulk_jobs/migration.sql (saved_views team_id,
 //   params_json, sort_spec, columns_json, version, updated_at; bulk_jobs table and indexes)
+//   prisma/migrations/0015_custom_fields_scoring_and_conversion/migration.sql (custom_field_definitions
+//   money/url/archive/order, leads/deals custom_fields JSONB GIN indexes, scoring_rules defaults)
 
 generator client {
   provider = "prisma-client-js"
@@ -219,6 +221,7 @@ model Lead {
   convertedAt            DateTime? @map("converted_at") @db.Timestamptz(6)
   leadScore              Int       @default(0) @map("lead_score")
   leadScoreBreakdown     Json      @default("[]") @map("lead_score_breakdown")
+  customFields           Json      @default("{}") @map("custom_fields")
   utmSource              String?   @map("utm_source")
   utmMedium              String?   @map("utm_medium")
   utmCampaign            String?   @map("utm_campaign")
@@ -250,6 +253,7 @@ model Deal {
   fteCount           Float     @default(1) @map("fte_count")
   engagementModel    String    @default("Full-time") @map("engagement_model")
   services           Json      @default("[]")
+  customFields       Json      @default("{}") @map("custom_fields")
   probability        Int       @default(10)
   expectedCloseDate  String?   @map("expected_close_date")
   trialStartedAt     DateTime? @map("trial_started_at") @db.Timestamptz(6)
@@ -557,4 +561,39 @@ model BulkJob {
   @@index([requestedBy, createdAt(sort: Desc)])
   @@index([teamId])
   @@map("bulk_jobs")
+}
+
+// Custom field definitions (PRD 4.17, 6.8) and lead/contact scoring rules (PRD 4.5, 4.16). Migration 0001 + 0015.
+model CustomFieldDefinition {
+  id          String    @id
+  entityType  String    @map("entity_type")
+  fieldKey    String    @map("field_key")
+  label       String
+  fieldType   String    @map("field_type")
+  optionsJson Json      @default("[]") @map("options_json")
+  isRequired  Boolean   @default(false) @map("is_required")
+  sortOrder   Int       @default(0) @map("sort_order")
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(6)
+  version     Int       @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([entityType, fieldKey])
+  @@map("custom_field_definitions")
+}
+
+model ScoringRule {
+  id          String   @id
+  name        String
+  category    String
+  fieldPath   String   @map("field_path")
+  operator    String
+  targetValue Json     @map("target_value")
+  points      Int
+  active      Boolean  @default(true)
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("scoring_rules")
 }

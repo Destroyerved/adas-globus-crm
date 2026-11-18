@@ -2,14 +2,16 @@ import { type Router } from '../../platform/http/router.js';
 import { parseListRequest } from '../../platform/list/index.js';
 import { type CrmService } from './index.js';
 import { BulkActionService } from './bulk.js';
+import { CustomFieldService } from './custom-fields.js';
 import { CrmListService, LEAD_LIST, TASK_LIST } from './lists.js';
 import { CrmRecordService } from './records.js';
 import { SavedViewService } from './saved-views.js';
+import { LeadScoringService } from './scoring.js';
 import { CrmTimelineService } from './timeline.js';
 
 /**
  * HTTP routes for companies, contacts, leads, deals, tasks, notes, tags, activities, saved views,
- * bulk actions and timelines (PRD 6.7). Controllers stay thin: parse, call the service, return JSON.
+ * bulk actions, custom fields, scoring rules and timelines (PRD 6.7).
  */
 export function registerCrmRoutes(
   router: Router,
@@ -20,9 +22,11 @@ export function registerCrmRoutes(
     timeline: CrmTimelineService;
     savedViews?: SavedViewService;
     bulk?: BulkActionService;
+    customFields?: CustomFieldService;
+    scoring?: LeadScoringService;
   },
 ): void {
-  const { crm, lists, records, timeline, savedViews, bulk } = services;
+  const { crm, lists, records, timeline, savedViews, bulk, customFields, scoring } = services;
 
   // ---- Leads (PRD 4.5)
   router.get('/api/v1/leads', async (ctx) => {
@@ -47,6 +51,19 @@ export function registerCrmRoutes(
     const body = await ctx.body();
     ctx.json(200, await crm.convertLead(ctx.user, { ...body, leadId: ctx.params['id'] } as never));
   });
+  if (customFields) {
+    router.put('/api/v1/leads/:id/custom-fields', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.setRecordValues(
+          ctx.user,
+          'lead',
+          ctx.params['id'] ?? '',
+          await ctx.body(),
+        ),
+      );
+    });
+  }
   router.get('/api/v1/leads/:id', async (ctx) => {
     ctx.json(200, await timeline.leadProfile(ctx.user, ctx.params['id'] ?? ''));
   });
@@ -71,6 +88,63 @@ export function registerCrmRoutes(
     router.post('/api/v1/contacts/bulk', async (ctx) => {
       const res = await bulk.submit(ctx.user, 'contact', await ctx.body(), ctx.ip);
       ctx.json(res.background ? 202 : 200, res);
+    });
+  }
+  router.post('/api/v1/contacts/:id/emails/primary', async (ctx) => {
+    ctx.json(
+      200,
+      await records.setPrimaryContactEmail(ctx.user, ctx.params['id'] ?? '', await ctx.body()),
+    );
+  });
+  router.post('/api/v1/contacts/:id/emails', async (ctx) => {
+    ctx.json(
+      201,
+      await records.addContactEmail(ctx.user, ctx.params['id'] ?? '', await ctx.body()),
+    );
+  });
+  router.delete('/api/v1/contacts/:id/emails', async (ctx) => {
+    ctx.json(
+      200,
+      await records.removeContactEmail(
+        ctx.user,
+        ctx.params['id'] ?? '',
+        ctx.query.get('email') ?? '',
+      ),
+    );
+  });
+  router.post('/api/v1/contacts/:id/phones/primary', async (ctx) => {
+    ctx.json(
+      200,
+      await records.setPrimaryContactPhone(ctx.user, ctx.params['id'] ?? '', await ctx.body()),
+    );
+  });
+  router.post('/api/v1/contacts/:id/phones', async (ctx) => {
+    ctx.json(
+      201,
+      await records.addContactPhone(ctx.user, ctx.params['id'] ?? '', await ctx.body()),
+    );
+  });
+  router.delete('/api/v1/contacts/:id/phones', async (ctx) => {
+    ctx.json(
+      200,
+      await records.removeContactPhone(
+        ctx.user,
+        ctx.params['id'] ?? '',
+        ctx.query.get('phone') ?? '',
+      ),
+    );
+  });
+  if (customFields) {
+    router.put('/api/v1/contacts/:id/custom-fields', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.setRecordValues(
+          ctx.user,
+          'contact',
+          ctx.params['id'] ?? '',
+          await ctx.body(),
+        ),
+      );
     });
   }
   router.get('/api/v1/contacts/:id', async (ctx) => {
@@ -100,6 +174,19 @@ export function registerCrmRoutes(
       ctx.json(res.background ? 202 : 200, res);
     });
   }
+  if (customFields) {
+    router.put('/api/v1/companies/:id/custom-fields', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.setRecordValues(
+          ctx.user,
+          'company',
+          ctx.params['id'] ?? '',
+          await ctx.body(),
+        ),
+      );
+    });
+  }
   router.get('/api/v1/companies/:id', async (ctx) => {
     ctx.json(200, await crm.getCompanyProfile(ctx.user, ctx.params['id'] ?? ''));
   });
@@ -121,6 +208,19 @@ export function registerCrmRoutes(
     router.post('/api/v1/deals/bulk', async (ctx) => {
       const res = await bulk.submit(ctx.user, 'deal', await ctx.body(), ctx.ip);
       ctx.json(res.background ? 202 : 200, res);
+    });
+  }
+  if (customFields) {
+    router.put('/api/v1/deals/:id/custom-fields', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.setRecordValues(
+          ctx.user,
+          'deal',
+          ctx.params['id'] ?? '',
+          await ctx.body(),
+        ),
+      );
     });
   }
   router.get('/api/v1/deals/:id', async (ctx) => {
@@ -234,6 +334,56 @@ export function registerCrmRoutes(
       ctx.json(200, await bulk.getJob(ctx.user, ctx.params['id'] ?? ''));
     });
   }
+
+  // ---- Custom fields (PRD 4.17, 6.8)
+  if (customFields) {
+    router.get('/api/v1/custom-fields', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.listDefinitions(
+          ctx.user,
+          ctx.query.get('entity'),
+          ctx.query.get('includeArchived') === '1',
+        ),
+      );
+    });
+    router.post('/api/v1/admin/custom-fields', async (ctx) => {
+      ctx.json(201, await customFields.createDefinition(ctx.user, await ctx.body(), ctx.ip));
+    });
+    router.patch('/api/v1/admin/custom-fields/:id', async (ctx) => {
+      ctx.json(
+        200,
+        await customFields.updateDefinition(
+          ctx.user,
+          ctx.params['id'] ?? '',
+          await ctx.body(),
+          ctx.ip,
+        ),
+      );
+    });
+  }
+
+  // ---- Lead & contact scoring rules (PRD 4.5, 4.16)
+  if (scoring) {
+    router.get('/api/v1/admin/scoring-rules', async (ctx) => {
+      ctx.json(200, await scoring.listRules(ctx.user));
+    });
+    router.post('/api/v1/admin/scoring-rules/recalculate', async (ctx) => {
+      ctx.json(200, await scoring.recalculateForAdmin(ctx.user));
+    });
+    router.post('/api/v1/admin/scoring-rules', async (ctx) => {
+      ctx.json(201, await scoring.createRule(ctx.user, await ctx.body(), ctx.ip));
+    });
+    router.patch('/api/v1/admin/scoring-rules/:id', async (ctx) => {
+      ctx.json(
+        200,
+        await scoring.updateRule(ctx.user, ctx.params['id'] ?? '', await ctx.body(), ctx.ip),
+      );
+    });
+    router.delete('/api/v1/admin/scoring-rules/:id', async (ctx) => {
+      ctx.json(200, await scoring.deleteRule(ctx.user, ctx.params['id'] ?? '', ctx.ip));
+    });
+  }
 }
 
 export {
@@ -241,5 +391,7 @@ export {
   CrmListService,
   CrmRecordService,
   CrmTimelineService,
+  CustomFieldService,
+  LeadScoringService,
   SavedViewService,
 };

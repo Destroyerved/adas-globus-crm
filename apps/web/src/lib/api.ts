@@ -1,7 +1,16 @@
 import {
+  type AddContactEmailInput,
+  type AddContactPhoneInput,
   type AddSuppressedDomainInput,
   type AddSuppressionInput,
+  type BulkActionInput,
+  type BulkJobView,
+  type ConvertLeadInput,
+  type CreateCustomFieldInput,
+  type CreateSavedViewInput,
+  type CreateScoringRuleInput,
   type Currency,
+  type CustomFieldDefinitionView,
   type DuplicateCandidateView,
   type ExportCreateInput,
   type ExportView,
@@ -23,13 +32,17 @@ import {
   type RoutingRuleView,
   type SavedView,
   type SavedViewEntity,
+  type ScoreBreakdownItem,
+  type ScoringRuleView,
+  type SetCustomFieldsInput,
+  type SetPrimaryContactEmailInput,
+  type SetPrimaryContactPhoneInput,
   type SuppressionStateFilter,
+  type UpdateCustomFieldInput,
   type UpdateRoutingRuleInput,
   type UpdateSavedViewInput,
+  type UpdateScoringRuleInput,
   type WithdrawConsentInput,
-  type BulkActionInput,
-  type BulkJobView,
-  type CreateSavedViewInput,
 } from '@adas/shared';
 
 const MERGE_PATH: Record<MergeEntity, string> = { contact: 'contacts', company: 'companies' };
@@ -214,6 +227,8 @@ export interface LeadRow {
   services_needed: string[];
   software_stack: string[];
   lead_score: number | null;
+  lead_score_breakdown?: ScoreBreakdownItem[];
+  custom_fields?: Record<string, unknown>;
   last_contacted_at: string | null;
   tags?: string[];
   version: number;
@@ -236,6 +251,7 @@ export interface CompanyRow {
   owner_user_id: string;
   accounting_software: string[];
   services_needed: string[];
+  custom_fields?: Record<string, unknown>;
   contact_count?: number;
   open_deal_count?: number;
   last_contacted_at?: string | null;
@@ -261,6 +277,9 @@ export interface ContactRow {
   owner_user_id: string;
   do_not_contact: boolean;
   email_verification_status: string;
+  lead_score?: number | null;
+  lead_score_breakdown?: ScoreBreakdownItem[];
+  custom_fields?: Record<string, unknown>;
   last_contacted_at?: string | null;
   tags?: string[];
   version: number;
@@ -297,6 +316,7 @@ export interface DealRow {
   owner_user_id: string;
   is_idle?: boolean;
   idle_days?: number;
+  custom_fields?: Record<string, unknown>;
   tags?: string[];
   version: number;
   updated_at: string;
@@ -350,6 +370,7 @@ export interface TimelineItem {
 export interface CompanyProfile {
   company: CompanyRow;
   contacts: ContactRow[];
+  leads?: LeadRow[];
   deals: DealRow[];
   tasks: TaskRow[];
   activities: ActivityRow[];
@@ -653,7 +674,7 @@ export const api = {
     market: Market;
   }) => createWithKey<LeadRow>('/leads', input),
   updateLead: (leadId: string, input: Patch) => patch<LeadRow>(`/leads/${enc(leadId)}`, input),
-  convertLead: (input: { leadId: string; dealName?: string; monthlyValueMinor?: string }) =>
+  convertLead: (input: ConvertLeadInput) =>
     post<{ leadId: string; companyId: string | null; contactId: string; dealId: string | null }>(
       '/leads/convert',
       input,
@@ -682,6 +703,22 @@ export const api = {
   }) => createWithKey<ContactRow>('/contacts', input),
   updateContact: (contactId: string, input: Patch) =>
     patch<ContactRow>(`/contacts/${enc(contactId)}`, input),
+  addContactEmail: (contactId: string, input: AddContactEmailInput) =>
+    post<{ emails: ContactProfile['emails'] }>(`/contacts/${enc(contactId)}/emails`, input),
+  setPrimaryContactEmail: (contactId: string, input: SetPrimaryContactEmailInput) =>
+    post<{ emails: ContactProfile['emails'] }>(`/contacts/${enc(contactId)}/emails/primary`, input),
+  removeContactEmail: (contactId: string, email: string) =>
+    del<{ emails: ContactProfile['emails'] }>(
+      `/contacts/${enc(contactId)}/emails?email=${enc(email)}`,
+    ),
+  addContactPhone: (contactId: string, input: AddContactPhoneInput) =>
+    post<{ phones: ContactProfile['phones'] }>(`/contacts/${enc(contactId)}/phones`, input),
+  setPrimaryContactPhone: (contactId: string, input: SetPrimaryContactPhoneInput) =>
+    post<{ phones: ContactProfile['phones'] }>(`/contacts/${enc(contactId)}/phones/primary`, input),
+  removeContactPhone: (contactId: string, phoneE164: string) =>
+    del<{ phones: ContactProfile['phones'] }>(
+      `/contacts/${enc(contactId)}/phones?phone=${enc(phoneE164)}`,
+    ),
 
   // Deals and pipelines
   listDeals: (params: ListParams = {}) => request<Page<DealRow>>(`/deals${listQuery(params)}`),
@@ -960,6 +997,38 @@ export const api = {
   runBulkAction: (entity: SavedViewEntity, input: BulkActionInput) =>
     createWithKey<BulkJobView>(`/${plural(entity)}/bulk`, input),
   getBulkJob: (jobId: string) => request<BulkJobView>(`/bulk-jobs/${enc(jobId)}`),
+
+  // Custom fields (PRD 4.3-4.6, 4.17, 6.8)
+  listCustomFields: (entity?: EntityType | null, includeArchived = false) => {
+    const search = new URLSearchParams();
+    if (entity) search.set('entity', entity);
+    if (includeArchived) search.set('includeArchived', '1');
+    const qs = search.toString();
+    return request<Items<CustomFieldDefinitionView>>(`/custom-fields${qs ? `?${qs}` : ''}`).then(
+      (r) => r.items,
+    );
+  },
+  createCustomField: (input: CreateCustomFieldInput) =>
+    createWithKey<CustomFieldDefinitionView>('/admin/custom-fields', input),
+  updateCustomField: (fieldId: string, input: UpdateCustomFieldInput) =>
+    patch<CustomFieldDefinitionView>(`/admin/custom-fields/${enc(fieldId)}`, input),
+  setRecordCustomFields: (entity: EntityType, recordId: string, input: SetCustomFieldsInput) =>
+    put<{ customFields: Record<string, unknown>; version: number }>(
+      `/${plural(entity)}/${enc(recordId)}/custom-fields`,
+      input,
+    ),
+
+  // Lead & contact scoring rules (PRD 4.5, 4.16, 4.17)
+  listScoringRules: () =>
+    request<Items<ScoringRuleView>>('/admin/scoring-rules').then((r) => r.items),
+  createScoringRule: (input: CreateScoringRuleInput) =>
+    createWithKey<ScoringRuleView>('/admin/scoring-rules', input),
+  updateScoringRule: (ruleId: string, input: UpdateScoringRuleInput) =>
+    patch<ScoringRuleView>(`/admin/scoring-rules/${enc(ruleId)}`, input),
+  deleteScoringRule: (ruleId: string) =>
+    del<{ id: string; deleted: true }>(`/admin/scoring-rules/${enc(ruleId)}`),
+  recalculateScores: () =>
+    post<{ leadsUpdated: number; contactsUpdated: number }>('/admin/scoring-rules/recalculate', {}),
 
   // Notifications
   notifications: () => request<{ items: NotificationRow[]; unreadCount: number }>('/notifications'),

@@ -668,7 +668,10 @@ export class BulkActionService {
         )
       ) {
         wheres.push(
-          compileFilter(selection.filter, cfg.spec.registry, params, { userId: user.id }),
+          compileFilter(selection.filter, cfg.spec.registry, params, {
+            userId: user.id,
+            customFieldsSql: cfg.spec.customFieldsSql,
+          }),
         );
       }
     }

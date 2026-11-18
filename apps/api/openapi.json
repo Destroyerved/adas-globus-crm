@@ -2410,6 +2410,407 @@
           }
         }
       }
+    },
+    "/saved-views": {
+      "get": {
+        "operationId": "listSavedViews",
+        "summary": "List personal, team and shared saved views for an entity (PRD 4.8)",
+        "responses": {
+          "200": {
+            "description": "{ items }"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createSavedView",
+        "summary": "Save a named filter/sort/column view (PRD 4.8)",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/saved-views/{id}": {
+      "patch": {
+        "operationId": "updateSavedView",
+        "summary": "Update or share a saved view (PRD 4.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteSavedView",
+        "summary": "Delete a saved view (PRD 4.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/bulk-jobs/{id}": {
+      "get": {
+        "operationId": "getBulkJob",
+        "summary": "Get background bulk action status and counts (PRD 6.7, 6.9)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bulk job"
+          }
+        }
+      }
+    },
+    "/custom-fields": {
+      "get": {
+        "operationId": "listCustomFields",
+        "summary": "List custom field definitions (PRD 4.17, 6.8)",
+        "responses": {
+          "200": {
+            "description": "{ items }"
+          }
+        }
+      }
+    },
+    "/admin/custom-fields": {
+      "post": {
+        "operationId": "createCustomField",
+        "summary": "Create a custom field definition (requires settings.manage — PRD 4.17)",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/admin/custom-fields/{id}": {
+      "patch": {
+        "operationId": "updateCustomField",
+        "summary": "Update or archive a custom field definition (requires settings.manage — PRD 4.17)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      }
+    },
+    "/leads/{id}/custom-fields": {
+      "put": {
+        "operationId": "setLeadCustomFields",
+        "summary": "Set typed custom field values on a lead (PRD 4.5, 6.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ customFields, version }"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/custom-fields": {
+      "put": {
+        "operationId": "setContactCustomFields",
+        "summary": "Set typed custom field values on a contact (PRD 4.4, 6.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ customFields, version }"
+          }
+        }
+      }
+    },
+    "/companies/{id}/custom-fields": {
+      "put": {
+        "operationId": "setCompanyCustomFields",
+        "summary": "Set typed custom field values on a company (PRD 4.3, 6.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ customFields, version }"
+          }
+        }
+      }
+    },
+    "/deals/{id}/custom-fields": {
+      "put": {
+        "operationId": "setDealCustomFields",
+        "summary": "Set typed custom field values on a deal (PRD 4.6, 6.8)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ customFields, version }"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/emails": {
+      "post": {
+        "operationId": "addContactEmail",
+        "summary": "Add a secondary email address to a contact (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "{ emails }"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeContactEmail",
+        "summary": "Remove a non-primary email address from a contact (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ emails }"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/emails/primary": {
+      "post": {
+        "operationId": "setPrimaryContactEmail",
+        "summary": "Promote an email address on a contact to primary (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ emails }"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/phones": {
+      "post": {
+        "operationId": "addContactPhone",
+        "summary": "Add a normalized E.164 phone number to a contact (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "{ phones }"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeContactPhone",
+        "summary": "Remove a phone number from a contact (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ phones }"
+          }
+        }
+      }
+    },
+    "/contacts/{id}/phones/primary": {
+      "post": {
+        "operationId": "setPrimaryContactPhone",
+        "summary": "Set primary phone number on a contact (PRD 4.4)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ phones }"
+          }
+        }
+      }
+    },
+    "/admin/scoring-rules": {
+      "get": {
+        "operationId": "listScoringRules",
+        "summary": "List configurable lead & contact scoring rules (requires settings.manage — PRD 4.16)",
+        "responses": {
+          "200": {
+            "description": "{ items }"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createScoringRule",
+        "summary": "Create a scoring rule (requires settings.manage — PRD 4.16)",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/admin/scoring-rules/recalculate": {
+      "post": {
+        "operationId": "recalculateScores",
+        "summary": "Recalculate scores across all active leads and contacts (PRD 4.16)",
+        "responses": {
+          "200": {
+            "description": "{ leadsUpdated, contactsUpdated }"
+          }
+        }
+      }
+    },
+    "/admin/scoring-rules/{id}": {
+      "patch": {
+        "operationId": "updateScoringRule",
+        "summary": "Update or toggle a scoring rule (PRD 4.16)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteScoringRule",
+        "summary": "Delete a scoring rule (PRD 4.16)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
+      }
     }
   }
 }

@@ -62,6 +62,7 @@ export const LEAD_LIST: ListSpec = {
     softwareStack: { sql: 'l.software_stack', type: 'jsonArray' },
     tags: { sql: 'l.id', type: 'tags', tagEntity: 'lead' },
   },
+  customFieldsSql: 'l.custom_fields',
   search: (q, p) => ilikeAny(['l.full_name', 'l.email', 'l.firm_name'], q, p),
 };
 
@@ -96,6 +97,7 @@ export const CONTACT_LIST: ListSpec = {
     lastContactedAt: { sql: 'c.last_contacted_at', type: 'date' },
     tags: { sql: 'c.id', type: 'tags', tagEntity: 'contact' },
   },
+  customFieldsSql: 'c.custom_fields',
   // Name or email on the contact, or the company's name. Written as two indexed lookups: an
   // OR across the two tables can't use the trigram indexes and reads every contact. The
   // lookups fill an array, which PostgreSQL always computes once; as an IN (sub-query) it
@@ -144,6 +146,7 @@ export const COMPANY_LIST: ListSpec = {
     lastContactedAt: { sql: 'c.last_contacted_at', type: 'date' },
     tags: { sql: 'c.id', type: 'tags', tagEntity: 'company' },
   },
+  customFieldsSql: 'c.custom_fields',
   search: (q, p) => ilikeAny(['c.name', 'c.domain'], q, p),
 };
 
@@ -184,6 +187,7 @@ export const DEAL_LIST: ListSpec = {
     updatedAt: { sql: 'd.updated_at', type: 'date' },
     tags: { sql: 'd.id', type: 'tags', tagEntity: 'deal' },
   },
+  customFieldsSql: 'd.custom_fields',
   // The deal's name or its company's name, as indexed lookups that fill an array (see the
   // contact list's search).
   search: (q, p) => {
