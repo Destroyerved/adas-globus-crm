@@ -1,0 +1,26 @@
+{
+  "name": "@adas/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ADAS Globus CRM — Standalone Electron Desktop Server Management Console",
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "build": "node scripts/build-desktop.mjs",
+    "typecheck": "tsc --noEmit",
+    "start": "node scripts/build-desktop.mjs && electron ./dist/main/index.js",
+    "preview": "tsx src/preview-server.ts"
+  },
+  "dependencies": {
+    "@adas/server-agent": "workspace:*",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@adas/config": "workspace:*",
+    "@types/node": "^22.13.5",
+    "electron": "^35.1.5",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

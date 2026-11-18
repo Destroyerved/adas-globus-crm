@@ -1,0 +1,22 @@
+[Unit]
+Description=ADAS Globus CRM — Authenticated Server Management Agent
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/adas-crm
+Environment=NODE_ENV=production
+Environment=ADAS_REPO_ROOT=/opt/adas-crm
+Environment=ADAS_AGENT_HOST=127.0.0.1
+Environment=ADAS_AGENT_PORT=3090
+ExecStart=/usr/bin/node /opt/adas-crm/apps/server-agent/dist/cli.js serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/adas-crm
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

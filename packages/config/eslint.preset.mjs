@@ -119,6 +119,15 @@ export const adasEslintConfig = tseslint.config(
       ],
     },
   },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 );
 
 export default adasEslintConfig;

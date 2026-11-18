@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ADAS Globus Pro — Server management</title>
+    <link rel="stylesheet" href="./tokens.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="Server navigation">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">AG</div>
+          <div>
+            <div class="brand-title">ADAS Globus</div>
+            <div class="brand-sub">Server console</div>
+          </div>
+        </div>
+
+        <div class="server-picker-block">
+          <label for="profileSelect" class="sidebar-label">Connected server</label>
+          <select id="profileSelect" class="sidebar-select" aria-label="Connected server"></select>
+          <div class="sidebar-actions">
+            <button type="button" id="btnAddLocal" class="btn-sidebar primary">
+              Connect local server
+            </button>
+            <button type="button" id="btnOpenPairModal" class="btn-sidebar">
+              Pair remote server
+            </button>
+          </div>
+        </div>
+
+        <nav class="nav-list" role="tablist" aria-label="Management sections">
+          <button
+            type="button"
+            role="tab"
+            id="tab-overview"
+            aria-controls="panel-main"
+            aria-selected="true"
+            data-tab="overview"
+            class="nav-item active"
+          >
+            Overview &amp; health
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-services"
+            aria-controls="panel-main"
+            aria-selected="false"
+            data-tab="services"
+            class="nav-item"
+          >
+            Services &amp; releases
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-logs"
+            aria-controls="panel-main"
+            aria-selected="false"
+            data-tab="logs"
+            class="nav-item"
+          >
+            Logs &amp; diagnostics
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-backups"
+            aria-controls="panel-main"
+            aria-selected="false"
+            data-tab="backups"
+            class="nav-item"
+          >
+            Backups &amp; recovery
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-config"
+            aria-controls="panel-main"
+            aria-selected="false"
+            data-tab="config"
+            class="nav-item"
+          >
+            Configuration &amp; secrets
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-security"
+            aria-controls="panel-main"
+            aria-selected="false"
+            data-tab="security"
+            class="nav-item"
+          >
+            Security &amp; audit
+          </button>
+        </nav>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h1 id="pageHeading" class="page-title">Overview &amp; health</h1>
+            <span id="serverRoleBadge" class="pill neutral" hidden></span>
+          </div>
+          <div class="topbar-right">
+            <button type="button" id="btnRefresh" class="btn">Refresh</button>
+            <button type="button" id="btnRemoveServer" class="btn danger-outline" hidden>
+              Disconnect
+            </button>
+          </div>
+        </header>
+
+        <div id="statusBanner" class="banner" role="status" aria-live="polite" hidden></div>
+
+        <main id="panel-main" class="content" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <dialog id="pairDialog" class="modal" aria-labelledby="pairDialogTitle">
+      <form id="pairForm" method="dialog" class="modal-card">
+        <h2 id="pairDialogTitle">Pair remote server</h2>
+        <p class="muted">
+          Run <code>adas-agent pair --role admin</code> on the server to generate a single-use
+          5-minute pairing code.
+        </p>
+        <div class="field">
+          <label for="pairName">Display name</label>
+          <input id="pairName" required placeholder="Office production server" />
+        </div>
+        <div class="field">
+          <label for="pairUrl">Agent HTTPS URL</label>
+          <input id="pairUrl" required placeholder="https://ops-agent.adasglobuspro.com" />
+        </div>
+        <div class="field">
+          <label for="pairCode">One-time pairing code</label>
+          <input id="pairCode" type="password" required placeholder="pair_..." />
+        </div>
+        <div class="field">
+          <label for="pairCfId">Cloudflare Access client ID (optional)</label>
+          <input id="pairCfId" placeholder="Service token client ID" />
+        </div>
+        <div class="field">
+          <label for="pairCfSecret">Cloudflare Access client secret (optional)</label>
+          <input id="pairCfSecret" type="password" placeholder="Service token secret" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelPair" class="btn">Cancel</button>
+          <button type="submit" class="btn primary">Pair server</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="restoreDialog" class="modal" aria-labelledby="restoreDialogTitle">
+      <form id="restoreForm" method="dialog" class="modal-card">
+        <h2 id="restoreDialogTitle">Confirm database restore</h2>
+        <p class="muted" id="restorePromptText"></p>
+        <div class="field">
+          <label for="restoreConfirmInput">Confirmation phrase</label>
+          <input id="restoreConfirmInput" required autocomplete="off" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelRestore" class="btn">Cancel</button>
+          <button type="submit" class="btn danger">Restore database</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
