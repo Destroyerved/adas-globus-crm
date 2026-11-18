@@ -286,6 +286,7 @@ describe('the worker on pg-boss', () => {
       );
       expect(queues.rows.map((q) => q.name)).toEqual([
         'bulk.execute',
+        'campaign.tick',
         'deals.idle',
         'duplicates.scan',
         'export.build',
@@ -294,6 +295,7 @@ describe('the worker on pg-boss', () => {
         'mail.subscriptions.renew',
         'mail.sync',
         'outbox.dispatch',
+        'sequence.tick',
         'sla.check',
         'tasks.reminders',
       ]);

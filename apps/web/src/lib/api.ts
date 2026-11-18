@@ -7,11 +7,19 @@ import {
   type AdminMailboxRow,
   type BulkActionInput,
   type BulkJobView,
+  type BatchEnrollSequenceInput,
+  type CampaignBlock,
+  type CampaignStatus,
   type ConvertLeadInput,
+  type CreateCampaignInput,
   type CreateCustomFieldInput,
   type CreateEmailTemplateInput,
+  type CreateMarketingListInput,
+  type CreateOutreachTemplateInput,
   type CreateSavedViewInput,
   type CreateScoringRuleInput,
+  type CreateSenderIdentityInput,
+  type CreateSequenceInput,
   type CreateTaskFromEmailInput,
   type Currency,
   type CustomFieldDefinitionView,
@@ -19,6 +27,7 @@ import {
   type DealContactView,
   type DuplicateCandidateView,
   type EmailTemplateView,
+  type EnrollmentStateActionInput,
   type ExportCreateInput,
   type ExportView,
   type FxRateView,
@@ -39,6 +48,7 @@ import {
   type MergeInput,
   type MergePreviewView,
   type MergeView,
+  type ModifyListMembersInput,
   type PrivacyEraseInput,
   type RecordConsentInput,
   type RecurrenceRule,
@@ -50,6 +60,7 @@ import {
   type RoutingRuleView,
   type SavedView,
   type SavedViewEntity,
+  type ScheduleCampaignInput,
   type ScoreBreakdownItem,
   type ScoringRuleView,
   type SendInboxEmailInput,
@@ -57,12 +68,19 @@ import {
   type SetPrimaryContactEmailInput,
   type SetPrimaryContactPhoneInput,
   type SuppressionStateFilter,
+  type TemplateChannel,
+  type TestSendCampaignInput,
+  type UpdateCampaignInput,
   type UpdateCustomFieldInput,
   type UpdateDealContactInput,
   type UpdateInboxThreadInput,
+  type UpdateMarketingListInput,
+  type UpdateOutreachTemplateInput,
   type UpdateRoutingRuleInput,
   type UpdateSavedViewInput,
   type UpdateScoringRuleInput,
+  type UpdateSenderIdentityInput,
+  type UpdateSequenceInput,
   type UpsertFxRateInput,
   type WithdrawConsentInput,
 } from '@adas/shared';
@@ -1164,4 +1182,358 @@ export const api = {
     request<Items<EmailTemplateView>>('/inbox/templates').then((r) => r.items),
   createInboxTemplate: (input: CreateEmailTemplateInput) =>
     createWithKey<EmailTemplateView>('/inbox/templates', input),
+
+  // System mail delivery mode (`/api/v1/healthz` -> `mailLive`)
+  healthStatus: () =>
+    request<{ status: string; mailLive: boolean; devLoginEnabled: boolean }>('/healthz'),
+
+  // Outreach templates (sequence, campaign, inbox)
+  listOutreachTemplates: (
+    params: { channel?: TemplateChannel; market?: Market; q?: string } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.channel) search.set('channel', params.channel);
+    if (params.market) search.set('market', params.market);
+    if (params.q) search.set('q', params.q);
+    const qs = search.toString();
+    return request<Items<OutreachTemplateRow>>(`/templates${qs ? `?${qs}` : ''}`).then(
+      (r) => r.items,
+    );
+  },
+  createOutreachTemplate: (input: CreateOutreachTemplateInput) =>
+    createWithKey<OutreachTemplateRow>('/templates', input),
+  updateOutreachTemplate: (id: string, input: UpdateOutreachTemplateInput) =>
+    patch<OutreachTemplateRow>(`/templates/${enc(id)}`, input),
+
+  // Personal outreach sequences
+  listSequences: () => request<Items<SequenceSummaryRow>>('/sequences').then((r) => r.items),
+  getSequence: (sequenceId: string) => request<SequenceDetailView>(`/sequences/${enc(sequenceId)}`),
+  createSequence: (input: CreateSequenceInput) =>
+    createWithKey<SequenceSummaryRow>('/sequences', input),
+  updateSequence: (sequenceId: string, input: UpdateSequenceInput) =>
+    patch<SequenceSummaryRow>(`/sequences/${enc(sequenceId)}`, input),
+  batchEnrollSequence: (sequenceId: string, input: BatchEnrollSequenceInput) =>
+    createWithKey<{
+      enrolled: Array<{ contactId: string; enrollmentId: string; nextSendAt: string }>;
+      skipped: Array<{ contactId: string; reasonCode: string; reasonMessage: string }>;
+    }>(`/sequences/${enc(sequenceId)}/enroll`, input),
+  updateEnrollmentState: (enrollmentId: string, input: EnrollmentStateActionInput) =>
+    post<SequenceEnrollmentRow>(`/enrollments/${enc(enrollmentId)}/state`, input),
+  stopEnrollment: (enrollmentId: string, reason?: string) =>
+    post<SequenceEnrollmentRow>(`/enrollments/${enc(enrollmentId)}/stop`, reason ? { reason } : {}),
+
+  // Segments & static marketing lists
+  listMarketingLists: () => request<Items<MarketingListRow>>('/lists').then((r) => r.items),
+  getMarketingList: (listId: string) =>
+    request<{ list: MarketingListRow; members: MarketingListMemberRow[]; totalCount: number }>(
+      `/lists/${enc(listId)}`,
+    ),
+  createMarketingList: (input: CreateMarketingListInput) =>
+    createWithKey<MarketingListRow>('/lists', input),
+  updateMarketingList: (listId: string, input: UpdateMarketingListInput) =>
+    patch<MarketingListRow>(`/lists/${enc(listId)}`, input),
+  addMarketingListMembers: (listId: string, input: ModifyListMembersInput) =>
+    post<{ addedCount: number; memberCount: number }>(`/lists/${enc(listId)}/members`, input),
+  removeMarketingListMember: (listId: string, contactId: string) =>
+    del<{ memberCount: number }>(`/lists/${enc(listId)}/members/${enc(contactId)}`),
+
+  // Verified sender identities & sending subdomains
+  listSenderIdentities: () =>
+    request<Items<SenderIdentityRow>>('/sender-identities').then((r) => r.items),
+  createSenderIdentity: (input: CreateSenderIdentityInput) =>
+    createWithKey<SenderIdentityRow>('/sender-identities', input),
+  updateSenderIdentity: (id: string, input: UpdateSenderIdentityInput) =>
+    patch<SenderIdentityRow>(`/sender-identities/${enc(id)}`, input),
+
+  // Marketing campaigns
+  listCampaigns: () => request<Items<CampaignSummaryRow>>('/campaigns').then((r) => r.items),
+  getCampaign: (campaignId: string) => request<CampaignDetailView>(`/campaigns/${enc(campaignId)}`),
+  createCampaign: (input: CreateCampaignInput) =>
+    createWithKey<CampaignSummaryRow>('/campaigns', input),
+  updateCampaign: (campaignId: string, input: UpdateCampaignInput) =>
+    patch<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}`, input),
+  getCampaignPreflight: (campaignId: string) =>
+    request<CampaignPreflightView>(`/campaigns/${enc(campaignId)}/preflight`),
+  submitCampaign: (campaignId: string) =>
+    post<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}/submit`, {}),
+  approveCampaign: (campaignId: string) =>
+    post<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}/approve`, {}),
+  testSendCampaign: (campaignId: string, input: TestSendCampaignInput) =>
+    post<{ sent: boolean; messageSendId: string | null }>(
+      `/campaigns/${enc(campaignId)}/test-send`,
+      input,
+    ),
+  scheduleCampaign: (campaignId: string, input: ScheduleCampaignInput) =>
+    post<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}/schedule`, input),
+  pauseCampaign: (campaignId: string, reason?: string) =>
+    post<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}/pause`, reason ? { reason } : {}),
+  cancelCampaign: (campaignId: string) =>
+    post<CampaignSummaryRow>(`/campaigns/${enc(campaignId)}/cancel`, {}),
+
+  // Contact profile outreach history
+  getContactOutreachHistory: (contactId: string) =>
+    request<ContactOutreachHistoryView>(`/contacts/${enc(contactId)}/outreach`),
 };
+
+export interface OutreachTemplateRow {
+  id: string;
+  name: string;
+  channel: TemplateChannel;
+  market: Market;
+  subject: string;
+  body_text: string;
+  body_html: string | null;
+  blocks_json: CampaignBlock[];
+  variables: string[];
+  shared: boolean;
+  owner_user_id: string;
+  owner_name?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SequenceSummaryRow {
+  id: string;
+  name: string;
+  description: string | null;
+  market: Market;
+  status: 'draft' | 'active' | 'paused' | 'archived';
+  shared: boolean;
+  daily_cap_per_mailbox: number;
+  send_window_start_minutes: number;
+  send_window_end_minutes: number;
+  stop_on_company_reply: boolean;
+  click_tracking_enabled: boolean;
+  owner_user_id: string;
+  owner_name?: string | null;
+  version: number;
+  step_count: number;
+  enrolled_count: number;
+  active_enrollments: number;
+  sent_count: number;
+  replied_count: number;
+  bounced_count: number;
+  unsubscribed_count: number;
+  meetings_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SequenceStepRow {
+  id: string;
+  sequence_id: string;
+  step_order: number;
+  step_kind: 'email' | 'task';
+  delay_business_days: number;
+  subject_template: string;
+  body_template: string;
+  reply_in_thread: boolean;
+  task_type: string;
+  task_title: string | null;
+  template_id: string | null;
+  sent_count: number;
+  replied_count: number;
+  bounced_count: number;
+  replyRatePct: number;
+}
+
+export interface SequenceEnrollmentRow {
+  id: string;
+  sequence_id: string;
+  contact_id: string;
+  contact_name: string;
+  contact_title: string | null;
+  contact_market: Market;
+  contact_timezone: string;
+  company_name: string | null;
+  email: string;
+  sender_user_id: string;
+  sender_name: string | null;
+  current_step_order: number;
+  status: string;
+  stop_reason: string | null;
+  last_skip_reason: string | null;
+  next_send_at: string | null;
+  enrolled_at: string;
+}
+
+export interface SequenceDetailView {
+  sequence: SequenceSummaryRow;
+  steps: SequenceStepRow[];
+  enrollments: SequenceEnrollmentRow[];
+  metrics: {
+    enrolledCount: number;
+    activeCount: number;
+    pausedCount: number;
+    completedCount: number;
+    sentCount: number;
+    repliedCount: number;
+    bouncedCount: number;
+    unsubscribedCount: number;
+    meetingsCount: number;
+    replyRatePct: number;
+  };
+}
+
+export interface MarketingListRow {
+  id: string;
+  name: string;
+  description: string | null;
+  list_type: 'static' | 'dynamic';
+  market: Market;
+  filter_json: Record<string, unknown>;
+  member_count: number;
+  shared: boolean;
+  owner_user_id: string;
+  owner_name?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketingListMemberRow {
+  id: string;
+  full_name: string;
+  first_name: string;
+  primary_email: string;
+  market: Market;
+  timezone: string;
+  email_verification_status: string;
+  company_name: string | null;
+}
+
+export interface SenderIdentityRow {
+  id: string;
+  from_name: string;
+  from_email: string;
+  reply_to_email: string | null;
+  domain: string;
+  spf_verified: boolean;
+  dkim_verified: boolean;
+  dmarc_verified: boolean;
+  verified_at: string | null;
+  daily_warmup_cap: number;
+  sent_today_count: number;
+  created_at: string;
+}
+
+export interface CampaignSummaryRow {
+  id: string;
+  name: string;
+  subject: string;
+  body_html: string;
+  body_text: string;
+  blocks_json: CampaignBlock[];
+  market: Market;
+  status: CampaignStatus;
+  list_id: string | null;
+  list_name?: string | null;
+  segment_filter_json: Record<string, unknown> | null;
+  sender_identity_id: string | null;
+  sender_from_name?: string | null;
+  sender_from_email?: string | null;
+  throttle_per_hour: number;
+  respect_recipient_timezone: boolean;
+  click_tracking_enabled: boolean;
+  exclude_unverified: boolean;
+  approved_by_user_id: string | null;
+  approved_by_name?: string | null;
+  approved_at: string | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  sent_count: number;
+  delivered_count: number;
+  bounced_count: number;
+  soft_bounced_count: number;
+  complained_count: number;
+  unsubscribed_count: number;
+  clicked_count: number;
+  opened_unreliable_count: number;
+  replied_count: number;
+  paused_reason: string | null;
+  owner_user_id: string;
+  owner_name?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignPreflightView {
+  campaignId: string;
+  senderVerified: boolean;
+  senderFromEmail: string | null;
+  sendingSubdomainOk: boolean;
+  unsubscribeFooterAutomatic: boolean;
+  postalAddressConfigured: boolean;
+  postalAddress: string;
+  totalAudienceCount: number;
+  eligibleCount: number;
+  suppressedCount: number;
+  skippedByReason: Record<string, number>;
+  counselSignedOff: boolean;
+  mailLive: boolean;
+  readyToApprove: boolean;
+}
+
+export interface CampaignRecipientRow {
+  id: string;
+  campaign_id: string;
+  contact_id: string;
+  contact_name: string;
+  company_name: string | null;
+  email: string;
+  status: string;
+  reason_code: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  clicked_at: string | null;
+}
+
+export interface CampaignDetailView {
+  campaign: CampaignSummaryRow;
+  preflight: CampaignPreflightView;
+  recipients: CampaignRecipientRow[];
+  clicksByLink: Array<{
+    target_url: string;
+    total_clicks: number;
+    unique_clickers: number;
+  }>;
+}
+
+export interface ContactOutreachHistoryView {
+  enrollments: Array<{
+    id: string;
+    sequence_id: string;
+    sequence_name: string;
+    sequence_market: Market;
+    sender_name: string | null;
+    current_step_order: number;
+    status: string;
+    stop_reason: string | null;
+    last_skip_reason: string | null;
+    next_send_at: string | null;
+    enrolled_at: string;
+  }>;
+  campaigns: Array<{
+    id: string;
+    campaign_id: string;
+    campaign_name: string;
+    campaign_subject: string;
+    status: string;
+    reason_code: string | null;
+    sent_at: string | null;
+    delivered_at: string | null;
+    clicked_at: string | null;
+  }>;
+  sends: Array<{
+    id: string;
+    channel: string;
+    subject: string;
+    status: string;
+    compliance_reason_code: string;
+    transport_provider: string;
+    sent_at: string;
+  }>;
+}

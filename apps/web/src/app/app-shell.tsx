@@ -8,10 +8,12 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Repeat,
   Search,
   Settings,
   Upload,
@@ -51,8 +53,7 @@ interface NavItem {
   capability?: string;
 }
 
-// Only modules that work end to end appear here (AGENTS.md section 3). Sequences and Campaigns
-// return when their engines land.
+// Every module here works end to end against PostgreSQL.
 const WORK_ITEMS: NavItem[] = [
   {
     id: 'dashboard',
@@ -85,6 +86,18 @@ const WORK_ITEMS: NavItem[] = [
 ];
 
 const GROW_ITEMS: NavItem[] = [
+  {
+    id: 'sequences',
+    label: 'Sequences',
+    icon: Repeat,
+    capability: 'sequences.read',
+  },
+  {
+    id: 'campaigns',
+    label: 'Campaigns',
+    icon: Megaphone,
+    capability: 'campaigns.read',
+  },
   {
     id: 'reports',
     label: 'Reports',
@@ -141,6 +154,8 @@ export function AppShell({
   const growItems = GROW_ITEMS.filter((item) => !item.capability || can(me, item.capability));
   const canReports = can(me, 'reports.read');
   const canInbox = can(me, 'inbox.read');
+  const canSequences = can(me, 'sequences.read');
+  const canCampaigns = can(me, 'campaigns.read');
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -191,7 +206,7 @@ export function AppShell({
 
       if (gChordRef.current) {
         gChordRef.current = false;
-        // DESIGN 9.3 keyboard map: G then H (home), I (inbox), L, C, O, D, T, R
+        // DESIGN 9.3 keyboard map: G then H (home), I (inbox), S (sequences), M (campaigns), L, C, O, D, T, R
         const targets: Record<string, AppScreenId> = {
           h: 'dashboard',
           l: 'leads',
@@ -200,6 +215,8 @@ export function AppShell({
           d: 'deals',
           t: 'tasks',
           ...(canInbox ? { i: 'inbox' } : {}),
+          ...(canSequences ? { s: 'sequences' } : {}),
+          ...(canCampaigns ? { m: 'campaigns' } : {}),
           ...(canReports ? { r: 'reports' } : {}),
         };
         const target = targets[event.key.toLowerCase()];
@@ -212,7 +229,7 @@ export function AppShell({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onNavigate, onOpenCommandPalette, canInbox, canReports]);
+  }, [onNavigate, onOpenCommandPalette, canInbox, canSequences, canCampaigns, canReports]);
 
   const renderSidebarNavContent = (isCollapsedView: boolean) => (
     <div className="flex flex-col h-full justify-between p-[12px] text-sidebar-foreground select-none">

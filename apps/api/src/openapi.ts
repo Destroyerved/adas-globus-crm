@@ -1289,6 +1289,252 @@ const inboxAndGraphPaths = {
   },
 };
 
+const sequencesAndCampaignsPaths = {
+  '/templates': {
+    get: {
+      operationId: 'listOutreachTemplates',
+      summary:
+        'List shared and personal outreach templates filtered by channel or market (PRD 4.12, 4.13)',
+      responses: ok('Template list'),
+    },
+    post: {
+      operationId: 'createOutreachTemplate',
+      summary: 'Create a plain-text or block-editor outreach template (PRD 4.12, 4.13)',
+      responses: { '201': { description: 'Template created' } },
+    },
+  },
+  '/templates/{id}': {
+    patch: {
+      operationId: 'updateOutreachTemplate',
+      summary: 'Update an outreach template with optimistic concurrency version check',
+      parameters: idParam,
+      responses: ok('Updated template'),
+    },
+  },
+  '/sequences': {
+    get: {
+      operationId: 'listSequences',
+      summary:
+        'List outreach sequences within sequences.read scope with step and enrollment counts (PRD 4.12)',
+      responses: ok('Sequence list'),
+    },
+    post: {
+      operationId: 'createSequence',
+      summary:
+        'Create a multi-step email and task sequence with local send window and mailbox cap (PRD 4.12)',
+      responses: { '201': { description: 'Sequence created' } },
+    },
+  },
+  '/sequences/{id}': {
+    get: {
+      operationId: 'getSequenceDetail',
+      summary: 'Get sequence detail, per-step metrics, and enrollments (PRD 4.12)',
+      parameters: idParam,
+      responses: ok('Sequence detail'),
+    },
+    patch: {
+      operationId: 'updateSequence',
+      summary: 'Update sequence configuration and steps (version checked)',
+      parameters: idParam,
+      responses: ok('Updated sequence'),
+    },
+  },
+  '/sequences/{id}/enroll': {
+    post: {
+      operationId: 'batchEnrollSequence',
+      summary:
+        'Enroll one or more contacts into a sequence with checkSendable and single-active-sequence checks (PRD 4.12, A16, A17)',
+      parameters: idParam,
+      responses: { '201': { description: 'Enrollment results and skip reasons' } },
+    },
+  },
+  '/enrollments/{id}/state': {
+    post: {
+      operationId: 'updateSequenceEnrollmentState',
+      summary: 'Pause, resume, or stop a sequence enrollment (PRD 4.12)',
+      parameters: idParam,
+      responses: ok('Updated enrollment'),
+    },
+  },
+  '/enrollments/{id}/stop': {
+    post: {
+      operationId: 'stopSequenceEnrollment',
+      summary: 'Stop an active or paused sequence enrollment immediately (PRD 4.12, 6.7)',
+      parameters: idParam,
+      responses: ok('Stopped enrollment'),
+    },
+  },
+  '/lists': {
+    get: {
+      operationId: 'listMarketingLists',
+      summary: 'List static marketing lists and dynamic filter-language segments (PRD 4.13, 6.8)',
+      responses: ok('Marketing lists'),
+    },
+    post: {
+      operationId: 'createMarketingList',
+      summary:
+        'Create a static list or dynamic segment validated against the contact field registry (PRD 4.13, 6.8)',
+      responses: { '201': { description: 'Created list or segment' } },
+    },
+  },
+  '/lists/{id}': {
+    get: {
+      operationId: 'getMarketingListDetail',
+      summary: 'Resolve members of a static list or dynamic segment (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('List detail and resolved members'),
+    },
+    patch: {
+      operationId: 'updateMarketingList',
+      summary: 'Update a static list or dynamic segment (version checked)',
+      parameters: idParam,
+      responses: ok('Updated list'),
+    },
+  },
+  '/lists/{id}/members': {
+    post: {
+      operationId: 'addMarketingListMembers',
+      summary: 'Add contacts to a static marketing list',
+      parameters: idParam,
+      responses: ok('Updated member count'),
+    },
+  },
+  '/lists/{id}/members/{contactId}': {
+    delete: {
+      operationId: 'removeMarketingListMember',
+      summary: 'Remove a contact from a static marketing list',
+      responses: ok('Updated member count'),
+    },
+  },
+  '/sender-identities': {
+    get: {
+      operationId: 'listSenderIdentities',
+      summary:
+        'List campaign sender identities and SPF/DKIM/DMARC subdomain verification status (PRD 5.4, 4.17)',
+      responses: ok('Sender identities'),
+    },
+    post: {
+      operationId: 'createSenderIdentity',
+      summary: 'Register a campaign sender identity on a dedicated sending subdomain (PRD 5.4)',
+      responses: { '201': { description: 'Created sender identity' } },
+    },
+  },
+  '/sender-identities/{id}': {
+    patch: {
+      operationId: 'updateSenderIdentity',
+      summary: 'Update SPF/DKIM/DMARC verification status and daily warm-up cap (PRD 5.4)',
+      parameters: idParam,
+      responses: ok('Updated sender identity'),
+    },
+  },
+  '/campaigns': {
+    get: {
+      operationId: 'listCampaigns',
+      summary: 'List marketing campaigns within campaigns.read scope (PRD 4.13)',
+      responses: ok('Campaign list'),
+    },
+    post: {
+      operationId: 'createCampaign',
+      summary: 'Create a marketing campaign with block-editor HTML and plain-text copy (PRD 4.13)',
+      responses: { '201': { description: 'Created campaign' } },
+    },
+  },
+  '/campaigns/{id}': {
+    get: {
+      operationId: 'getCampaignDetail',
+      summary:
+        'Get campaign detail, pre-flight checklist, recipients, and click breakdown (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Campaign detail'),
+    },
+    patch: {
+      operationId: 'updateCampaign',
+      summary: 'Edit a campaign; editing an approved campaign returns it to Draft (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Updated campaign'),
+    },
+  },
+  '/campaigns/{id}/preflight': {
+    get: {
+      operationId: 'getCampaignPreflight',
+      summary:
+        'Run pre-flight compliance and sender verification checks across the target audience (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Pre-flight checklist'),
+    },
+  },
+  '/campaigns/{id}/submit': {
+    post: {
+      operationId: 'submitCampaignForApproval',
+      summary: 'Submit a draft campaign for second-person approval (PRD 4.13, A19)',
+      parameters: idParam,
+      responses: ok('Pending approval'),
+    },
+  },
+  '/campaigns/{id}/approve': {
+    post: {
+      operationId: 'approveCampaign',
+      summary:
+        'Approve a campaign as a second reviewer (requires campaigns.approve; creator cannot self-approve — PRD 2.4, 4.13, A19)',
+      parameters: idParam,
+      responses: ok('Approved campaign'),
+    },
+  },
+  '/campaigns/{id}/test-send': {
+    post: {
+      operationId: 'testSendCampaign',
+      summary: 'Send a [TEST] preview to an internal active employee address (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Test send receipt'),
+    },
+  },
+  '/campaigns/{id}/schedule': {
+    post: {
+      operationId: 'scheduleCampaign',
+      summary:
+        'Schedule an approved campaign or start throttled sending immediately (PRD 4.13, 8.4)',
+      parameters: idParam,
+      responses: ok('Scheduled or sending campaign'),
+    },
+  },
+  '/campaigns/{id}/pause': {
+    post: {
+      operationId: 'pauseCampaign',
+      summary: 'Pause an approved, scheduled, or sending campaign (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Paused campaign'),
+    },
+  },
+  '/campaigns/{id}/cancel': {
+    post: {
+      operationId: 'cancelCampaign',
+      summary: 'Cancel a campaign (PRD 4.13)',
+      parameters: idParam,
+      responses: ok('Cancelled campaign'),
+    },
+  },
+  '/contacts/{id}/outreach': {
+    get: {
+      operationId: 'getContactOutreachHistory',
+      summary:
+        'Sequence enrollments, campaign deliveries, and message sends for a contact (PRD 4.4)',
+      parameters: idParam,
+      responses: ok('Contact outreach history'),
+    },
+  },
+  '/webhooks/esp': {
+    post: {
+      operationId: 'receiveEspWebhook',
+      summary:
+        'Public HMAC-SHA256 verified ESP webhook on go. host for deliveries, bounces, complaints, clicks and auto-pause (PRD 5.6, 8.4, A20)',
+      responses: {
+        '202': { description: 'Webhook accepted' },
+        '401': { description: 'Invalid signature' },
+      },
+    },
+  },
+};
+
 const allPaths = openApiSpec.paths as Record<string, Record<string, unknown>>;
 for (const [path, methods] of Object.entries({
   ...listsAndEditingPaths,
@@ -1299,6 +1545,7 @@ for (const [path, methods] of Object.entries({
   ...intakeAndRoutingPaths,
   ...crmExtensionsPaths,
   ...inboxAndGraphPaths,
+  ...sequencesAndCampaignsPaths,
 })) {
   allPaths[path] = { ...allPaths[path], ...methods };
 }

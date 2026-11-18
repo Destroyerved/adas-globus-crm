@@ -50,6 +50,12 @@ export const EnvSchema = z
     MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
     CRM_NOTIFICATION_MAILBOX: z.string().email().default('crm@adasglobuspro.com'),
 
+    ESP_PROVIDER: z.enum(['postmark', 'resend', 'http_json']).default('postmark'),
+    ESP_API_BASE_URL: z.string().url().default('https://api.postmarkapp.com'),
+    ESP_API_KEY_FILE: z.string().min(1).default('./secrets/esp_api_key.txt'),
+    ESP_WEBHOOK_SECRET_FILE: z.string().min(1).default('./secrets/esp_webhook_secret.txt'),
+    ESP_SENDING_DOMAIN: z.string().min(1).default('mail.adasglobuspro.com'),
+
     CF_ACCESS_TEAM_DOMAIN: z.string().min(1).default('adasglobuspro.cloudflareaccess.com'),
     CF_ACCESS_AUD: z
       .string()

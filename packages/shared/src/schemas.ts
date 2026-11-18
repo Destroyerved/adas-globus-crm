@@ -18,13 +18,23 @@ export const SendableReasonCodeSchema = z.enum([
   'OK',
   'SUPPRESSED_EMAIL',
   'SUPPRESSED_DOMAIN',
+  'UNSUBSCRIBED',
+  'COMPLAINED',
   'HARD_BOUNCED',
   'DO_NOT_CONTACT',
   'INVALID_EMAIL',
+  'EMAIL_UNVERIFIED_OR_RISKY',
   'CONSENT_REVOKED',
   'CONSENT_EXPIRED',
   'NO_LAWFUL_BASIS',
   'MARKET_BLOCKED',
+  'ALREADY_SENT_THIS_STEP',
+  'IN_OTHER_ACTIVE_SEQUENCE',
+  'SEQUENCE_INACTIVE',
+  'CAMPAIGN_NOT_APPROVED',
+  'CAMPAIGN_PAUSED',
+  'SENDER_NOT_VERIFIED',
+  'MAILBOX_DISCONNECTED',
   'FREQUENCY_CAP',
   'MAILBOX_DAILY_CAP',
   'OUTSIDE_SEND_WINDOW',
@@ -50,9 +60,19 @@ export const CheckSendableInputSchema = z.object({
   contactDoNotContact: z.boolean().default(false),
   companyAccountStatus: AccountStatusSchema.default('prospect'),
   emailVerificationStatus: EmailVerificationStatusSchema.default('unknown'),
+  excludeUnverifiedInCampaigns: z.boolean().default(false),
   hardBounced: z.boolean().default(false),
   suppressedEmail: z.boolean().default(false),
   suppressedDomain: z.boolean().default(false),
+  unsubscribed: z.boolean().default(false),
+  complained: z.boolean().default(false),
+  alreadySentThisStep: z.boolean().default(false),
+  inOtherActiveSequence: z.boolean().default(false),
+  sequenceInactive: z.boolean().default(false),
+  campaignNotApproved: z.boolean().default(false),
+  campaignPaused: z.boolean().default(false),
+  senderNotVerified: z.boolean().default(false),
+  mailboxDisconnected: z.boolean().default(false),
   consent: z
     .object({
       basis: ConsentBasisSchema,
@@ -70,7 +90,7 @@ export const CheckSendableInputSchema = z.object({
   bypassSendWindow: z.boolean().default(false),
   nowIso: z.string().datetime().optional(),
 });
-export type CheckSendableInput = z.infer<typeof CheckSendableInputSchema>;
+export type CheckSendableInput = z.input<typeof CheckSendableInputSchema>;
 
 export const CheckSendableResultSchema = z.object({
   sendable: z.boolean(),
@@ -456,39 +476,79 @@ export type WebsiteInquiryPayload = z.infer<typeof WebsiteInquiryPayloadSchema>;
 // PRD §4.11–4.16 & §8: Inbox, Sequences, Campaigns, Integrations
 // ---------------------------------------------------------------------------
 
+export const SequenceStepInputSchema = z
+  .object({
+    stepOrder: z.number().int().positive().max(25),
+    stepKind: z.enum(['email', 'task']).default('email'),
+    delayBusinessDays: z.number().int().min(0).max(90),
+    subjectTemplate: z.string().trim().max(240).default(''),
+    bodyTemplate: z.string().trim().max(20000).default(''),
+    replyInThread: z.boolean().default(true),
+    taskType: TaskTypeSchema.default('call'),
+    taskTitle: z.string().trim().max(240).nullable().optional(),
+    templateId: z.string().trim().min(1).nullable().optional(),
+  })
+  .superRefine((step, ctx) => {
+    if (step.stepKind === 'email' && !step.templateId) {
+      if (!step.subjectTemplate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['subjectTemplate'],
+          message: 'Email steps need a subject line or a template.',
+        });
+      }
+      if (!step.bodyTemplate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['bodyTemplate'],
+          message: 'Email steps need message copy or a template.',
+        });
+      }
+    }
+  });
+export type SequenceStepInput = z.input<typeof SequenceStepInputSchema>;
+
 export const CreateSequenceInputSchema = z.object({
-  name: z.string().min(1).max(160),
+  name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(500).nullable().optional(),
   market: MarketSchema.default('US'),
-  dailyCapPerMailbox: z.number().int().positive().max(200).default(50),
-  steps: z
-    .array(
-      z.object({
-        stepOrder: z.number().int().positive(),
-        delayBusinessDays: z.number().int().nonnegative(),
-        subjectTemplate: z.string().min(1),
-        bodyTemplate: z.string().min(1),
-      }),
-    )
-    .min(1),
+  status: z.enum(['draft', 'active', 'paused', 'archived']).default('active'),
+  shared: z.boolean().default(true),
+  dailyCapPerMailbox: z.number().int().positive().max(150).default(50),
+  sendWindowStartMinutes: z.number().int().min(0).max(1439).default(480),
+  sendWindowEndMinutes: z.number().int().min(1).max(1440).default(1020),
+  stopOnCompanyReply: z.boolean().default(true),
+  clickTrackingEnabled: z.boolean().default(false),
+  steps: z.array(SequenceStepInputSchema).min(1).max(20),
 });
-export type CreateSequenceInput = z.infer<typeof CreateSequenceInputSchema>;
+export type CreateSequenceInput = z.input<typeof CreateSequenceInputSchema>;
 
 export const EnrollSequenceInputSchema = z.object({
-  sequenceId: z.string(),
-  contactId: z.string(),
+  sequenceId: z.string().min(1),
+  contactId: z.string().min(1),
   senderUserId: z.string().optional(),
 });
-export type EnrollSequenceInput = z.infer<typeof EnrollSequenceInputSchema>;
+export type EnrollSequenceInput = z.input<typeof EnrollSequenceInputSchema>;
 
 export const CreateCampaignInputSchema = z.object({
-  name: z.string().min(1).max(160),
-  subject: z.string().min(1).max(200),
-  bodyHtml: z.string().min(1),
+  name: z.string().trim().min(1).max(160),
+  subject: z.string().trim().min(1).max(200),
+  bodyHtml: z.string().max(100000).default(''),
+  bodyText: z.string().max(50000).default(''),
+  blocks: z.array(z.record(z.string(), z.unknown())).max(40).default([]),
   market: MarketSchema.default('US'),
-  listId: z.string().optional().nullable(),
+  listId: z.string().trim().min(1).optional().nullable(),
+  segmentFilterJson: z.record(z.string(), z.unknown()).nullable().optional(),
+  templateId: z.string().trim().min(1).optional().nullable(),
+  senderIdentityId: z.string().trim().min(1).optional().nullable(),
+  throttlePerHour: z.number().int().min(1).max(10000).default(200),
+  respectRecipientTimezone: z.boolean().default(true),
+  clickTrackingEnabled: z.boolean().default(true),
+  excludeUnverified: z.boolean().default(true),
+  initialStatus: z.enum(['draft', 'pending_approval']).default('pending_approval'),
   recipientContactIds: z.array(z.string()).default([]),
 });
-export type CreateCampaignInput = z.infer<typeof CreateCampaignInputSchema>;
+export type CreateCampaignInput = z.input<typeof CreateCampaignInputSchema>;
 
 export const DealStageDefinitionSchema = z.object({
   id: z.string(),

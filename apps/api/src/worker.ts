@@ -7,13 +7,19 @@
  *   pnpm --filter @adas/api dev:worker
  */
 import { buildWorker } from './jobs.js';
+import { ComplianceService } from './modules/compliance/index.js';
 import { InboxService } from './modules/inbox/index.js';
+import { OutreachService } from './modules/outreach/index.js';
 import { loadDotEnv, resolveConfigPath, validateEnv } from './platform/config/index.js';
 import { loadSecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
 import { LocalFileStorage } from './platform/files/index.js';
 import { createLogger } from './platform/logger/index.js';
-import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
+import {
+  EspBulkSender,
+  MailpitTransport,
+  MicrosoftGraphMailboxClient,
+} from './platform/mail-transport/index.js';
 
 loadDotEnv();
 const env = validateEnv();
@@ -31,6 +37,16 @@ const secretBox = loadSecretBox(
   env.TOKEN_ENCRYPTION_KEY_VERSION,
   false,
 );
+const mailpit = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL);
+const espSender = new EspBulkSender({
+  provider: env.ESP_PROVIDER,
+  apiBaseUrl: env.ESP_API_BASE_URL,
+  apiKeyFile: resolveConfigPath(env.ESP_API_KEY_FILE),
+  webhookSecretFile: resolveConfigPath(env.ESP_WEBHOOK_SECRET_FILE),
+  sendingDomain: env.ESP_SENDING_DOMAIN,
+  nodeEnv: env.NODE_ENV,
+  mailLive: env.MAIL_LIVE,
+});
 const graph = new MicrosoftGraphMailboxClient({
   tenantId: env.ENTRA_TENANT_ID,
   clientId: env.ENTRA_CLIENT_ID,
@@ -39,21 +55,24 @@ const graph = new MicrosoftGraphMailboxClient({
   authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
   graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
 });
-const inbox = new InboxService(
-  db,
-  graph,
-  new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL),
-  {
-    nodeEnv: env.NODE_ENV,
-    mailLive: env.MAIL_LIVE,
-    publicHost: env.APP_PUBLIC_HOST,
-    maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
-    secretBox,
-  },
-);
+const inbox = new InboxService(db, graph, mailpit, {
+  nodeEnv: env.NODE_ENV,
+  mailLive: env.MAIL_LIVE,
+  publicHost: env.APP_PUBLIC_HOST,
+  maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
+  secretBox,
+});
+const outreach = new OutreachService(db, new ComplianceService(db), mailpit, {
+  nodeEnv: env.NODE_ENV,
+  mailLive: env.MAIL_LIVE,
+  publicHost: env.APP_PUBLIC_HOST,
+  sendingSubdomain: env.ESP_SENDING_DOMAIN,
+  espSender,
+});
 const { runner } = buildWorker(db, logger, {
   files: new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH)),
   inbox,
+  outreach,
 });
 try {
   await db.ensureInitialized();

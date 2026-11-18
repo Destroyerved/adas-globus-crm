@@ -150,12 +150,13 @@ export interface EmailTemplateVariables {
   companyName?: string | null;
   senderName?: string | null;
   senderEmail?: string | null;
+  [key: string]: string | null | undefined;
 }
 
 /**
  * Renders `{{key}}` and `{{key|fallback}}` placeholders for Inbox, Sequence, and Campaign copy.
  * Supports both flat (`{{first_name}}`, `{{company_name}}`) and dotted (`{{contact.first_name}}`,
- * `{{company.name}}`) tokens used in seeded templates.
+ * `{{company.name}}`, `{{company.software}}`) tokens used in templates.
  */
 export function renderEmailTemplate(template: string, vars: EmailTemplateVariables): string {
   const full = (vars.fullName ?? '').trim();
@@ -182,6 +183,12 @@ export function renderEmailTemplate(template: string, vars: EmailTemplateVariabl
     'sender.name': senderName,
     'sender.email': senderEmail,
   };
+
+  for (const [k, v] of Object.entries(vars)) {
+    if (typeof v === 'string' && v.trim()) {
+      lookup[k.toLowerCase()] = v.trim();
+    }
+  }
 
   return template.replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]*))?\s*\}\}/g, (_m, rawKey, fb) => {
     const key = String(rawKey).toLowerCase();

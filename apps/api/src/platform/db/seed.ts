@@ -199,11 +199,35 @@ export const SEED_SQL: readonly string[] = [
       ON CONFLICT (id) DO NOTHING;
 
       INSERT INTO templates (
-        id, name, category, market, subject, body_text, variables, owner_user_id, shared
+        id, name, category, channel, market, subject, body_text, variables, owner_user_id, shared
       ) VALUES
-        ('tpl_inbox_trial_intro', '3-day CPA staffing trial introduction', 'inbox', 'US', '3-day risk-free tax & accounting pod trial for {{company_name|your firm}}', 'Hi {{first_name|there}}, would Tuesday or Thursday work for a 15-minute scope call regarding a 3-day risk-free trial for {{company_name|your firm}}?', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE),
-        ('tpl_inbox_ca_followup', 'Canada T1/T2 CaseWare & TaxCycle follow-up', 'inbox', 'CA', 'Following up on CaseWare & TaxCycle staffing for {{company_name|your practice}}', 'Hi {{first_name|there}}, shortlisted two senior Canadian tax specialists familiar with TaxCycle and CaseWare for {{company_name|your firm}}.', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE)
+        ('tpl_inbox_trial_intro', '3-day CPA staffing trial introduction', 'inbox', 'inbox', 'US', '3-day risk-free tax & accounting pod trial for {{company_name|your firm}}', 'Hi {{first_name|there}}, would Tuesday or Thursday work for a 15-minute scope call regarding a 3-day risk-free trial for {{company_name|your firm}}?', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE),
+        ('tpl_inbox_ca_followup', 'Canada T1/T2 CaseWare & TaxCycle follow-up', 'inbox', 'inbox', 'CA', 'Following up on CaseWare & TaxCycle staffing for {{company_name|your practice}}', 'Hi {{first_name|there}}, shortlisted two senior Canadian tax specialists familiar with TaxCycle and CaseWare for {{company_name|your firm}}.', '["first_name","company_name","sender_name"]'::jsonb, 'usr_mgr_1', TRUE),
+        ('tpl_cmpg_q1_briefing', 'Busy Season Staffing Capacity Briefing', 'campaign', 'campaign', 'US', 'How CPA firms staff UltraTax & CCH pods ahead of peak season', 'Hi {{contact.first_name|there}}, explore how {{company.name|your firm}} can pilot an EA-qualified tax pod for 3 days at no cost.', '["contact.first_name","company.name"]'::jsonb, 'usr_mkt_1', TRUE)
       ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO sender_identities (
+        id, from_name, from_email, reply_to_email, domain, spf_verified, dkim_verified, dmarc_verified,
+        verified_at, daily_warmup_cap, sent_today_count, owner_user_id
+      ) VALUES
+        ('snd_mail_subdomain', 'Ananya Iyer · ADAS Globus Pro', 'briefings@mail.adasglobuspro.example.com', 'ananya@adasglobuspro.example.com', 'mail.adasglobuspro.example.com', TRUE, TRUE, TRUE, NOW() - INTERVAL '14 days', 500, 0, 'usr_mkt_1')
+      ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO lists (
+        id, name, description, list_type, market, filter_json, member_count, owner_user_id, team_id, shared
+      ) VALUES
+        ('lst_us_trial_pilots', 'U.S. Priority Trial Prospects', 'Hand-curated U.S. CPA partners evaluating a 3-day tax pod trial', 'static', 'US', '{}'::jsonb, 2, 'usr_mkt_1', 'team_us', TRUE)
+      ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO list_members (list_id, contact_id, added_by_user_id) VALUES
+        ('lst_us_trial_pilots', 'cnt_jane', 'usr_mkt_1'),
+        ('lst_us_trial_pilots', 'cnt_elena', 'usr_mkt_1')
+      ON CONFLICT DO NOTHING;
+
+      UPDATE campaigns
+      SET sender_identity_id = 'snd_mail_subdomain',
+          body_text = 'Explore our 3-day risk-free CPA staffing trial.'
+      WHERE id = 'cmpg_us_q4_tax' AND sender_identity_id IS NULL;
 
       INSERT INTO scoring_rules (
         id, name, category, field_path, operator, target_value, points, active

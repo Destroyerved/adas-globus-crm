@@ -39,7 +39,7 @@ import { ExportService, registerExportRoutes } from './modules/exports/index.js'
 import { InboxService, registerInboxRoutes } from './modules/inbox/index.js';
 import { WebsiteIntakeService, registerIntakeRoutes } from './modules/intake/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
-import { OutreachService } from './modules/outreach/index.js';
+import { OutreachService, registerOutreachRoutes } from './modules/outreach/index.js';
 import {
   isDevLoginEnabled,
   loadDotEnv,
@@ -53,7 +53,11 @@ import { LocalFileStorage, type FileStorage } from './platform/files/index.js';
 import { DomainError, NotFoundDomainError, toProblemDetails } from './platform/errors/index.js';
 import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
-import { MailpitTransport, MicrosoftGraphMailboxClient } from './platform/mail-transport/index.js';
+import {
+  EspBulkSender,
+  MailpitTransport,
+  MicrosoftGraphMailboxClient,
+} from './platform/mail-transport/index.js';
 import { effectiveCapabilities, requireCapability } from './platform/scope/index.js';
 import {
   PerUserRateLimiter,
@@ -196,11 +200,22 @@ export function createAppServer(
     files?: FileStorage;
     /** Optional Cloudflare Access JWKS loader override for offline integration tests. */
     cfAccessJwksLoader?: CloudflareAccessOptions['jwksLoader'];
+    /** Optional ESP webhook HMAC secret override for offline integration tests. */
+    espWebhookSecret?: string;
   } = {},
 ) {
   const logger = createLogger(env.LOG_LEVEL);
   const db = existingDb ?? DatabaseService.connect(env.DATABASE_URL);
   const transport = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL);
+  const espSender = new EspBulkSender({
+    provider: env.ESP_PROVIDER,
+    apiBaseUrl: env.ESP_API_BASE_URL,
+    apiKeyFile: resolveConfigPath(env.ESP_API_KEY_FILE),
+    webhookSecretFile: resolveConfigPath(env.ESP_WEBHOOK_SECRET_FILE),
+    sendingDomain: env.ESP_SENDING_DOMAIN,
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+  });
   const auth = new AuthAndUsersService(db, env.NODE_ENV);
   const apiTokens = new ApiTokenService(db, auth);
   const cfAccess = new CloudflareAccessVerifier({
@@ -216,7 +231,14 @@ export function createAppServer(
     rateLimitPer10Min: env.INQUIRY_RATE_LIMIT_PER_10M,
   });
   const dataQuality = new DataQualityService(db);
-  const outreach = new OutreachService(db, compliance, transport);
+  const outreach = new OutreachService(db, compliance, transport, {
+    nodeEnv: env.NODE_ENV,
+    mailLive: env.MAIL_LIVE,
+    publicHost: env.APP_PUBLIC_HOST,
+    sendingSubdomain: env.ESP_SENDING_DOMAIN,
+    espSender,
+    espWebhookSecret: options.espWebhookSecret ?? null,
+  });
   const intelligence = new IntelligenceService(db);
   const lists = new CrmListService(db);
   const records = new CrmRecordService(db);
@@ -239,6 +261,7 @@ export function createAppServer(
   });
   registerComplianceRoutes(router, compliance);
   registerIntakeRoutes(router, intake);
+  registerOutreachRoutes(router, outreach);
   const admin = new AdminService(db);
   registerAdminRoutes(router, admin);
   const dashboard = new DashboardService(db);
@@ -498,6 +521,84 @@ export function createAppServer(
           res.end(serializeJson({ status: 'accepted', ...result }));
           return;
         }
+      }
+
+      // Public stored-URL click redirect (`GET /c/:token` on `go.` — PRD §8.6).
+      // Redirects strictly to the stored `click_tokens.target_url`; never an open redirect.
+      if (method === 'GET' && pathname.startsWith('/c/')) {
+        const rawToken = decodeURIComponent(pathname.slice('/c/'.length));
+        try {
+          const { targetUrl } = await outreach.handleClickRedirect(rawToken);
+          res.writeHead(302, {
+            Location: targetUrl,
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+          });
+          res.end();
+          return;
+        } catch (err) {
+          if (err instanceof DomainError && err.status === 404) {
+            sendHtml(
+              res,
+              404,
+              publicPage(
+                'Link not found',
+                `<h1>This link <strong>isn't valid</strong></h1><p>It may be incomplete or expired.</p>`,
+              ),
+              production,
+            );
+            return;
+          }
+          throw err;
+        }
+      }
+
+      // Public ESP webhook receiver (`POST /api/v1/webhooks/esp` on `go.` — PRD §8.4, §8.7, §9).
+      // Verifies constant-time HMAC-SHA256 signature over raw bytes before processing events.
+      if (method === 'POST' && pathname === '/api/v1/webhooks/esp') {
+        const rawBuf = await readRawBody(req, 262_144);
+        const rawBody = rawBuf.toString('utf-8');
+        let parsedBody: unknown;
+        try {
+          parsedBody = rawBody.trim() ? JSON.parse(rawBody) : {};
+        } catch {
+          throw new DomainError({
+            status: 400,
+            code: 'INVALID_JSON',
+            title: 'Invalid JSON',
+            detail: 'The webhook body must be valid JSON.',
+          });
+        }
+        const sigHeader =
+          (typeof req.headers['x-esp-signature'] === 'string'
+            ? req.headers['x-esp-signature']
+            : undefined) ??
+          (typeof req.headers['x-postmark-signature'] === 'string'
+            ? req.headers['x-postmark-signature']
+            : undefined) ??
+          (typeof req.headers['svix-signature'] === 'string'
+            ? req.headers['svix-signature']
+            : undefined);
+        const tsHeader =
+          (typeof req.headers['x-esp-timestamp'] === 'string'
+            ? req.headers['x-esp-timestamp']
+            : undefined) ??
+          (typeof req.headers['svix-timestamp'] === 'string'
+            ? req.headers['svix-timestamp']
+            : undefined);
+
+        const result = await outreach.handleEspWebhook({
+          rawBody,
+          signatureHeader: sigHeader,
+          timestampHeader: tsHeader,
+          parsedBody,
+        });
+        res.writeHead(202, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(serializeJson({ status: 'accepted', ...result }));
+        return;
       }
 
       // Cloudflare Access JWT defence-in-depth on internal `crm.` routes (PRD §6.5, §9)
@@ -915,52 +1016,7 @@ export function createAppServer(
         return;
       }
 
-      // Sequences, Campaigns, Legacy Pipeline Rollup
-      if (method === 'GET' && pathname === '/api/v1/sequences') {
-        requireCapability(user, 'sequences.read');
-        const items = await outreach.listSequences(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/v1/sequences/enroll') {
-        requireCapability(user, 'sequences.enroll');
-        const body = await readJsonBody(req);
-        const enrolled = await outreach.enrollInSequence(user, body as never);
-        if (body['executeStepOneImmediately'] === true) {
-          const stepResult = await outreach.executeSequenceEnrollmentStep(enrolled.enrollmentId, {
-            bypassSendWindow: true,
-          });
-          res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(serializeJson({ ...enrolled, stepOneSend: stepResult }));
-          return;
-        }
-        res.writeHead(201, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(enrolled));
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/v1/campaigns') {
-        requireCapability(user, 'campaigns.read');
-        const items = await outreach.listCampaigns(user);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson({ items }));
-        return;
-      }
-
-      if (
-        method === 'POST' &&
-        pathname.startsWith('/api/v1/campaigns/') &&
-        pathname.endsWith('/approve')
-      ) {
-        const campaignId = pathname.slice('/api/v1/campaigns/'.length, -'/approve'.length);
-        const approved = await outreach.approveCampaign(user, campaignId);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(serializeJson(approved));
-        return;
-      }
-
+      // Legacy Pipeline Rollup
       if (method === 'GET' && pathname === '/api/v1/reports/pipeline-rollup') {
         requireCapability(user, 'reports.read');
         const currency = (parsedUrl.searchParams.get('currency') as 'USD' | 'CAD') ?? 'USD';

@@ -186,6 +186,53 @@ describe('Compliance gate checkSendable() & Market Rules (PRD §5.1, §5.2, A12)
     expect(res.sendable).toBe(false);
     expect(res.reasonCode).toBe('OUTSIDE_SEND_WINDOW');
   });
+
+  it('covers all remaining PRD 5.1, 5.6 & 8.5 reason codes deterministically', () => {
+    expect(
+      checkSendable({
+        ...baseValidInput,
+        channel: 'campaign',
+        emailVerificationStatus: 'unknown',
+        excludeUnverifiedInCampaigns: true,
+      }).reasonCode,
+    ).toBe('EMAIL_UNVERIFIED_OR_RISKY');
+
+    expect(
+      checkSendable({
+        ...baseValidInput,
+        channel: 'campaign',
+        emailVerificationStatus: 'risky',
+        excludeUnverifiedInCampaigns: true,
+      }).reasonCode,
+    ).toBe('EMAIL_UNVERIFIED_OR_RISKY');
+
+    expect(checkSendable({ ...baseValidInput, unsubscribed: true }).reasonCode).toBe(
+      'UNSUBSCRIBED',
+    );
+    expect(checkSendable({ ...baseValidInput, complained: true }).reasonCode).toBe('COMPLAINED');
+    expect(checkSendable({ ...baseValidInput, alreadySentThisStep: true }).reasonCode).toBe(
+      'ALREADY_SENT_THIS_STEP',
+    );
+    expect(checkSendable({ ...baseValidInput, inOtherActiveSequence: true }).reasonCode).toBe(
+      'IN_OTHER_ACTIVE_SEQUENCE',
+    );
+    expect(checkSendable({ ...baseValidInput, sequenceInactive: true }).reasonCode).toBe(
+      'SEQUENCE_INACTIVE',
+    );
+    expect(
+      checkSendable({ ...baseValidInput, channel: 'campaign', campaignNotApproved: true })
+        .reasonCode,
+    ).toBe('CAMPAIGN_NOT_APPROVED');
+    expect(
+      checkSendable({ ...baseValidInput, channel: 'campaign', campaignPaused: true }).reasonCode,
+    ).toBe('CAMPAIGN_PAUSED');
+    expect(
+      checkSendable({ ...baseValidInput, channel: 'campaign', senderNotVerified: true }).reasonCode,
+    ).toBe('SENDER_NOT_VERIFIED');
+    expect(checkSendable({ ...baseValidInput, mailboxDisconnected: true }).reasonCode).toBe(
+      'MAILBOX_DISCONNECTED',
+    );
+  });
 });
 
 describe('Platform Calendar & Money helpers (PRD §4.12, §4.15)', () => {

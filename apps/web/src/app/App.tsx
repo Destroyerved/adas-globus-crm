@@ -14,6 +14,8 @@ import { ContactProfileScreen } from '@/features/contacts/contact-profile-screen
 import { DealProfileScreen } from '@/features/deals/deal-profile-screen.js';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.js';
 import { InboxScreen } from '@/features/inbox/inbox-screen.js';
+import { SequencesScreen } from '@/features/sequences/sequences-screen.js';
+import { CampaignsScreen } from '@/features/campaigns/campaigns-screen.js';
 import { ReportsScreen } from '@/features/reports/reports-screen.js';
 import { SettingsScreen } from '@/features/settings/settings-screen.js';
 import { ImportsScreen } from '@/features/imports/imports-screen.js';
@@ -41,10 +43,11 @@ const queryClient: QueryClient = new QueryClient({
   },
 });
 
-// Only screens that work on live data. Sequences and Campaigns come back when their engines land.
 const VALID_SCREENS: ReadonlySet<AppScreenId> = new Set<AppScreenId>([
   'dashboard',
   'inbox',
+  'sequences',
+  'campaigns',
   'reports',
   'settings',
   'leads',
@@ -203,6 +206,8 @@ function Workspace({ user }: { user: { displayName: string; initials: string; ro
             onOpenDeal={openDeal}
           />
         )}
+        {activeScreen === 'sequences' && <SequencesScreen onOpenContact={openContact} />}
+        {activeScreen === 'campaigns' && <CampaignsScreen onOpenContact={openContact} />}
         {activeScreen === 'reports' && <ReportsScreen />}
         {activeScreen === 'settings' && <SettingsScreen onOpenLead={openLead} />}
         {activeScreen === 'imports' && (
