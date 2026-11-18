@@ -81,10 +81,13 @@ export class ImportRecordWriter {
   /** Definite contact match: the same normalised email on an active contact. */
   async contactByEmail(tx: DbTx, email: string): Promise<Row | null> {
     const res = await tx.query(
-      `SELECT c.* FROM contacts c
+      `SELECT c.* FROM (
+         SELECT id FROM contacts WHERE deleted_at IS NULL AND primary_email = $1
+         UNION
+         SELECT contact_id AS id FROM contact_emails WHERE email = $1
+       ) m
+       JOIN contacts c ON c.id = m.id
        WHERE c.deleted_at IS NULL
-         AND (c.primary_email = $1
-              OR c.id IN (SELECT contact_id FROM contact_emails WHERE email = $1))
        ORDER BY c.created_at
        LIMIT 1`,
       [email],
