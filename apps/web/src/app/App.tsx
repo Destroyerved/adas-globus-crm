@@ -109,6 +109,7 @@ function SignedInGate() {
       return (
         <LoginScreen
           microsoftSignIn={config.data?.microsoftSignIn ?? false}
+          googleSignIn={config.data?.googleSignIn ?? false}
           devSignIn={config.data?.devSignIn ?? false}
           adminSignIn={config.data?.adminSignIn ?? false}
           onSignedIn={() => {

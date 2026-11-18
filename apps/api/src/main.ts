@@ -10,6 +10,7 @@ import {
   CloudflareAccessVerifier,
   CookieSigner,
   EntraSignIn,
+  GoogleSignIn,
   SessionService,
   readCookies,
   serializeCookie,
@@ -58,6 +59,7 @@ import { createLogger } from './platform/logger/index.js';
 import { Router, type RouteContext } from './platform/http/router.js';
 import {
   EspBulkSender,
+  GoogleGmailMailboxClient,
   MailpitTransport,
   MicrosoftGraphMailboxClient,
 } from './platform/mail-transport/index.js';
@@ -151,6 +153,12 @@ function loadSessionSecret(file: string, production: boolean): string {
   return randomBytes(32).toString('hex'); // development: valid until the API restarts
 }
 
+function loadOptionalSecretFile(file: string): string | null {
+  if (!existsSync(file)) return null;
+  const trimmed = readFileSync(file, 'utf8').trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -209,6 +217,8 @@ export function createAppServer(
     apolloClient?: ApolloClient;
     /** Optional Microsoft Bookings webhook HMAC secret override for integration tests. */
     bookingsWebhookSecret?: string;
+    /** Optional Google Pub/Sub webhook verification token override for integration tests. */
+    googleWebhookToken?: string;
   } = {},
 ) {
   const logger = createLogger(env.LOG_LEVEL);
@@ -241,11 +251,30 @@ export function createAppServer(
     authorityBaseUrl: env.MICROSOFT_AUTHORITY_BASE_URL,
     graphBaseUrl: env.MICROSOFT_GRAPH_BASE_URL,
   });
+  const gmail = new GoogleGmailMailboxClient({
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecretFile: resolveConfigPath(env.GOOGLE_CLIENT_SECRET_FILE),
+    redirectUri: env.GOOGLE_MAIL_REDIRECT_URI,
+    authUrl: env.GOOGLE_AUTH_URL,
+    tokenUrl: env.GOOGLE_TOKEN_URL,
+    gmailBaseUrl: env.GOOGLE_GMAIL_BASE_URL,
+    pubsubTopic: env.GOOGLE_PUBSUB_TOPIC,
+  });
   const entra = new EntraSignIn({
     tenantId: env.ENTRA_TENANT_ID,
     clientId: env.ENTRA_CLIENT_ID,
     clientSecretFile: resolveConfigPath(env.ENTRA_CLIENT_SECRET_FILE),
     redirectUri: env.ENTRA_REDIRECT_URI,
+  });
+  const googleSso = new GoogleSignIn({
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecretFile: resolveConfigPath(env.GOOGLE_CLIENT_SECRET_FILE),
+    redirectUri: env.GOOGLE_REDIRECT_URI,
+    allowedDomains: env.GOOGLE_ALLOWED_DOMAINS,
+    issuerUrl: env.GOOGLE_ISSUER_URL,
+    authorizationEndpoint: env.GOOGLE_AUTH_URL,
+    tokenEndpoint: env.GOOGLE_TOKEN_URL,
+    jwksUri: env.GOOGLE_JWKS_URL,
   });
   const apolloClient =
     options.apolloClient ??
@@ -288,6 +317,8 @@ export function createAppServer(
     connectorFlags: {
       entraConfigured: entra.isConfigured(),
       graphConfigured: graph.isConfigured(),
+      googleConfigured: googleSso.isConfigured(),
+      gmailConfigured: gmail.isConfigured(),
       espConfigured: espSender.isConfigured(),
       espProvider: env.ESP_PROVIDER,
       espSendingDomain: env.ESP_SENDING_DOMAIN,
@@ -370,7 +401,14 @@ export function createAppServer(
     publicHost: env.APP_PUBLIC_HOST,
     maxAttachmentBytes: env.MAX_ATTACHMENT_UPLOAD_BYTES,
     secretBox: resolvedSecretBox,
+    gmail,
+    googleWebhookToken:
+      options.googleWebhookToken ??
+      loadOptionalSecretFile(resolveConfigPath(env.GOOGLE_WEBHOOK_TOKEN_FILE)),
   });
+  outreach.setLiveMailboxSender((senderUserId, payload) =>
+    inbox.sendSequenceMessageViaUserMailbox(senderUserId, payload),
+  );
   registerInboxRoutes(router, inbox);
   const sessions = new SessionService(
     db,
@@ -558,6 +596,28 @@ export function createAppServer(
         }
       }
 
+      // Public Google Cloud Pub/Sub push webhook (`POST /api/v1/webhooks/google` on `go.` — PRD §8.2, §15 Q2).
+      // Verifies constant-time shared token (`?token=` or `X-Goog-Channel-Token`) before queueing sync.
+      if (method === 'POST' && pathname === '/api/v1/webhooks/google') {
+        const body = await readJsonBody(req, 262_144);
+        const suppliedToken =
+          parsedUrl.searchParams.get('token') ??
+          (typeof req.headers['x-goog-channel-token'] === 'string'
+            ? req.headers['x-goog-channel-token']
+            : null) ??
+          (typeof req.headers.authorization === 'string' &&
+          req.headers.authorization.startsWith('Bearer ')
+            ? req.headers.authorization.slice(7).trim()
+            : null);
+        const result = await inbox.handleGoogleWebhook(body, suppliedToken);
+        res.writeHead(202, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(serializeJson({ status: 'accepted', ...result }));
+        return;
+      }
+
       // Public stored-URL click redirect (`GET /c/:token` on `go.` — PRD §8.6).
       // Redirects strictly to the stored `click_tokens.target_url`; never an open redirect.
       if (method === 'GET' && pathname.startsWith('/c/')) {
@@ -731,6 +791,7 @@ export function createAppServer(
       if (method === 'GET' && pathname === '/api/v1/auth/config') {
         sendJson(200, {
           microsoftSignIn: entra.isConfigured(),
+          googleSignIn: googleSso.isConfigured(),
           devSignIn: devLoginEnabled,
           adminSignIn: breakGlass.isAvailable(),
         });
@@ -782,7 +843,64 @@ export function createAppServer(
               db.writeAuditLog(tx, {
                 action: 'auth.sso.failed',
                 entityType: 'session',
-                metadata: { code },
+                metadata: { provider: 'microsoft', code },
+                ipAddress: clientIpOf(req),
+              }),
+            )
+            .catch(() => undefined);
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=login&error=${encodeURIComponent(code)}`, [
+            clearPending,
+          ]);
+        }
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/auth/sso/google/start') {
+        if (!googleSso.isConfigured()) {
+          redirect(`${env.PUBLIC_WEB_URL}/?screen=login&error=google_sso_not_configured`);
+          return;
+        }
+        const { url, pending } = await googleSso.start();
+        redirect(url, [
+          serializeCookie(OIDC_COOKIE, signer.sign(JSON.stringify(pending)), {
+            maxAgeSeconds: 600,
+            secure: production,
+          }),
+        ]);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/auth/sso/google/callback') {
+        const clearPending = serializeCookie(OIDC_COOKIE, '', {
+          maxAgeSeconds: 0,
+          secure: production,
+        });
+        try {
+          const pendingRaw = signer.verify(cookies[OIDC_COOKIE]);
+          if (!pendingRaw) throw new Error('Sign-in expired or was started in another browser.');
+          if (parsedUrl.searchParams.get('error')) {
+            throw new Error(
+              parsedUrl.searchParams.get('error_description') ?? 'Google sign-in was cancelled.',
+            );
+          }
+          const identity = await googleSso.finish(parsedUrl.search, JSON.parse(pendingRaw));
+          const userId = await auth.findUserForGoogleSignIn(identity);
+          // Session fixation protection: invalidate any pre-existing session cookie first.
+          await sessions.revoke(cookies[sessionCookieName(production)]);
+          const token = await sessions.create(userId, req, 'google');
+          redirect(`${env.PUBLIC_WEB_URL}/`, [clearPending, sessionCookie(token)]);
+        } catch (err) {
+          const code = err instanceof DomainError ? err.code.toLowerCase() : 'sso_failed';
+          logger.warn(
+            { requestId, code, err: err instanceof Error ? err.message : String(err) },
+            'Google sign-in failed',
+          );
+          await db
+            .transaction((tx) =>
+              db.writeAuditLog(tx, {
+                action: 'auth.sso.failed',
+                entityType: 'session',
+                metadata: { provider: 'google', code },
                 ipAddress: clientIpOf(req),
               }),
             )
@@ -876,10 +994,12 @@ export function createAppServer(
       const rateStatus = userRateLimiter.check(rateActorKey);
       res.setHeader('X-RateLimit-Remaining', String(rateStatus.remaining));
 
-      // Delegated Microsoft 365 mailbox connection OAuth2 + PKCE flow (PRD §4.11, §8.2)
+      // Delegated Microsoft 365 / Google Workspace mailbox connection OAuth2 + PKCE flow (PRD §4.11, §8.2, §15 Q2)
       if (method === 'GET' && pathname === '/api/v1/inbox/oauth/start') {
         try {
-          const { url, pending } = inbox.startOAuthConnect(user);
+          const providerParam = parsedUrl.searchParams.get('provider');
+          const provider = providerParam === 'google_gmail' ? 'google_gmail' : 'microsoft_graph';
+          const { url, pending } = inbox.startOAuthConnect(user, provider);
           redirect(url, [
             serializeCookie(MAIL_OAUTH_COOKIE, signer.sign(JSON.stringify(pending)), {
               maxAgeSeconds: 600,
@@ -905,15 +1025,15 @@ export function createAppServer(
               status: 400,
               code: 'OAUTH_SESSION_EXPIRED',
               title: 'Authorization expired',
-              detail: 'Start the Microsoft 365 mailbox connection again.',
+              detail: 'Start the mailbox connection again.',
             });
           }
           if (parsedUrl.searchParams.get('error')) {
             throw new DomainError({
               status: 400,
               code: 'OAUTH_ACCESS_DENIED',
-              title: 'Microsoft 365 connection cancelled',
-              detail: 'Consent was cancelled in Microsoft 365.',
+              title: 'Mailbox connection cancelled',
+              detail: 'Consent was cancelled at the identity provider.',
             });
           }
           const code = parsedUrl.searchParams.get('code') ?? '';
@@ -923,7 +1043,7 @@ export function createAppServer(
               status: 400,
               code: 'OAUTH_CODE_MISSING',
               title: 'Missing authorization code',
-              detail: 'Microsoft did not return an authorization code.',
+              detail: 'The identity provider did not return an authorization code.',
             });
           }
           await inbox.finishOAuthConnect(user, {
@@ -942,7 +1062,7 @@ export function createAppServer(
               code,
               err: err instanceof Error ? err.message : String(err),
             },
-            'Microsoft 365 mailbox connection failed',
+            'Mailbox OAuth connection failed',
           );
           redirect(`${env.PUBLIC_WEB_URL}/?screen=inbox&mailError=${encodeURIComponent(code)}`, [
             clearMailPending,
@@ -1149,6 +1269,8 @@ export function createAppServer(
       intake,
       inbox,
       graph,
+      gmail,
+      googleSso,
       dataQuality,
       outreach,
       intelligence,

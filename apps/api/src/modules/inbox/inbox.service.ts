@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   CreateEmailTemplateInputSchema,
   CreateTaskFromEmailInputSchema,
@@ -16,6 +16,7 @@ import {
   type EmailTemplateView,
   type InboxThreadDetail,
   type InboxThreadSummary,
+  type MailboxProviderType,
   type MailboxStatusView,
   type SessionUser,
 } from '@adas/shared';
@@ -37,12 +38,19 @@ function conflictError(code: string, detail: string): DomainError {
   });
 }
 import {
+  GmailApiError,
+  GmailAuthRevokedError,
+  GmailThrottleError,
   GraphApiError,
   GraphAuthRevokedError,
   GraphThrottleError,
+  type GoogleGmailMailboxClient,
+  type GraphAttachmentMetadata,
   type GraphMailMessage,
   type MailpitTransport,
   type MicrosoftGraphMailboxClient,
+  type OutboundEmailPayload,
+  type OutboundEmailReceipt,
   type PendingMailOAuth,
   stripHtmlTagsToText,
 } from '../../platform/mail-transport/index.js';
@@ -60,6 +68,8 @@ export interface InboxServiceOptions {
   publicHost: string;
   maxAttachmentBytes: number;
   secretBox: SecretBox | null;
+  gmail?: GoogleGmailMailboxClient | null;
+  googleWebhookToken?: string | null;
 }
 
 interface MailboxRow {
@@ -75,6 +85,7 @@ interface MailboxRow {
   token_key_version: number;
   inbox_delta_link: string | null;
   sent_delta_link: string | null;
+  gmail_history_id: string | null;
   inbox_subscription_id: string | null;
   inbox_subscription_expires_at: Date | string | null;
   sent_subscription_id: string | null;
@@ -146,6 +157,27 @@ export class InboxService {
     }
   }
 
+  private normalizeProvider(raw: string | null | undefined): MailboxProviderType {
+    return raw === 'google_gmail' ? 'google_gmail' : 'microsoft_graph';
+  }
+
+  private providerLabel(provider: MailboxProviderType): string {
+    return provider === 'google_gmail' ? 'Google Workspace' : 'Microsoft 365';
+  }
+
+  private requireGmail(): GoogleGmailMailboxClient {
+    if (!this.options.gmail || !this.options.gmail.isConfigured()) {
+      throw new DomainError({
+        status: 503,
+        code: 'GOOGLE_GMAIL_NOT_CONFIGURED',
+        title: 'Google Workspace OAuth client not configured',
+        detail:
+          'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET_FILE before connecting a Google Workspace mailbox.',
+      });
+    }
+    return this.options.gmail;
+  }
+
   private requireSecretBox(): SecretBox {
     if (!this.options.secretBox) {
       throw new DomainError({
@@ -153,14 +185,14 @@ export class InboxService {
         code: 'ENCRYPTION_KEY_MISSING',
         title: 'Token encryption key not configured',
         detail:
-          'Configure TOKEN_ENCRYPTION_KEY_FILE with at least 32 characters before connecting a Microsoft 365 mailbox.',
+          'Configure TOKEN_ENCRYPTION_KEY_FILE with at least 32 characters before connecting a mailbox.',
       });
     }
     return this.options.secretBox;
   }
 
   // -------------------------------------------------------------------------
-  // 1. Mailbox Connection Status, Delegated OAuth2 Connect & Disconnect (PRD 4.11, 8.2)
+  // 1. Mailbox Connection Status, Delegated OAuth2 Connect & Disconnect (PRD 4.11, 8.2, 15 Q2)
   // -------------------------------------------------------------------------
 
   async getMailboxStatus(user: SessionUser): Promise<MailboxStatusView> {
@@ -170,6 +202,7 @@ export class InboxService {
       [user.id],
     );
     const row = res.rows[0];
+    const googleConfigured = Boolean(this.options.gmail?.isConfigured());
     if (!row) {
       return {
         connected: false,
@@ -177,6 +210,7 @@ export class InboxService {
         email: null,
         provider: null,
         entraConfigured: this.graph.isConfigured(),
+        googleConfigured,
         mailLive: this.options.mailLive,
         dailySendCap: 50,
         sentTodayCount: 0,
@@ -198,8 +232,9 @@ export class InboxService {
       connected: statusNorm === 'connected',
       status: statusNorm,
       email: row.email,
-      provider: 'microsoft_graph',
+      provider: this.normalizeProvider(row.provider),
       entraConfigured: this.graph.isConfigured(),
+      googleConfigured,
       mailLive: this.options.mailLive,
       dailySendCap: row.daily_send_cap,
       sentTodayCount: row.sent_today_count,
@@ -225,6 +260,7 @@ export class InboxService {
         userId: r.user_id,
         userName: r.user_name,
         email: r.email,
+        provider: this.normalizeProvider(r.provider),
         status: r.status,
         dailySendCap: r.daily_send_cap,
         sentTodayCount: r.sent_today_count,
@@ -236,9 +272,18 @@ export class InboxService {
     };
   }
 
-  startOAuthConnect(user: SessionUser): { url: string; pending: PendingMailOAuth } {
+  startOAuthConnect(
+    user: SessionUser,
+    provider: MailboxProviderType = 'microsoft_graph',
+  ): { url: string; pending: PendingMailOAuth } {
     requireCapability(user, 'inbox.send');
     this.requireSecretBox();
+    if (provider === 'google_gmail') {
+      return this.requireGmail().createAuthorizationRequest({
+        userId: user.id,
+        loginHint: user.email,
+      });
+    }
     if (!this.graph.isConfigured()) {
       throw new DomainError({
         status: 503,
@@ -248,10 +293,11 @@ export class InboxService {
           'Set ENTRA_TENANT_ID, ENTRA_CLIENT_ID and ENTRA_CLIENT_SECRET_FILE before connecting an Outlook mailbox.',
       });
     }
-    return this.graph.createAuthorizationRequest({
+    const req = this.graph.createAuthorizationRequest({
       userId: user.id,
       loginHint: user.email,
     });
+    return { url: req.url, pending: { ...req.pending, provider: 'microsoft_graph' } };
   }
 
   async finishOAuthConnect(
@@ -260,14 +306,123 @@ export class InboxService {
   ): Promise<MailboxStatusView> {
     requireCapability(user, 'inbox.send');
     const box = this.requireSecretBox();
+    const provider: MailboxProviderType =
+      input.pending.provider === 'google_gmail' ? 'google_gmail' : 'microsoft_graph';
 
     if (input.pending.userId !== user.id || input.pending.state !== input.state) {
       throw new DomainError({
         status: 400,
         code: 'INVALID_OAUTH_STATE',
         title: 'Mailbox connection state mismatch',
-        detail: 'The Microsoft 365 authorization session expired or did not match your account.',
+        detail: `The ${this.providerLabel(provider)} authorization session expired or did not match your account.`,
       });
+    }
+
+    if (provider === 'google_gmail') {
+      const gmail = this.requireGmail();
+      const tokens = await gmail.exchangeAuthorizationCode({
+        code: input.code,
+        codeVerifier: input.pending.codeVerifier,
+      });
+      const profile = await gmail.getMailboxProfile(tokens.accessToken);
+      const sealedAccess = box.seal(tokens.accessToken, accessTokenContext(user.id));
+      const sealedRefresh = tokens.refreshToken
+        ? box.seal(tokens.refreshToken, refreshTokenContext(user.id))
+        : null;
+      const accessExpiresAt = new Date(Date.now() + tokens.expiresInSeconds * 1000).toISOString();
+
+      let watchSubId: string | null = null;
+      let watchExp: string | null = null;
+      try {
+        const watched = await gmail.watchMailbox({ accessToken: tokens.accessToken });
+        if (watched) {
+          watchSubId = 'gmail_watch';
+          watchExp = watched.expiresAt;
+        }
+      } catch {
+        // 5-min history polling fallback remains active if Pub/Sub push is not configured.
+      }
+
+      const mailboxId = await this.db.transaction(async (tx) => {
+        const existing = await tx.query<{ id: string; provider: string }>(
+          `SELECT id, provider FROM mailbox_connections WHERE user_id = $1 LIMIT 1`,
+          [user.id],
+        );
+        const id = existing.rows[0]?.id ?? `mbx_${randomUUID()}`;
+        const preserveHistory = existing.rows[0]?.provider === 'google_gmail';
+
+        await tx.query(
+          `INSERT INTO mailbox_connections (
+             id, user_id, email, provider, status, scopes,
+             encrypted_access_token, encrypted_refresh_token, access_token_expires_at, token_key_version,
+             inbox_delta_link, sent_delta_link, gmail_history_id,
+             inbox_subscription_id, inbox_subscription_expires_at,
+             sent_subscription_id, sent_subscription_expires_at,
+             client_state_sha256, sync_pending, retry_after_at, last_error, connected_at, updated_at
+           ) VALUES (
+             $1, $2, $3, 'google_gmail', 'connected', $4,
+             $5, $6, $7::timestamptz, $8,
+             NULL, NULL, NULL,
+             $9, $10::timestamptz,
+             NULL, NULL,
+             NULL, TRUE, NULL, NULL, NOW(), NOW()
+           )
+           ON CONFLICT (user_id) DO UPDATE SET
+             email = EXCLUDED.email,
+             provider = 'google_gmail',
+             status = 'connected',
+             scopes = EXCLUDED.scopes,
+             encrypted_access_token = EXCLUDED.encrypted_access_token,
+             encrypted_refresh_token = COALESCE(EXCLUDED.encrypted_refresh_token, CASE WHEN mailbox_connections.provider = 'google_gmail' THEN mailbox_connections.encrypted_refresh_token ELSE NULL END),
+             access_token_expires_at = EXCLUDED.access_token_expires_at,
+             token_key_version = EXCLUDED.token_key_version,
+             inbox_delta_link = NULL,
+             sent_delta_link = NULL,
+             gmail_history_id = CASE WHEN $11::boolean AND LOWER(mailbox_connections.email) = LOWER(EXCLUDED.email) THEN mailbox_connections.gmail_history_id ELSE NULL END,
+             inbox_subscription_id = EXCLUDED.inbox_subscription_id,
+             inbox_subscription_expires_at = EXCLUDED.inbox_subscription_expires_at,
+             sent_subscription_id = NULL,
+             sent_subscription_expires_at = NULL,
+             client_state_sha256 = NULL,
+             sync_pending = TRUE,
+             retry_after_at = NULL,
+             last_error = NULL,
+             connected_at = NOW(),
+             updated_at = NOW()`,
+          [
+            id,
+            user.id,
+            profile.email,
+            tokens.scope,
+            sealedAccess,
+            sealedRefresh,
+            accessExpiresAt,
+            box.keyVersion,
+            watchSubId,
+            watchExp,
+            preserveHistory,
+          ],
+        );
+
+        await this.db.writeAuditLog(tx, {
+          actorUserId: user.id,
+          action: 'mailbox.connected',
+          entityType: 'mailbox_connection',
+          entityId: id,
+          metadata: {
+            provider: 'google_gmail',
+            tokenKeyVersion: box.keyVersion,
+            webhooksSubscribed: Boolean(watchSubId),
+          },
+          ipAddress: input.ipAddress ?? null,
+        });
+
+        return id;
+      });
+
+      // Run initial 90-day scan immediately on connection (PRD 8.2)
+      await this.syncMailboxById(mailboxId).catch(() => undefined);
+      return this.getMailboxStatus(user);
     }
 
     const { tokens, profile } = await this.graph.exchangeCodeForTokens({
@@ -337,16 +492,18 @@ export class InboxService {
          )
          ON CONFLICT (user_id) DO UPDATE SET
            email = EXCLUDED.email,
+           provider = 'microsoft_graph',
            status = 'connected',
            scopes = EXCLUDED.scopes,
            encrypted_access_token = EXCLUDED.encrypted_access_token,
-           encrypted_refresh_token = COALESCE(EXCLUDED.encrypted_refresh_token, mailbox_connections.encrypted_refresh_token),
+           encrypted_refresh_token = COALESCE(EXCLUDED.encrypted_refresh_token, CASE WHEN mailbox_connections.provider = 'microsoft_graph' THEN mailbox_connections.encrypted_refresh_token ELSE NULL END),
            access_token_expires_at = EXCLUDED.access_token_expires_at,
            token_key_version = EXCLUDED.token_key_version,
-           inbox_subscription_id = COALESCE(EXCLUDED.inbox_subscription_id, mailbox_connections.inbox_subscription_id),
-           inbox_subscription_expires_at = COALESCE(EXCLUDED.inbox_subscription_expires_at, mailbox_connections.inbox_subscription_expires_at),
-           sent_subscription_id = COALESCE(EXCLUDED.sent_subscription_id, mailbox_connections.sent_subscription_id),
-           sent_subscription_expires_at = COALESCE(EXCLUDED.sent_subscription_expires_at, mailbox_connections.sent_subscription_expires_at),
+           gmail_history_id = NULL,
+           inbox_subscription_id = COALESCE(EXCLUDED.inbox_subscription_id, CASE WHEN mailbox_connections.provider = 'microsoft_graph' THEN mailbox_connections.inbox_subscription_id ELSE NULL END),
+           inbox_subscription_expires_at = COALESCE(EXCLUDED.inbox_subscription_expires_at, CASE WHEN mailbox_connections.provider = 'microsoft_graph' THEN mailbox_connections.inbox_subscription_expires_at ELSE NULL END),
+           sent_subscription_id = COALESCE(EXCLUDED.sent_subscription_id, CASE WHEN mailbox_connections.provider = 'microsoft_graph' THEN mailbox_connections.sent_subscription_id ELSE NULL END),
+           sent_subscription_expires_at = COALESCE(EXCLUDED.sent_subscription_expires_at, CASE WHEN mailbox_connections.provider = 'microsoft_graph' THEN mailbox_connections.sent_subscription_expires_at ELSE NULL END),
            client_state_sha256 = EXCLUDED.client_state_sha256,
            sync_pending = TRUE,
            retry_after_at = NULL,
@@ -393,7 +550,7 @@ export class InboxService {
   }
 
   /**
-   * PRD 4.12 & 8.2: Disconnecting a mailbox deletes Graph subscriptions, clears encrypted tokens,
+   * PRD 4.12 & 8.2: Disconnecting a mailbox deletes remote subscriptions, clears encrypted tokens,
    * and pauses that user's active sequence enrollments.
    */
   async disconnectMailbox(
@@ -410,7 +567,8 @@ export class InboxService {
       return { disconnected: false, pausedSequences: 0 };
     }
 
-    if (this.options.secretBox && row.encrypted_access_token) {
+    const provider = this.normalizeProvider(row.provider);
+    if (provider === 'microsoft_graph' && this.options.secretBox && row.encrypted_access_token) {
       try {
         const accessToken = this.options.secretBox.open(
           row.encrypted_access_token,
@@ -458,7 +616,7 @@ export class InboxService {
         action: 'mailbox.disconnected',
         entityType: 'mailbox_connection',
         entityId: row.id,
-        metadata: { pausedSequenceEnrollments: paused.rowCount },
+        metadata: { provider, pausedSequenceEnrollments: paused.rowCount },
         ipAddress: ipAddress ?? null,
       });
 
@@ -472,6 +630,8 @@ export class InboxService {
 
   private async ensureAccessToken(row: MailboxRow): Promise<string> {
     const box = this.requireSecretBox();
+    const provider = this.normalizeProvider(row.provider);
+    const label = this.providerLabel(provider);
     const expiresMs = row.access_token_expires_at
       ? new Date(row.access_token_expires_at).getTime()
       : 0;
@@ -484,13 +644,16 @@ export class InboxService {
       await this.markMailboxNeedsReconnect(row, 'Missing refresh token');
       throw conflictError(
         'MAILBOX_RECONNECT_REQUIRED',
-        'Your Microsoft 365 mailbox needs to be reconnected before syncing or sending.',
+        `Your ${label} mailbox needs to be reconnected before syncing or sending.`,
       );
     }
 
     const refreshPlain = box.open(row.encrypted_refresh_token, refreshTokenContext(row.user_id));
     try {
-      const refreshed = await this.graph.refreshAccessToken(refreshPlain);
+      const refreshed =
+        provider === 'google_gmail'
+          ? await this.requireGmail().refreshAccessToken(refreshPlain)
+          : await this.graph.refreshAccessToken(refreshPlain);
       const sealedAccess = box.seal(refreshed.accessToken, accessTokenContext(row.user_id));
       const sealedRefresh = refreshed.refreshToken
         ? box.seal(refreshed.refreshToken, refreshTokenContext(row.user_id))
@@ -511,11 +674,11 @@ export class InboxService {
       );
       return refreshed.accessToken;
     } catch (err) {
-      if (err instanceof GraphAuthRevokedError) {
-        await this.markMailboxNeedsReconnect(row, 'Microsoft 365 authorization expired');
+      if (err instanceof GraphAuthRevokedError || err instanceof GmailAuthRevokedError) {
+        await this.markMailboxNeedsReconnect(row, `${label} authorization expired`);
         throw conflictError(
           'MAILBOX_RECONNECT_REQUIRED',
-          'Your Microsoft 365 authorization expired. Reconnect your mailbox in Inbox.',
+          `Your ${label} authorization expired. Reconnect your mailbox in Inbox.`,
         );
       }
       throw err;
@@ -523,6 +686,7 @@ export class InboxService {
   }
 
   private async markMailboxNeedsReconnect(row: MailboxRow, reason: string): Promise<void> {
+    const label = this.providerLabel(this.normalizeProvider(row.provider));
     await this.db.transaction(async (tx) => {
       await tx.query(
         `UPDATE mailbox_connections
@@ -544,8 +708,8 @@ export class InboxService {
       await addNotification(tx, {
         userId: row.user_id,
         kind: 'general',
-        title: 'Reconnect your Microsoft 365 mailbox',
-        body: 'Outlook sync and sequences are paused until you sign back into Microsoft 365.',
+        title: `Reconnect your ${label} mailbox`,
+        body: `Email sync and sequences are paused until you sign back into ${label}.`,
         entityType: 'mailbox_connection',
         entityId: row.id,
         dedupeKey: `mbx_reconnect:${row.id}:${new Date().toISOString().slice(0, 10)}`,
@@ -566,10 +730,13 @@ export class InboxService {
     );
     const row = res.rows[0];
     if (!row || row.status !== 'connected') {
-      throw conflictError('MAILBOX_NOT_CONNECTED', 'Connect your Microsoft 365 mailbox first.');
+      throw conflictError(
+        'MAILBOX_NOT_CONNECTED',
+        'Connect your Microsoft 365 or Google Workspace mailbox first.',
+      );
     }
     if (!row.encrypted_access_token && !row.encrypted_refresh_token) {
-      // Seeded development mailbox without live Graph tokens: report clean state without faking Graph traffic.
+      // Seeded development mailbox without live provider tokens: report clean state without faking traffic.
       await this.db.query(
         `UPDATE mailbox_connections SET last_synced_at = NOW(), sync_pending = FALSE, updated_at = NOW() WHERE id = $1`,
         [row.id],
@@ -606,12 +773,52 @@ export class InboxService {
       };
     }
 
+    const provider = this.normalizeProvider(row.provider);
     let syncedMessages = 0;
     let ignoredMessages = 0;
     let bouncesProcessed = 0;
 
     try {
       const accessToken = await this.ensureAccessToken(row);
+
+      if (provider === 'google_gmail') {
+        const gmail = this.requireGmail();
+        const syncRes = await gmail.syncMessages({
+          accessToken,
+          mailboxEmail: row.email,
+          startHistoryId: row.gmail_history_id,
+        });
+
+        for (const item of syncRes.items) {
+          if (item.message.removed || !item.message.id) continue;
+          const outcome = await this.ingestGraphMessage(
+            row,
+            item.direction,
+            item.message,
+            null,
+            undefined,
+            item.attachments,
+          );
+          if (outcome.bounced) bouncesProcessed += 1;
+          else if (outcome.synced) syncedMessages += 1;
+          else ignoredMessages += 1;
+        }
+
+        await this.db.query(
+          `UPDATE mailbox_connections
+           SET gmail_history_id = COALESCE($2, gmail_history_id),
+               last_synced_at = NOW(),
+               sync_pending = FALSE,
+               retry_after_at = NULL,
+               last_error = NULL,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [row.id, syncRes.nextHistoryId],
+        );
+
+        return { syncedMessages, ignoredMessages, bouncesProcessed, throttledUntil: null };
+      }
+
       const sinceIso = new Date(Date.now() - 90 * 86_400_000).toISOString();
 
       const inboxDelta = await this.graph.fetchFolderDelta({
@@ -662,24 +869,32 @@ export class InboxService {
 
       return { syncedMessages, ignoredMessages, bouncesProcessed, throttledUntil: null };
     } catch (err) {
-      if (err instanceof GraphThrottleError) {
+      if (err instanceof GraphThrottleError || err instanceof GmailThrottleError) {
         const retryAt = new Date(Date.now() + err.retryAfterSeconds * 1000).toISOString();
+        const prefix = err instanceof GmailThrottleError ? 'Gmail' : 'Graph';
         await this.db.query(
           `UPDATE mailbox_connections
            SET retry_after_at = $2::timestamptz,
                last_error = $3,
                updated_at = NOW()
            WHERE id = $1`,
-          [row.id, retryAt, `Graph throttled (429); backing off ${err.retryAfterSeconds}s`],
+          [row.id, retryAt, `${prefix} throttled (429); backing off ${err.retryAfterSeconds}s`],
         );
         return { syncedMessages, ignoredMessages, bouncesProcessed, throttledUntil: retryAt };
       }
-      if (err instanceof GraphAuthRevokedError) {
-        await this.markMailboxNeedsReconnect(row, 'Microsoft 365 authorization expired');
+      if (err instanceof GraphAuthRevokedError || err instanceof GmailAuthRevokedError) {
+        await this.markMailboxNeedsReconnect(
+          row,
+          `${this.providerLabel(provider)} authorization expired`,
+        );
         return { syncedMessages, ignoredMessages, bouncesProcessed, throttledUntil: null };
       }
       const safeError =
-        err instanceof GraphApiError ? `Graph HTTP ${err.status} (${err.code})` : 'Sync failed';
+        err instanceof GraphApiError
+          ? `Graph HTTP ${err.status} (${err.code})`
+          : err instanceof GmailApiError
+            ? `Gmail HTTP ${err.status} (${err.code})`
+            : 'Sync failed';
       await this.db.query(
         `UPDATE mailbox_connections SET last_error = $2, sync_pending = FALSE, updated_at = NOW() WHERE id = $1`,
         [row.id, safeError],
@@ -724,8 +939,8 @@ export class InboxService {
   }
 
   /**
-   * Worker job `mail.subscriptions.renew`: renews Graph change-notification subscriptions well
-   * before expiry (within 24 hours, PRD 6.9, 8.2).
+   * Worker job `mail.subscriptions.renew`: renews Microsoft Graph subscriptions and Google Gmail
+   * Pub/Sub `users.watch` leases well before expiry (within 24 hours, PRD 6.9, 8.2).
    */
   async renewExpiringSubscriptions(): Promise<{ renewed: number }> {
     const expiring = await this.db.query<MailboxRow>(
@@ -746,6 +961,23 @@ export class InboxService {
     for (const row of expiring.rows) {
       try {
         const accessToken = await this.ensureAccessToken(row);
+        if (this.normalizeProvider(row.provider) === 'google_gmail') {
+          if (this.options.gmail?.isConfigured()) {
+            const watched = await this.options.gmail.watchMailbox({ accessToken });
+            if (watched) {
+              await this.db.query(
+                `UPDATE mailbox_connections
+                 SET inbox_subscription_id = 'gmail_watch',
+                     inbox_subscription_expires_at = $2::timestamptz,
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [row.id, watched.expiresAt],
+              );
+              renewed += 1;
+            }
+          }
+          continue;
+        }
         if (row.inbox_subscription_id) {
           const sub = await this.graph.renewSubscription({
             accessToken,
@@ -868,16 +1100,105 @@ export class InboxService {
     return { accepted, ignored };
   }
 
+  /**
+   * Public Google Cloud Pub/Sub push webhook `POST /api/v1/webhooks/google` on `go.` (PRD 8.2, 9, 15 Q2):
+   * Verifies the shared webhook secret in constant time, decodes the base64 Pub/Sub `message.data`
+   * (`{ emailAddress, historyId }`), deduplicates via `inbound_events`, and flags `sync_pending = TRUE`.
+   */
+  async handleGoogleWebhook(
+    payload: Record<string, unknown>,
+    suppliedToken?: string | null,
+  ): Promise<{ accepted: number; ignored: number }> {
+    const expectedToken = (this.options.googleWebhookToken ?? '').trim();
+    if (!expectedToken || !suppliedToken) {
+      throw new DomainError({
+        status: 401,
+        code: 'WEBHOOK_UNAUTHORIZED',
+        title: 'Invalid webhook credentials',
+        detail: 'Missing or unconfigured Google webhook verification token.',
+      });
+    }
+
+    const expectedDigest = createHash('sha256').update(expectedToken, 'utf8').digest();
+    const suppliedDigest = createHash('sha256').update(suppliedToken.trim(), 'utf8').digest();
+    if (!timingSafeEqual(expectedDigest, suppliedDigest)) {
+      throw new DomainError({
+        status: 401,
+        code: 'WEBHOOK_UNAUTHORIZED',
+        title: 'Invalid webhook credentials',
+        detail: 'Google webhook verification token mismatch.',
+      });
+    }
+
+    const msgObj =
+      typeof payload['message'] === 'object' && payload['message'] !== null
+        ? (payload['message'] as Record<string, unknown>)
+        : null;
+    if (!msgObj || typeof msgObj['data'] !== 'string') {
+      return { accepted: 0, ignored: 1 };
+    }
+
+    let decodedJson: Record<string, unknown>;
+    try {
+      const decodedStr = Buffer.from(msgObj['data'], 'base64').toString('utf8');
+      const parsed: unknown = JSON.parse(decodedStr);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return { accepted: 0, ignored: 1 };
+      }
+      decodedJson = parsed as Record<string, unknown>;
+    } catch {
+      return { accepted: 0, ignored: 1 };
+    }
+
+    const emailAddress = normalizeEmail(String(decodedJson['emailAddress'] ?? ''));
+    const historyId = String(decodedJson['historyId'] ?? '').trim();
+    if (!emailAddress) {
+      return { accepted: 0, ignored: 1 };
+    }
+
+    const mbxRes = await this.db.query<MailboxRow>(
+      `SELECT * FROM mailbox_connections
+       WHERE provider = 'google_gmail' AND LOWER(email) = $1 AND status = 'connected'
+       LIMIT 1`,
+      [emailAddress],
+    );
+    const mailbox = mbxRes.rows[0];
+    if (!mailbox) {
+      return { accepted: 0, ignored: 1 };
+    }
+
+    const pubsubMessageId = String(msgObj['messageId'] ?? msgObj['message_id'] ?? '').trim();
+    const eventKey = pubsubMessageId || `${mailbox.id}:${historyId || 'notify'}`;
+
+    const inserted = await this.db.query(
+      `INSERT INTO inbound_events (id, provider, provider_event_id, processed_at, status, metadata)
+       VALUES ($1, 'google_gmail', $2, NOW(), 'processed', $3::jsonb)
+       ON CONFLICT (provider, provider_event_id) DO NOTHING`,
+      [`ine_${randomUUID()}`, eventKey, JSON.stringify({ mailboxId: mailbox.id, historyId })],
+    );
+    if (inserted.rowCount === 0) {
+      return { accepted: 0, ignored: 1 };
+    }
+
+    await this.db.query(
+      `UPDATE mailbox_connections SET sync_pending = TRUE, updated_at = NOW() WHERE id = $1`,
+      [mailbox.id],
+    );
+
+    return { accepted: 1, ignored: 0 };
+  }
+
   // -------------------------------------------------------------------------
   // 3. Message Ingestion, Sync Rule, Reply Detection & DSN Hard Bounces (PRD 4.11, 8.3, A11)
   // -------------------------------------------------------------------------
 
   async ingestGraphMessage(
-    mailbox: Pick<MailboxRow, 'id' | 'user_id' | 'email'>,
+    mailbox: Pick<MailboxRow, 'id' | 'user_id' | 'email'> & { provider?: string },
     direction: 'inbound' | 'outbound',
     msg: GraphMailMessage,
     accessTokenForAttachments?: string | null,
     manualTarget?: { contactId?: string | null; companyId?: string | null; dealId?: string | null },
+    preloadedAttachments?: GraphAttachmentMetadata[],
   ): Promise<{
     synced: boolean;
     bounced: boolean;
@@ -902,7 +1223,9 @@ export class InboxService {
       if (bounce.isHardBounce && bounce.bouncedAddress) {
         const cleanBounced = normalizeEmail(bounce.bouncedAddress);
         if (cleanBounced) {
-          await this.recordHardBounce(cleanBounced, bounce.statusCode ?? '5.0.0');
+          const bounceSource =
+            mailbox.provider === 'google_gmail' ? 'google_gmail_ndr' : 'microsoft_graph_ndr';
+          await this.recordHardBounce(cleanBounced, bounce.statusCode ?? '5.0.0', bounceSource);
           return {
             synced: false,
             bounced: true,
@@ -948,8 +1271,9 @@ export class InboxService {
     }
 
     // 4. Fetch attachment metadata only (never file bytes — PRD 4.11)
-    const attachmentsMeta =
-      msg.hasAttachments && accessTokenForAttachments
+    const attachmentsMeta = preloadedAttachments
+      ? preloadedAttachments
+      : msg.hasAttachments && accessTokenForAttachments
         ? await this.graph.listMessageAttachments(accessTokenForAttachments, msg.id).catch(() => [])
         : [];
 
@@ -1599,7 +1923,11 @@ export class InboxService {
     return stoppedCount;
   }
 
-  private async recordHardBounce(cleanEmail: string, dsnStatus: string): Promise<void> {
+  private async recordHardBounce(
+    cleanEmail: string,
+    dsnStatus: string,
+    source: 'microsoft_graph_ndr' | 'google_gmail_ndr' = 'microsoft_graph_ndr',
+  ): Promise<void> {
     const emailHash = sha256Hex(cleanEmail);
     await this.db.transaction(async (tx) => {
       const ceRes = await tx.query<{ contact_id: string }>(
@@ -1620,14 +1948,14 @@ export class InboxService {
 
       await tx.query(
         `INSERT INTO suppressions (id, email, email_sha256, reason, source, notes)
-         VALUES ($1, $2, $3, 'hard_bounce', 'microsoft_graph_ndr', $4)
+         VALUES ($1, $2, $3, 'hard_bounce', $4, $5)
          ON CONFLICT (email_sha256) DO UPDATE SET
            reason = 'hard_bounce',
            lifted_at = NULL,
            lifted_by = NULL,
            lifted_reason = NULL
          WHERE suppressions.reason <> 'privacy_erasure'`,
-        [`sup_${randomUUID()}`, cleanEmail, emailHash, `NDR hard bounce (${dsnStatus})`],
+        [`sup_${randomUUID()}`, cleanEmail, emailHash, source, `NDR hard bounce (${dsnStatus})`],
       );
 
       if (contactId) {
@@ -1916,6 +2244,7 @@ export class InboxService {
     const fromEmail = mailbox?.email ?? user.email;
     let providerMessageId = `idem:${idemKey}`;
     let internetMessageId = `<${idemKey}@adasglobuspro.com>`;
+    let sentConversationId: string | null = null;
     let outboundStatus: 'sent' | 'failed' = 'sent';
     let errorDetail: string | null = null;
 
@@ -1923,25 +2252,42 @@ export class InboxService {
       if (!mailbox || mailbox.status !== 'connected') {
         throw conflictError(
           'MAILBOX_NOT_CONNECTED',
-          'Connect your Microsoft 365 mailbox in Inbox before sending live email.',
+          'Connect your Microsoft 365 or Google Workspace mailbox in Inbox before sending live email.',
         );
       }
+      const provider = this.normalizeProvider(mailbox.provider);
       const accessToken = await this.ensureAccessToken(mailbox);
       try {
-        const sent = await this.graph.sendMail({
-          accessToken,
-          toEmails: [cleanTo],
-          ccEmails: cleanCc,
-          subject: renderedSubject,
-          bodyText: renderedBody,
-        });
-        providerMessageId = `idem:${idemKey}:${sent.providerMessageId}`;
+        if (provider === 'google_gmail') {
+          const sent = await this.requireGmail().sendMail({
+            accessToken,
+            fromEmail: mailbox.email,
+            toEmails: [cleanTo],
+            ccEmails: cleanCc,
+            subject: renderedSubject,
+            bodyText: renderedBody,
+          });
+          providerMessageId = `idem:${idemKey}:${sent.providerMessageId}`;
+          internetMessageId = sent.internetMessageId;
+          sentConversationId = sent.threadId;
+        } else {
+          const sent = await this.graph.sendMail({
+            accessToken,
+            toEmails: [cleanTo],
+            ccEmails: cleanCc,
+            subject: renderedSubject,
+            bodyText: renderedBody,
+          });
+          providerMessageId = `idem:${idemKey}:${sent.providerMessageId}`;
+        }
       } catch (err) {
         outboundStatus = 'failed';
         errorDetail =
           err instanceof GraphApiError
             ? `Microsoft Graph returned HTTP ${err.status} (${err.code}).`
-            : 'Delivery through Microsoft 365 failed.';
+            : err instanceof GmailApiError
+              ? `Google Gmail API returned HTTP ${err.status} (${err.code}).`
+              : `Delivery through ${this.providerLabel(provider)} failed.`;
       }
     } else {
       const receipt = await this.mailpit.sendOneToOne({
@@ -1961,7 +2307,7 @@ export class InboxService {
       const tid = await this.findOrCreateThread(tx, {
         ownerUserId: user.id,
         teamId: user.teamId,
-        conversationId: null,
+        conversationId: sentConversationId,
         subject: renderedSubject,
         snippet: renderedBody.slice(0, 180),
         direction: 'outbound',
@@ -2099,18 +2445,23 @@ export class InboxService {
       );
     }
 
-    const lastGraphMsgRes = await this.db.query<{
+    const lastMsgMetaRes = await this.db.query<{
       provider_message_id: string | null;
       internet_message_id: string | null;
+      references_header: string | null;
+      conversation_id: string | null;
     }>(
-      `SELECT provider_message_id, internet_message_id
-       FROM email_messages
-       WHERE thread_id = $1
-       ORDER BY sent_at DESC LIMIT 1`,
+      `SELECT m.provider_message_id, m.internet_message_id, m.references_header, t.conversation_id
+       FROM email_messages m
+       JOIN email_threads t ON t.id = m.thread_id
+       WHERE m.thread_id = $1
+       ORDER BY m.sent_at DESC LIMIT 1`,
       [threadId],
     );
-    const lastProviderId = lastGraphMsgRes.rows[0]?.provider_message_id ?? null;
-    const inReplyToHeader = lastGraphMsgRes.rows[0]?.internet_message_id ?? null;
+    const lastProviderId = lastMsgMetaRes.rows[0]?.provider_message_id ?? null;
+    const inReplyToHeader = lastMsgMetaRes.rows[0]?.internet_message_id ?? null;
+    const prevReferences = lastMsgMetaRes.rows[0]?.references_header ?? null;
+    const threadConversationId = lastMsgMetaRes.rows[0]?.conversation_id ?? null;
 
     const fromEmail = mailbox?.email ?? user.email;
     let providerMessageId = `idem:${idemKey}`;
@@ -2122,12 +2473,28 @@ export class InboxService {
       if (!mailbox || mailbox.status !== 'connected') {
         throw conflictError(
           'MAILBOX_NOT_CONNECTED',
-          'Connect your Microsoft 365 mailbox in Inbox before replying.',
+          'Connect your Microsoft 365 or Google Workspace mailbox in Inbox before replying.',
         );
       }
+      const provider = this.normalizeProvider(mailbox.provider);
       const accessToken = await this.ensureAccessToken(mailbox);
       try {
-        if (
+        if (provider === 'google_gmail') {
+          const refsChain = [prevReferences, inReplyToHeader].filter(Boolean).join(' ') || null;
+          const sent = await this.requireGmail().sendMail({
+            accessToken,
+            fromEmail: mailbox.email,
+            toEmails: [toEmail],
+            ccEmails: cleanCc,
+            subject: replySubject,
+            bodyText: renderedBody,
+            threadId: threadConversationId,
+            inReplyTo: inReplyToHeader,
+            references: refsChain,
+          });
+          providerMessageId = `idem:${idemKey}:${sent.providerMessageId}`;
+          internetMessageId = sent.internetMessageId;
+        } else if (
           lastProviderId &&
           !lastProviderId.startsWith('mailpit_') &&
           !lastProviderId.startsWith('idem:')
@@ -2154,7 +2521,9 @@ export class InboxService {
         errorDetail =
           err instanceof GraphApiError
             ? `Microsoft Graph returned HTTP ${err.status} (${err.code}).`
-            : 'Reply delivery through Microsoft 365 failed.';
+            : err instanceof GmailApiError
+              ? `Google Gmail API returned HTTP ${err.status} (${err.code}).`
+              : `Reply delivery through ${this.providerLabel(provider)} failed.`;
       }
     } else {
       const receipt = await this.mailpit.sendOneToOne({
@@ -2403,11 +2772,33 @@ export class InboxService {
     if (!mailbox) {
       throw conflictError(
         'MAILBOX_NOT_CONNECTED',
-        'Connect your Microsoft 365 mailbox before linking messages.',
+        'Connect your Microsoft 365 or Google Workspace mailbox before linking messages.',
       );
     }
 
+    const provider = this.normalizeProvider(mailbox.provider);
     const accessToken = await this.ensureAccessToken(mailbox);
+    if (provider === 'google_gmail') {
+      const synced = await this.requireGmail().fetchSingleMessage(
+        accessToken,
+        mailbox.email,
+        input.providerMessageId,
+      );
+      const outcome = await this.ingestGraphMessage(
+        mailbox,
+        synced.direction,
+        synced.message,
+        null,
+        {
+          contactId: input.contactId ?? null,
+          companyId: input.companyId ?? null,
+          dealId: input.dealId ?? null,
+        },
+        synced.attachments,
+      );
+      return { synced: outcome.synced, threadId: outcome.threadId };
+    }
+
     const graphMsg = await this.graph.fetchSingleMessage(accessToken, input.providerMessageId);
     const direction: 'inbound' | 'outbound' =
       normalizeEmail(graphMsg.fromEmail) === normalizeEmail(mailbox.email) ? 'outbound' : 'inbound';
@@ -2464,22 +2855,103 @@ export class InboxService {
     if (!mailbox || mailbox.status !== 'connected') {
       throw conflictError(
         'MAILBOX_NOT_CONNECTED',
-        'The Microsoft 365 mailbox that owns this attachment is disconnected.',
+        'The mailbox that owns this attachment is disconnected.',
       );
     }
 
+    const provider = this.normalizeProvider(mailbox.provider);
     const accessToken = await this.ensureAccessToken(mailbox);
-    const downloaded = await this.graph.downloadAttachment({
-      accessToken,
-      providerMessageId,
-      providerAttachmentId: att.provider_attachment_id,
-      maxBytes: this.options.maxAttachmentBytes,
-    });
+    const downloaded =
+      provider === 'google_gmail'
+        ? await this.requireGmail().downloadAttachment({
+            accessToken,
+            providerMessageId,
+            providerAttachmentId: att.provider_attachment_id,
+            maxBytes: this.options.maxAttachmentBytes,
+          })
+        : await this.graph.downloadAttachment({
+            accessToken,
+            providerMessageId,
+            providerAttachmentId: att.provider_attachment_id,
+            maxBytes: this.options.maxAttachmentBytes,
+          });
 
     return {
       buffer: downloaded.buffer,
       filename: att.filename.replace(/[\r\n"]/g, '_'),
       mimeType: att.mime_type || downloaded.contentType,
+    };
+  }
+
+  /**
+   * Dispatches a live automated sequence email through the enrolled sender's connected
+   * Microsoft 365 Outlook or Google Workspace Gmail mailbox (`PRD §4.12, §8.7, §15 Q2`).
+   * Strictly delegates to Mailpit whenever `NODE_ENV !== 'production'` or `!mailLive`.
+   */
+  async sendSequenceMessageViaUserMailbox(
+    senderUserId: string,
+    payload: OutboundEmailPayload,
+  ): Promise<OutboundEmailReceipt> {
+    if (!(this.options.nodeEnv === 'production' && this.options.mailLive)) {
+      return this.mailpit.sendOneToOne(payload);
+    }
+
+    const mbxRes = await this.db.query<MailboxRow>(
+      `SELECT * FROM mailbox_connections WHERE user_id = $1 LIMIT 1`,
+      [senderUserId],
+    );
+    const mailbox = mbxRes.rows[0];
+    if (!mailbox || mailbox.status !== 'connected') {
+      throw conflictError(
+        'MAILBOX_NOT_CONNECTED',
+        'Sender mailbox is not connected to Microsoft 365 or Google Workspace.',
+      );
+    }
+
+    const provider = this.normalizeProvider(mailbox.provider);
+    const accessToken = await this.ensureAccessToken(mailbox);
+
+    if (provider === 'google_gmail') {
+      const sent = await this.requireGmail().sendMail({
+        accessToken,
+        fromEmail: mailbox.email,
+        toEmails: [payload.toEmail],
+        ccEmails: payload.ccEmails,
+        subject: payload.subject,
+        bodyText: payload.bodyText,
+        bodyHtml: payload.bodyHtml,
+        extraHeaders: payload.headers,
+      });
+      await this.db.query(
+        `UPDATE mailbox_connections SET sent_today_count = sent_today_count + 1, updated_at = NOW() WHERE id = $1`,
+        [mailbox.id],
+      );
+      return {
+        provider: 'google_gmail',
+        providerMessageId: sent.providerMessageId,
+        internetMessageId: sent.internetMessageId,
+        sentAt: new Date().toISOString(),
+      };
+    }
+
+    const sent = await this.graph.sendMail({
+      accessToken,
+      toEmails: [payload.toEmail],
+      ccEmails: payload.ccEmails,
+      subject: payload.subject,
+      bodyText: payload.bodyText,
+      bodyHtml: payload.bodyHtml,
+      internetMessageHeaders: payload.headers,
+    });
+    await this.db.query(
+      `UPDATE mailbox_connections SET sent_today_count = sent_today_count + 1, updated_at = NOW() WHERE id = $1`,
+      [mailbox.id],
+    );
+    return {
+      provider: 'microsoft_graph',
+      providerMessageId: sent.providerMessageId,
+      internetMessageId: `<${payload.idempotencyKey}@adasglobuspro.com>`,
+      sentAt: sent.sentAt,
     };
   }
 

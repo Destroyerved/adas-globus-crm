@@ -373,8 +373,35 @@ export function IntegrationsTab() {
               </StatusBadge>
             </div>
             <p className="m-0 text-[13px] text-ink-2">
-              {formatNumber(connectors.microsoftGraphMail.connectedMailboxes)} connected employee
+              {formatNumber(connectors.microsoftGraphMail.connectedMailboxes)} connected Outlook
               mailbox{connectors.microsoftGraphMail.connectedMailboxes === 1 ? '' : 'es'}.
+            </p>
+          </div>
+
+          <div className="border border-line rounded-[8px] p-[14px] space-y-[6px]">
+            <div className="flex items-center justify-between gap-[8px]">
+              <span className="font-semibold text-ink text-[14px]">Google Workspace sign-in</span>
+              <StatusBadge tone={connectors.googleSso?.configured ? 'success' : 'neutral'}>
+                {connectors.googleSso?.configured ? 'Connected' : 'Awaiting credentials'}
+              </StatusBadge>
+            </div>
+            <p className="m-0 text-[13px] text-ink-2">
+              Employee single sign-on with company Google Workspace accounts.
+            </p>
+          </div>
+
+          <div className="border border-line rounded-[8px] p-[14px] space-y-[6px]">
+            <div className="flex items-center justify-between gap-[8px]">
+              <span className="font-semibold text-ink text-[14px]">
+                Google Workspace Gmail sync
+              </span>
+              <StatusBadge tone={connectors.googleGmailMail?.configured ? 'success' : 'neutral'}>
+                {connectors.googleGmailMail?.configured ? 'Connected' : 'Awaiting credentials'}
+              </StatusBadge>
+            </div>
+            <p className="m-0 text-[13px] text-ink-2">
+              {formatNumber(connectors.googleGmailMail?.connectedMailboxes ?? 0)} connected Gmail
+              mailbox{(connectors.googleGmailMail?.connectedMailboxes ?? 0) === 1 ? '' : 'es'}.
             </p>
           </div>
 

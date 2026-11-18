@@ -1,4 +1,5 @@
 export * from './microsoft-graph.js';
+export * from './google-gmail.js';
 export * from './esp-bulk.js';
 
 export interface OutboundEmailPayload {
@@ -13,7 +14,7 @@ export interface OutboundEmailPayload {
 }
 
 export interface OutboundEmailReceipt {
-  provider: 'mailpit' | 'microsoft_graph' | 'esp_bulk';
+  provider: 'mailpit' | 'microsoft_graph' | 'google_gmail' | 'esp_bulk';
   providerMessageId: string;
   internetMessageId?: string;
   sentAt: string;

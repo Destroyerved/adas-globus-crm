@@ -333,12 +333,16 @@ export const CreateEmailTemplateInputSchema = z.object({
 });
 export type CreateEmailTemplateInput = z.infer<typeof CreateEmailTemplateInputSchema>;
 
+export const MailboxProviderTypeSchema = z.enum(['microsoft_graph', 'google_gmail']);
+export type MailboxProviderType = z.infer<typeof MailboxProviderTypeSchema>;
+
 export interface MailboxStatusView {
   connected: boolean;
   status: 'connected' | 'Needs Reconnect' | 'disconnected' | 'not_connected';
   email: string | null;
-  provider: 'microsoft_graph' | null;
+  provider: MailboxProviderType | null;
   entraConfigured: boolean;
+  googleConfigured: boolean;
   mailLive: boolean;
   dailySendCap: number;
   sentTodayCount: number;
@@ -354,6 +358,7 @@ export interface AdminMailboxRow {
   userId: string;
   userName: string;
   email: string;
+  provider: MailboxProviderType;
   status: string;
   dailySendCap: number;
   sentTodayCount: number;

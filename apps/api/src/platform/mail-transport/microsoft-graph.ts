@@ -32,6 +32,7 @@ export interface PendingMailOAuth {
   state: string;
   codeVerifier: string;
   userId: string;
+  provider?: 'microsoft_graph' | 'google_gmail';
 }
 
 export interface GraphTokenBundle {

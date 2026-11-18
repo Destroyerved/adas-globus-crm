@@ -91,7 +91,9 @@ export function InboxScreen({
 
   const [composing, setComposing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [entraSetupHint, setEntraSetupHint] = useState(false);
+  const [setupHintProvider, setSetupHintProvider] = useState<
+    'microsoft_graph' | 'google_gmail' | null
+  >(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   const canSend = can(me, 'inbox.send');
@@ -254,8 +256,13 @@ export function InboxScreen({
             <div className="min-w-0 space-y-[2px]">
               <div className="flex flex-wrap items-center gap-[8px]">
                 <span className="text-[14px] font-semibold text-ink">
-                  {mailbox.email ?? 'No Microsoft 365 mailbox connected'}
+                  {mailbox.email ?? 'No mailbox connected'}
                 </span>
+                {mailbox.provider && (
+                  <StatusBadge tone="neutral">
+                    {mailbox.provider === 'google_gmail' ? 'Google Workspace' : 'Microsoft 365'}
+                  </StatusBadge>
+                )}
                 <StatusBadge
                   tone={
                     mailbox.status === 'connected'
@@ -276,7 +283,7 @@ export function InboxScreen({
               <p className="m-0 text-[12.5px] text-ink-3">
                 {mailbox.connected
                   ? `${formatNumber(mailbox.sentTodayCount)} of ${formatNumber(mailbox.dailySendCap)} daily sends used${mailbox.lastSyncedAt ? ` · Last synced ${formatRelative(mailbox.lastSyncedAt)}` : ''}`
-                  : 'Connect your Microsoft 365 account to sync client threads and send from Outlook.'}
+                  : 'Connect your Microsoft 365 or Google Workspace mailbox to sync client threads and automate outreach.'}
                 {mailbox.lastError ? ` · ${mailbox.lastError}` : ''}
               </p>
             </div>
@@ -288,31 +295,59 @@ export function InboxScreen({
                     Disconnect
                   </Button>
                 ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!mailbox.entraConfigured) {
-                        setEntraSetupHint(true);
-                        return;
-                      }
-                      window.location.assign(api.inboxOAuthStartUrl());
-                    }}
-                  >
-                    {mailbox.status === 'Needs Reconnect'
-                      ? 'Reconnect Microsoft 365'
-                      : 'Connect Microsoft 365'}
-                  </Button>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="connect-microsoft-mailbox-btn"
+                      onClick={() => {
+                        if (!mailbox.entraConfigured) {
+                          setSetupHintProvider('microsoft_graph');
+                          return;
+                        }
+                        window.location.assign(api.inboxOAuthStartUrl('microsoft_graph'));
+                      }}
+                    >
+                      {mailbox.status === 'Needs Reconnect' &&
+                      mailbox.provider === 'microsoft_graph'
+                        ? 'Reconnect Microsoft 365'
+                        : 'Connect Microsoft 365'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="connect-google-mailbox-btn"
+                      onClick={() => {
+                        if (!mailbox.googleConfigured) {
+                          setSetupHintProvider('google_gmail');
+                          return;
+                        }
+                        window.location.assign(api.inboxOAuthStartUrl('google_gmail'));
+                      }}
+                    >
+                      {mailbox.status === 'Needs Reconnect' && mailbox.provider === 'google_gmail'
+                        ? 'Reconnect Google Workspace'
+                        : 'Connect Google Workspace'}
+                    </Button>
+                  </>
                 )}
               </div>
             )}
           </div>
 
-          {entraSetupHint && !mailbox.entraConfigured && (
+          {setupHintProvider === 'microsoft_graph' && !mailbox.entraConfigured && (
             <div className="mt-[10px]">
               <Callout tone="warning">
-                Microsoft 365 sign-in is not configured on this server yet. Add your Entra tenant
-                ID, client ID and client secret file to connect a live Outlook mailbox.
+                Microsoft 365 is not configured on this server yet. Add your Entra tenant ID, client
+                ID and client secret file to connect a live Outlook mailbox.
+              </Callout>
+            </div>
+          )}
+          {setupHintProvider === 'google_gmail' && !mailbox.googleConfigured && (
+            <div className="mt-[10px]">
+              <Callout tone="warning">
+                Google Workspace is not configured on this server yet. Add your Google OAuth client
+                ID and client secret file to connect a live Gmail mailbox.
               </Callout>
             </div>
           )}
@@ -520,7 +555,7 @@ export function InboxScreen({
 
       <ConfirmDialog
         open={disconnecting}
-        title="Disconnect Microsoft 365 mailbox?"
+        title={`Disconnect ${mailbox?.provider === 'google_gmail' ? 'Google Workspace' : 'Microsoft 365'} mailbox?`}
         body="Syncing will stop and any active sequences sending from your mailbox will pause immediately."
         confirmLabel="Disconnect mailbox"
         tone="danger"

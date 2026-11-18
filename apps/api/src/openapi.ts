@@ -59,6 +59,26 @@ const openApiSpec = {
         },
       },
     },
+    '/auth/sso/google/start': {
+      get: {
+        operationId: 'startGoogleSignIn',
+        summary:
+          'Redirects to Google Workspace OIDC sign-in (authorization code flow with PKCE S256)',
+        responses: {
+          '302': { description: 'Redirect to Google, or to the login page if not configured' },
+        },
+      },
+    },
+    '/auth/sso/google/callback': {
+      get: {
+        operationId: 'finishGoogleSignIn',
+        summary:
+          'Google Workspace redirects here; validates the OIDC ID token, hosted domain, and invite status before starting a session',
+        responses: {
+          '302': { description: 'Redirect to the app, or to the login page with an error' },
+        },
+      },
+    },
     '/auth/me': {
       get: {
         operationId: 'getCurrentUser',
@@ -1296,6 +1316,17 @@ const inboxAndGraphPaths = {
       responses: {
         '200': { description: 'Plain-text validationToken echo' },
         '202': { description: 'Notification accepted' },
+      },
+    },
+  },
+  '/webhooks/google': {
+    post: {
+      operationId: 'receiveGoogleGmailWebhook',
+      summary:
+        'Public Google Cloud Pub/Sub push webhook on go. host: verifies shared token in constant time, deduplicates via inbound_events, and queues Gmail historyId delta sync (PRD 8.2, 15 Q2)',
+      responses: {
+        '202': { description: 'Notification accepted' },
+        '401': { description: 'Invalid or missing webhook token' },
       },
     },
   },

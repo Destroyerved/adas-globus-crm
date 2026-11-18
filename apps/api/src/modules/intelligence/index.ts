@@ -74,6 +74,8 @@ export interface IntelligenceServiceOptions {
   connectorFlags?: {
     entraConfigured?: boolean;
     graphConfigured?: boolean;
+    googleConfigured?: boolean;
+    gmailConfigured?: boolean;
     espConfigured?: boolean;
     espProvider?: string;
     espSendingDomain?: string;
@@ -182,6 +184,8 @@ export class IntelligenceService {
     connectors: {
       entraSso: { configured: boolean };
       microsoftGraphMail: { configured: boolean; connectedMailboxes: number };
+      googleSso: { configured: boolean };
+      googleGmailMail: { configured: boolean; connectedMailboxes: number };
       espCampaigns: {
         configured: boolean;
         provider: string;
@@ -219,8 +223,11 @@ export class IntelligenceService {
 
     const [mbxCountRes, apolloStatus, bookingsCountRes, whActiveRes, whStatsRes, apolloLedgerRes] =
       await Promise.all([
-        this.db.query<{ cnt: number }>(
-          `SELECT COUNT(*)::int AS cnt FROM mailbox_connections WHERE status = 'connected'`,
+        this.db.query<{ graph_cnt: number; gmail_cnt: number }>(
+          `SELECT
+             COUNT(*) FILTER (WHERE status = 'connected' AND provider = 'microsoft_graph')::int AS graph_cnt,
+             COUNT(*) FILTER (WHERE status = 'connected' AND provider = 'google_gmail')::int AS gmail_cnt
+           FROM mailbox_connections`,
         ),
         this.readApolloCreditSummary(),
         this.db.query<{ cnt: number }>(
@@ -259,7 +266,14 @@ export class IntelligenceService {
         },
         microsoftGraphMail: {
           configured: Boolean(this.connectorFlags.graphConfigured),
-          connectedMailboxes: mbxCountRes.rows[0]?.cnt ?? 0,
+          connectedMailboxes: mbxCountRes.rows[0]?.graph_cnt ?? 0,
+        },
+        googleSso: {
+          configured: Boolean(this.connectorFlags.googleConfigured),
+        },
+        googleGmailMail: {
+          configured: Boolean(this.connectorFlags.gmailConfigured),
+          connectedMailboxes: mbxCountRes.rows[0]?.gmail_cnt ?? 0,
         },
         espCampaigns: {
           configured: Boolean(this.connectorFlags.espConfigured),

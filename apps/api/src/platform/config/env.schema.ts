@@ -50,6 +50,28 @@ export const EnvSchema = z
     MICROSOFT_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
     CRM_NOTIFICATION_MAILBOX: z.string().email().default('crm@adasglobuspro.com'),
 
+    GOOGLE_CLIENT_ID: z
+      .string()
+      .min(1)
+      .default('000000000000-placeholder.apps.googleusercontent.com'),
+    GOOGLE_CLIENT_SECRET_FILE: z.string().min(1).default('./secrets/google_client_secret.txt'),
+    GOOGLE_REDIRECT_URI: z
+      .string()
+      .url()
+      .default('http://localhost:5174/api/v1/auth/sso/google/callback'),
+    GOOGLE_MAIL_REDIRECT_URI: z
+      .string()
+      .url()
+      .default('http://localhost:5174/api/v1/inbox/oauth/callback'),
+    GOOGLE_ALLOWED_DOMAINS: z.string().default(''),
+    GOOGLE_ISSUER_URL: z.string().url().default('https://accounts.google.com'),
+    GOOGLE_AUTH_URL: z.string().url().default('https://accounts.google.com/o/oauth2/v2/auth'),
+    GOOGLE_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+    GOOGLE_JWKS_URL: z.string().url().default('https://www.googleapis.com/oauth2/v3/certs'),
+    GOOGLE_GMAIL_BASE_URL: z.string().url().default('https://gmail.googleapis.com/gmail/v1'),
+    GOOGLE_PUBSUB_TOPIC: z.string().default(''),
+    GOOGLE_WEBHOOK_TOKEN_FILE: z.string().min(1).default('./secrets/google_webhook_token.txt'),
+
     ESP_PROVIDER: z.enum(['postmark', 'resend', 'http_json']).default('postmark'),
     ESP_API_BASE_URL: z.string().url().default('https://api.postmarkapp.com'),
     ESP_API_KEY_FILE: z.string().min(1).default('./secrets/esp_api_key.txt'),

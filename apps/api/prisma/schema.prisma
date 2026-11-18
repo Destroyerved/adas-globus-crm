@@ -37,6 +37,8 @@
 //   prisma/migrations/0023_fulltext_search_indexes/migration.sql (public.immutable_unaccent,
 //   generated search_tsv tsvector columns & GIN indexes on companies, contacts, leads, deals,
 //   notes and email_threads, plus idx_deals_name_trgm; PRD 6.10)
+//   prisma/migrations/0024_google_workspace_sso_and_gmail/migration.sql (users.google_subject_id
+//   partial unique index, mailbox_connections.gmail_history_id & provider check; PRD 6.6, 8.2, Q2)
 
 generator client {
   provider = "prisma-client-js"
@@ -69,22 +71,24 @@ model Role {
 }
 
 model User {
-  id            String   @id
-  email         String   @unique
-  name          String
-  roleId        String   @map("role_id")
-  teamId        String?  @map("team_id")
-  marketFocus   String   @default("US") @map("market_focus")
-  status        String   @default("active")
-  isBreakGlass  Boolean  @default(false) @map("is_break_glass")
+  id              String   @id
+  email           String   @unique
+  name            String
+  roleId          String   @map("role_id")
+  teamId          String?  @map("team_id")
+  marketFocus     String   @default("US") @map("market_focus")
+  status          String   @default("active")
+  entraObjectId   String?  @map("entra_object_id") // migration 0002
+  googleSubjectId String?  @map("google_subject_id") // migration 0024
+  isBreakGlass    Boolean  @default(false) @map("is_break_glass")
   // Deprecated (cleared in 0006, to be dropped): credentials live in local_credentials.
-  passwordHash  String?  @map("password_hash")
-  totpSecret    String?  @map("totp_secret")
-  dailySendCap  Int      @default(50) @map("daily_send_cap")
-  timezone      String   @default("Asia/Kolkata") // migration 0003
-  version       Int      @default(1) // migration 0004
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  passwordHash    String?  @map("password_hash")
+  totpSecret      String?  @map("totp_secret")
+  dailySendCap    Int      @default(50) @map("daily_send_cap")
+  timezone        String   @default("Asia/Kolkata") // migration 0003
+  version         Int      @default(1) // migration 0004
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([teamId])
   @@index([roleId])
