@@ -12,7 +12,12 @@ import { InboxService } from './modules/inbox/index.js';
 import { IntelligenceService } from './modules/intelligence/index.js';
 import { OutreachService } from './modules/outreach/index.js';
 import { ApolloClient } from './platform/apollo/index.js';
-import { loadDotEnv, resolveConfigPath, validateEnv } from './platform/config/index.js';
+import {
+  loadDotEnv,
+  resolveConfigPath,
+  validateEnv,
+  verifyProductionReadiness,
+} from './platform/config/index.js';
 import { loadSecretBox } from './platform/crypto/index.js';
 import { DatabaseService } from './platform/db/index.js';
 import { LocalFileStorage } from './platform/files/index.js';
@@ -27,17 +32,11 @@ loadDotEnv();
 const env = validateEnv();
 const logger = createLogger(env.LOG_LEVEL);
 
-if (env.NODE_ENV === 'production') {
-  // Same guard as the API (docs/PROGRESS.md, "Not production-ready"); removed in R8.
-  logger.fatal('Refusing to start the worker with NODE_ENV=production: not production-ready yet.');
-  process.exit(1);
-}
-
 const db = DatabaseService.connect(env.DATABASE_URL);
 const secretBox = loadSecretBox(
   resolveConfigPath(env.TOKEN_ENCRYPTION_KEY_FILE),
   env.TOKEN_ENCRYPTION_KEY_VERSION,
-  false,
+  env.NODE_ENV === 'production',
 );
 const mailpit = new MailpitTransport(env.MAIL_LIVE, env.NODE_ENV, env.MAILPIT_HTTP_URL);
 const espSender = new EspBulkSender({
@@ -81,8 +80,7 @@ const intelligence = new IntelligenceService(db, {
   nodeEnv: env.NODE_ENV,
   mailLive: env.MAIL_LIVE,
   publicHost: env.APP_PUBLIC_HOST,
-  allowPrivateWebhookTargets:
-    env.WEBHOOK_ALLOW_PRIVATE_TARGETS || (env.NODE_ENV as string) !== 'production',
+  allowPrivateWebhookTargets: env.WEBHOOK_ALLOW_PRIVATE_TARGETS || env.NODE_ENV !== 'production',
 });
 const { runner } = buildWorker(db, logger, {
   files: new LocalFileStorage(resolveConfigPath(env.FILE_STORAGE_LOCAL_PATH)),
@@ -93,6 +91,12 @@ const { runner } = buildWorker(db, logger, {
 });
 try {
   await db.ensureInitialized();
+  await verifyProductionReadiness({
+    env,
+    db,
+    secretBox,
+    resolvePath: resolveConfigPath,
+  });
   await runner.start();
 } catch (err) {
   // Start-up only: no record data can be in this error.

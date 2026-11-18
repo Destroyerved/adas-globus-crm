@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export * from './env.schema.js';
+export * from './prod-readiness.js';
 
 /** The repository root (this file is five folders below it in both src/ and dist/). */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');

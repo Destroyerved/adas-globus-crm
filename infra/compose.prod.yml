@@ -1,38 +1,45 @@
 # =============================================================================
-# ADAS CRM — 16GB RAM Production Stack & Cloudflare Tunnel (PRD §10.1–10.4)
-# Total Container Memory Cap: 7.75 GB (leaves 8.25 GB OS + PostgreSQL Page Cache)
+# ADAS CRM — 16 GB RAM Production Stack & Cloudflare Tunnel (PRD §10.1–10.6)
+# Base Container Memory Cap: 6.50 GB (+ optional 1.50 GB n8n profile = 8.00 GB)
+# Leaves 8.0–9.5 GB OS & PostgreSQL Page Cache headroom on 16 GB server.
 # =============================================================================
 
 name: adas-crm-prod
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.4-alpine
     container_name: adas-crm-postgres-prod
     restart: unless-stopped
     mem_limit: 4096m
     environment:
-      POSTGRES_USER: adas_app
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_USER: adas_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_APP_PASSWORD_FILE: /run/secrets/postgres_app_password
       POSTGRES_DB: adas_crm
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
+      - ./postgres/00-provision-roles.sh:/docker-entrypoint-initdb.d/00-provision-roles.sh:ro
       - ./postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-init-extensions.sql:ro
       - ./postgres/postgresql.16gb.conf:/etc/postgresql/postgresql.conf:ro
-      - ../secrets/postgres_password.txt:/run/secrets/postgres_password:ro
+      - ../secrets/postgres_admin_password.txt:/run/secrets/postgres_admin_password:ro
+      - ../secrets/postgres_app_password.txt:/run/secrets/postgres_app_password:ro
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    networks:
+      - adas_internal
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U adas_app -d adas_crm"]
+      test: ["CMD-SHELL", "pg_isready -U adas_admin -d adas_crm"]
       interval: 10s
       timeout: 5s
       retries: 10
 
   api:
+    image: adas-crm-api:${ADAS_IMAGE_TAG:-local}
     build:
       context: ..
       dockerfile: infra/Dockerfile.api
@@ -42,6 +49,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    command: ["node", "--conditions=production-dist", "apps/api/dist/main.js"]
     ports:
       - "127.0.0.1:3000:3000"
     env_file:
@@ -49,18 +57,23 @@ services:
     volumes:
       - ../secrets:/app/secrets:ro
       - ../data/files:/app/data/files
+      - ../data/backups:/app/data/backups:ro
+    networks:
+      - adas_internal
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 15s
 
   worker:
+    image: adas-crm-api:${ADAS_IMAGE_TAG:-local}
     build:
       context: ..
       dockerfile: infra/Dockerfile.api
@@ -70,19 +83,114 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["node", "apps/api/dist/worker.js"]
+    command: ["node", "--conditions=production-dist", "apps/api/dist/worker.js"]
     env_file:
       - ../.env.production
     volumes:
       - ../secrets:/app/secrets:ro
       - ../data/files:/app/data/files
+    networks:
+      - adas_internal
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "node --conditions=production-dist apps/api/dist/worker-healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  backup:
+    image: adas-crm-api:${ADAS_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: adas-crm-backup-prod
+    restart: unless-stopped
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "/app/infra/backup/run-backup.sh"]
+    env_file:
+      - ../.env.production
+    volumes:
+      - ../secrets:/app/secrets:ro
+      - ../data/files:/app/data/files:ro
+      - ../data/backups:/app/data/backups
+      - ./backup:/app/infra/backup:ro
+    networks:
+      - adas_internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /tmp/backup-loop.heartbeat && find /tmp/backup-loop.heartbeat -mmin -120 | grep -q backup-loop",
+        ]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16
+    container_name: adas-crm-uptime-kuma
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+    networks:
+      - adas_internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:2025.2.1
+    container_name: adas-crm-cloudflared
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      api:
+        condition: service_healthy
+      uptime-kuma:
+        condition: service_started
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflare:/etc/cloudflared:ro
+    networks:
+      - adas_internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   n8n:
+    profiles: ["automation"]
     image: docker.n8n.io/n8nio/n8n:1.76.1
     container_name: adas-crm-n8n-prod
     restart: unless-stopped
@@ -101,49 +209,22 @@ services:
     volumes:
       - n8n_prod_data:/home/node/.n8n
       - ./n8n/workflows:/home/node/workflows:ro
+    networks:
+      - adas_internal
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:5678/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
 
-  uptime-kuma:
-    image: louislam/uptime-kuma:1
-    container_name: adas-crm-uptime-kuma
-    restart: unless-stopped
-    mem_limit: 256m
-    ports:
-      - "127.0.0.1:3001:3001"
-    volumes:
-      - uptime_kuma_data:/app/data
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: adas-crm-cloudflared
-    restart: unless-stopped
-    mem_limit: 128m
-    depends_on:
-      - api
-      - n8n
-      - uptime-kuma
-    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./cloudflare:/etc/cloudflared:ro
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+networks:
+  adas_internal:
+    driver: bridge
 
 volumes:
   postgres_prod_data:

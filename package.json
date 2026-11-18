@@ -17,6 +17,8 @@
     "db:plans": "pnpm --filter @adas/api db:plans",
     "db:plans:test": "node scripts/query-plans-test.mjs",
     "perf:load": "pnpm --filter @adas/api perf:load",
+    "backup:run": "pnpm --filter @adas/api backup:run",
+    "backup:drill": "pnpm --filter @adas/api backup:drill",
     "db:local": "node scripts/local-db.mjs",
     "break-glass": "pnpm --filter @adas/api break-glass",
     "lint": "eslint . --max-warnings 0 && prettier --check \"**/*.{ts,tsx,mjs,json,css,md}\"",

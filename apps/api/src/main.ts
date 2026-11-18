@@ -47,6 +47,7 @@ import {
   loadDotEnv,
   resolveConfigPath,
   validateEnv,
+  verifyProductionReadiness,
   type AppEnv,
 } from './platform/config/index.js';
 import { loadSecretBox, type SecretBox } from './platform/crypto/index.js';
@@ -1163,6 +1164,7 @@ export function createAppServer(
       exports: exportService,
     },
     files,
+    secretBox: resolvedSecretBox,
   };
 }
 
@@ -1171,26 +1173,24 @@ const isMainModule =
 
 if (isMainModule) {
   loadDotEnv();
-  const { server, logger, env, db } = createAppServer();
-  // Fail closed until the remaining production blockers in docs/PROGRESS.md are done:
-  // the connectors, and verification on real PostgreSQL (API and worker), Microsoft Entra
-  // and emergency admin sign-in. Remove this guard in R8 (production deploy).
-  if (env.NODE_ENV === 'production') {
-    logger.fatal(
-      'Refusing to start with NODE_ENV=production: the CRM is not production-ready yet (connectors and verification outstanding). See docs/PROGRESS.md, "Not production-ready".',
-    );
-    process.exit(1);
-  }
+  const { server, logger, env, db, secretBox } = createAppServer();
   void (async () => {
     try {
       await db.ensureInitialized();
+      await verifyProductionReadiness({
+        env,
+        db,
+        secretBox,
+        resolvePath: resolveConfigPath,
+      });
     } catch (err) {
       // Start-up only: no request data can be in this error.
       const e = err as { name?: string; code?: string; message?: string };
       logger.fatal(
         { err: { name: e.name, code: e.code, message: e.message } },
-        'database unavailable',
+        'API startup verification failed',
       );
+      await db.close().catch(() => undefined);
       process.exit(1);
     }
     server.listen(env.PORT, () => {
